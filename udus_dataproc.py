@@ -25,9 +25,14 @@ def prepareSpec(pp):
     '''
     i,chdata,sampleFreq,NFFT,noverlap = pp
     #specgram_scaling = 'density'   # divide over freq
-    freqs, bins, Sxx = spectrogram_lspopt(chdata, fs=sampleFreq, c_parameter=c_parameter,
-                                     nperseg=NFFT, scaling=specgram_scaling, 
-                                      noverlap=noverlap) 
+    if spectogramtype == 'lspopt':
+        freqs, bins, Sxx = spectrogram_lspopt(chdata, fs=sampleFreq, c_parameter=c_parameter,
+                                         nperseg=NFFT, scaling=specgram_scaling, 
+                                          noverlap=noverlap) 
+    else:
+        freqs, bins, Sxx = sig.spectrogram(chdata, fs=sampleFreq, 
+                                         nperseg=NFFT, scaling=specgram_scaling, 
+                                          noverlap=noverlap) 
     return i,freqs,bins,Sxx
 
 def getAllSpecgrams(chdata,sampleFreq,NFFT,specgramoverlap):
@@ -126,10 +131,38 @@ def getData(rawname,chns,ts=None, te=None):
 
     return np.vstack(chdatas), times
 
+def sortChans(subj, modality, fbname, replace=False, numKeep = 3):
+    cht = gen_subj_info[ subj ]['chantuples']
+    fbs,fbe = freqBands[fbname]
+    for side in cht:
+        chtcur = cht[side]['nametuples']
+        bpt = []
+        if modality not in chtcur :
+            raise ValueError('No such modality!')
+        chnames = chtcur[modality]
+        for chn in chnames:
+            freq, bins, Sxx = specgrams[k][chn]
+            f,b,bandspec = getSubspec(freq,bins,Sxx, fbs,fbe)
+            #bandpow = np.sum( bandspec, axis=0 )
+            bandpow_total = np.sum( bandspec )
+            bpt += [bandpow_total]
+        #sortinds = np.argsort(bpt)
+        #srt = chtcur[modality][sortinds][::-1]   # first the largest one 
+        ss = '{}_{}_sorted'.format(modality,fbname )
+
+        from operator import itemgetter
+        srt = sorted( zip(bpt,chnames), key = itemgetter(1) )[::-1]
+        srt = [ chn for chi,chn in srt ] 
+        chtcur[ ss  ] = srt
+        if replace:
+            chtcur[modality] = srt[:numKeep]
+
 ########  Gen stats across conditions
 def getStatPerChan(time_start,time_end,freq_min,freq_max,modalities=None):
     if modalities is None:
         modalities = ['LFP', 'EMG', 'EOG', 'MEGsrc']
+
+    print('Starting computing glob stats for modalities ',modalities)
 
     glob_stats = {}
     for subj in subjs_analyzed:   # over subjects 
@@ -316,6 +349,8 @@ def getStatPerChan(time_start,time_end,freq_min,freq_max,modalities=None):
                     
         glob_stats[subj] = stat_persubj
         #glob_stats[subj] = stat_perchan
+
+    print('Glob stats computation finished')
     return glob_stats
         
 def getSubspec(freqs,bins,Sxx,freq_min,freq_max,time_start=None,time_end=None):
@@ -723,10 +758,11 @@ def genChanTuples(rawname, chnames ):
         curinds = {}
         curinds['left'] = np.where( f['source_data']['pos'][0,:] < 0  )[0]  # 3 x Nsrc
         curinds['right']= np.where( f['source_data']['pos'][0,:] >= 0 )[0] 
+
         for side in order_by_EMGside:
             for ind in curinds[side]:
-                if MEGsrc_inds_toshow is None or ind in MEGsrc_inds_toshow:
-                    chn = 'MEGsrc_{}_{}'.format(roistr,ind)
+                chn = 'MEGsrc_{}_{}'.format(roistr,ind)
+                if MEGsrc_names_toshow is None or chn in MEGsrc_names_toshow:
                     MEGsrc_names[side] += [chn]
 
             MEGsrc_inds[side] += list( np.array( curinds[side] ) + indshift  )
@@ -745,32 +781,47 @@ def genChanTuples(rawname, chnames ):
     LFPinds['right'] = lfpr_inds
 
 
-    chnames_tuples = []
-    chinds_tuples = []
+    #chnames_tuples = []
+    #chinds_tuples = []
+    chnames_tuples = {}
+    chinds_tuples  = {}
     for sidei in range(len(order_by_EMGside)):
         side = order_by_EMGside[sidei]
         revside = order_by_EMGside[1-sidei]
-        chnames_tuples += [{'EMG':EMGnames[side], 
-            'LFP':LFPnames[revside], 'MEGsrc':MEGsrc_names[revside], 'EOG':eog_names }]
-        chinds_tuples += [{'EMG':EMGinds[side],  
-            'LFP':LFPinds[revside], 'MEGsrc':MEGsrc_inds[revside], 'EOG':eog_inds }]
+        #chnames_tuples += [{'EMG':EMGnames[side], 
+        #    'LFP':LFPnames[revside], 'MEGsrc':MEGsrc_names[revside], 'EOG':eog_names }]
+        #chinds_tuples += [{'EMG':EMGinds[side],  
+        #    'LFP':LFPinds[revside], 'MEGsrc':MEGsrc_inds[revside], 'EOG':eog_inds }]
+        chnames_tuples[side] = {'EMG':EMGnames[side], 
+            'LFP':LFPnames[revside], 'MEGsrc':MEGsrc_names[revside], 'EOG':eog_names }
+        chinds_tuples[side] = {'EMG':EMGinds[side],  
+            'LFP':LFPinds[revside], 'MEGsrc':MEGsrc_inds[revside], 'EOG':eog_inds }
         # both EOGs goe to both sides
     
 #     chnames_tuples += [{'EMG':EMGnames['right'], 'LFP':LFPnames['left'] }]
 #     chinds_tuples += [{'EMG':EMGinds['right'], 'LFP':LFPinds['left'] }]
     
-    return order_by_EMGside, chinds_tuples, chnames_tuples, LFPnames, EMGnames, MEGsrc_names
+    r = {}
+    r['order'] = order_by_EMGside
+    r['indtuples'] = chinds_tuples
+    r['nametuples'] = chnames_tuples
+    r['LFPnames'] = LFPnames
+    r['MEGsrcnames'] = MEGsrc_names
+    r['EMGnames'] = EMGnames
+    #return order_by_EMGside, chinds_tuples, chnames_tuples, LFPnames, EMGnames, MEGsrc_names
+    return r
 
 def getTuples(sind_str):
     cht = gen_subj_info[sind_str]['chantuples']
     sides = []
     indtuples = []
     nametuples = []
-    for side in cht:
+    for sidei,side in enumerate(cht.keys() ):
         sides += [side]
-        indtuples +=  cht[side]['indtuples']
-        nametuples +=  cht[side]['nametuples']
+        indtuples +=  [ cht[side]['indtuples'] ]
+        nametuples += [ cht[side]['nametuples'] ]
 
+    #chns = chnames_tuples[pair_ind]['EMG']
     return sides, indtuples, nametuples
 
 def getChannelSide(chname):
@@ -842,6 +893,42 @@ def MEGsrcChind2data(rawname,chi):
 
     return None
 
+def plotChannelBand(ax,k,chn,fbname,time_start,time_end,logscale=False, bandPow=True,
+        color = None):
+    '''
+    bandPow -- if True, plot band power, if False, plot band passed freq
+    '''
+    if bandPow:
+        specgramsComputed = specgrams[k]
+        freqs, bins, Sxx = specgramsComputed[chn]
+        fbs,fbe = freqBands[fbname]
+        freqs_b, bins_b, Sxx_b = getSubspec(freqs,bins,Sxx, fbs,fbe, 
+                time_start,time_end)
+
+
+        if specgram_scaling == 'psd':
+            freqres = freqs[1]-freqs[0]
+        else:
+            freqres = 1.
+        bandpower = np.sum(Sxx_b,axis=0) * freqres
+    else:
+        bandpassFltorder = 10
+        bandpassFreq =  freqBands[fbname] 
+        sos = sig.butter(bandpassFltorder, bandpassFreq, 
+                'bandpass', fs=sampleFreq, output='sos')
+        bandpower = sig.sosfilt(sos, ys)
+
+
+    #print('--- plotting {} {} max {}'.format(chn, fbname, np.max(bandpower) ) )
+    ax.plot(bins_b,bandpower,
+            label='{}, {}'.format(chn,fbname), 
+            ls = plot_freqBandsLineStyle[fbname], alpha=0.5, c=color )
+    if logscale:
+        ax.set_yscale('log')
+        ax.set_ylabel('logscale')
+
+    return bandpower
+
 def plotSpectralData(plt,time_start = 0,time_end = 400, chanTypes_toshow = None, onlyTremor = False ):
 
     if chanTypes_toshow is None:
@@ -911,7 +998,7 @@ def plotSpectralData(plt,time_start = 0,time_end = 400, chanTypes_toshow = None,
     # assume that already taken into account MEGsrc_inds_toshow
     MEGsrcnames_subj0 = list( gen_subj_info.values() )[0] ['MEGsrcnames_perSide']
     n = max( len( MEGsrcnames_subj0['left'] ), len( MEGsrcnames_subj0['right'] )  )  # since we can have different sides for different subjects
-    nchans_perModality['MEGsrc'] = n
+    nchans_perModality['MEGsrc'] = min( n , plot_numBestMEGsrc)
     
     #nr_bandpow = 2
 
@@ -969,7 +1056,7 @@ def plotSpectralData(plt,time_start = 0,time_end = 400, chanTypes_toshow = None,
         
         sind_str,medcond,task = getParamsFromRawname(k)
         deftimeint =  [(time_start,time_end) ]
-        time_start, time_end =  plot_timeIntervalsPerSubj.get( sind_str, deftimeint  )   [0]
+        time_start, time_end =  plot_timeIntervalsPerSubj.get( k, deftimeint  )   [0]   # 0 means first interval, potentially may have several
 
         #chnames = raws[k].info['ch_names']
         orderEMG, chinds_tuples, chnames_tuples = getTuples(sind_str)
@@ -1144,6 +1231,7 @@ def plotSpectralData(plt,time_start = 0,time_end = 400, chanTypes_toshow = None,
                     #for modality in spcht:
                     #    ch_toplot_bandpow += chnames_tuples[channel_pair_ind][modality]
                     ch_toplot_bandpow = chnames_tuples[channel_pair_ind][modality] 
+                    pars = plot_paramsPerModality[modality]
 
                     colorEMGind = 0
                     maxpow = 0
@@ -1160,6 +1248,7 @@ def plotSpectralData(plt,time_start = 0,time_end = 400, chanTypes_toshow = None,
                         # by default we show all interesting frequency bands
                         freqBands_names = plot_freqBandNames_perModality[modality]
                         # although for EMG only tremor band
+                        maxpow_band = 0
                         for fbi,fbname in enumerate(freqBands_names):
                             axcoordy = modalityi
                             title = '{}, Freq bands powers'.format(modality)
@@ -1175,33 +1264,49 @@ def plotSpectralData(plt,time_start = 0,time_end = 400, chanTypes_toshow = None,
                             #print('{} ,  {}'.format(chn, axcoordy ) )
                             ax = axs[rowind_shift + axcoordy,colind]
 
-                            fbs,fbe = freqBands[fbname]
-                            freqs_b, bins_b, Sxx_b = getSubspec(freqs,bins,Sxx, fbs,fbe, 
-                                    time_start,tetmp/sampleFreq)
-                            bandpower = np.sum(Sxx_b,axis=0) * freqres
 
                             color = None
-                            if modality.find('EMG') >= 0:      # use fixed colors for EMG
+                            if chn.find('EMG') >= 0:      # use fixed colors for EMG
                                 color = plot_colorsEMG[colorEMGind]
                                 colorEMGind += 1
+                            #
+                            bandpower = plotChannelBand(ax,k,chn,fbname,time_start,tetmp/sampleFreq,logscale=0,color=color)
+                            #
+                            #fbs,fbe = freqBands[fbname]
+                            #freqs_b, bins_b, Sxx_b = getSubspec(freqs,bins,Sxx, fbs,fbe, 
+                            #        time_start,tetmp/sampleFreq)
+                            #bandpower = np.sum(Sxx_b,axis=0) * freqres
 
-                            #print('--- plotting {} {} max {}'.format(chn, fbname, np.max(bandpower) ) )
-                            ax.plot(bins_b,bandpower,
-                                    label='{}, {}'.format(chn,fbname), 
-                                    ls = plot_freqBandsLineStyle[fbname], alpha=0.5, c=color )
-                            logscale = 0
-                            maxpow = max(maxpow, np.max(bandpower) )
-                            if logscale:
-                                ax.set_yscale('log')
-                                ax.set_ylabel('logscale')
+                            #color = None
+                            #if modality.find('EMG') >= 0:      # use fixed colors for EMG
+                            #    color = plot_colorsEMG[colorEMGind]
+                            #    colorEMGind += 1
+
+                            ##print('--- plotting {} {} max {}'.format(chn, fbname, np.max(bandpower) ) )
+                            #ax.plot(bins_b,bandpower,
+                            #        label='{}, {}'.format(chn,fbname), 
+                            #        ls = plot_freqBandsLineStyle[fbname], alpha=0.5, c=color )
+                            #logscale = 0
+                            #maxpow = max(maxpow, np.max(bandpower) )
+                            #if logscale:
+                            #    ax.set_yscale('log')
+                            #    ax.set_ylabel('logscale')
+                            #
+
+                            maxpowcur = np.max(bandpower)
+                            maxpow = max(maxpow, maxpowcur )
+                            maxpow_band = max(maxpow_band, maxpowcur)
                             ax.legend(loc=legendloc)
-
-                            pars = plot_paramsPerModality[modality]
-                            deflims = (0, maxpow)
-                            ymin,ymax = pars.get('axLims_bandPow',{}).get(sind_str, deflims )
+                            if modality == 'MEGsrc':
+                                print('{}__{}__{} maxpow {:6E}'.format(k,chn,fbname, maxpowcur) )
+                                #import pdb; pdb.set_trace()
                             ax.set_ylim(ymin,ymax)
                             ax.set_title(title )
                             ax.set_xlim(mintime,maxtime)
+
+                            #deflims = (0, maxpow_band)
+                            deflims = (0, maxpow)
+                            ymin,ymax = pars.get('axLims_bandPow',{}).get(sind_str, deflims )
 
                         if modality.find('EMG') >= 0:
                             if tremrDet_clusterMultiMEG:
@@ -1221,6 +1326,12 @@ def plotSpectralData(plt,time_start = 0,time_end = 400, chanTypes_toshow = None,
                                 thr = gen_subj_info[sind_str]['tremorDetect_customThr'][medcond][chn] 
                                 ax.axhline(y=thr, ls = ltype_tremorThr,lw=2, c= plot_colorsEMG[colorEMGind-1], 
                                         label = '{} tremor thr'.format(chn) )
+
+
+                    if modality.find('MEGsrc') < 0:
+                        deflims = (0, maxpow)
+                        ymin,ymax = pars.get('axLims_bandPow',{}).get(sind_str, deflims )
+                        ax.set_ylim(ymin,ymax)
                                                                  
 
             rowind_shift += chanTypes_toshow['bandpow']['nplots']
@@ -1257,6 +1368,10 @@ def plotSpectralData(plt,time_start = 0,time_end = 400, chanTypes_toshow = None,
                     elif normType == 'log':
                         norm = mpl.colors.LogNorm(vmin=mn,vmax=mx);
                     #print(chname,Sxx.shape,len(freqs),mx, mn)
+                    if chname.find('MEGsrc') >= 0:
+                        modality = 'MEGsrc'
+                    else:
+                        modality = 'LFP'
                     im = ax.pcolormesh(bins, freqs, Sxx, 
                             cmap=plot_specgramCmapPerModality[modality], norm=norm)
 
@@ -1406,15 +1521,57 @@ if __name__ == '__main__':
         data_dir = os.path.expandvars('$DATA_DUSS')
     else:
         data_dir = '/home/demitau/data'
+
+    ########################################## Data selection
+    MEGsrc_roi = ['Brodmann area 4']
+    MEGsrc_roi = ['Brodmann area 4', 'Brodmann area 6']
+    #MEGsrc_roi = ['Brodmann area 6']
+
+    subjinds = [1,2,3,4,5,6,7,8,9,10]
+    tasks = ['hold', 'move', 'rest']
+    medconds = ['off', 'on']
+
+    subjinds = [4,5,6]
+    #tasks = ['hold']
+    tasks = ['rest', 'move', 'hold']
+    medconds = ['off', 'on']
+
+    subjinds = [1,2]
+    #tasks = ['hold']
+    tasks = ['rest', 'move', 'hold']
+    medconds = ['off', 'on']
+
+    subjinds = [1]
+    tasks = ['hold']
+    medconds = ['off', 'on']
+
+    #subjinds = [4]
+    ###tasks = ['hold']
+    #tasks = ['rest', 'move']
+    #medconds = ['off', 'on']
+
+    #subjinds = [3,4,5,6]
+    ##tasks = ['hold']
+    #tasks = ['rest', 'move', 'hold']
+    #medconds = ['off', 'on']
+
+    # used on the level of chanTuples generation first, so for unselected nothing will be computed 
+    MEGsrc_names_toshow = ['MEGsrc_Brodmann area 4_0', 'MEGsrc_Brodmann area 4_10', 'MEGsrc_Brodmann area 4_15'  ]  # right
+    MEGsrc_names_toshow += [ 'MEGsrc_Brodmann area 4_3', 'MEGsrc_Brodmann area 4_30', 'MEGsrc_Brodmann area 4_74' ]  # left
+    MEGsrc_names_toshow = []
+    MEGsrc_names_toshow = None
+    
+    # left indices in Brodmann 4 --  [3, 4, 7, 8, 9, 13, 14, 16, 18, 22, 23, 24, 26, 30, 31, 32, 34, 36, 37, 40, 41, 43, 45, 46, 47, 51, 52, 58, 59, 60, 63, 64, 67, 68, 72, 73, 74]
                 
     raws = {}
     srcs = {}
 
+    #########################  Plot params
     plot_output_dir = 'output'
 
     specgramoverlap = 0.75
     c_parameter = 20.0  # for the spectrogram calc
-    c_parameter = 3
+    #c_parameter = 3
     #NFFT = 256  # for spectrograms
     NFFT = 256  # for spectrograms
     nonTaskTimeEnd = 300
@@ -1423,6 +1580,8 @@ if __name__ == '__main__':
     # which time range use to compute spectrograms
     spec_time_start=0 
     spec_time_end=nonTaskTimeEnd
+    spectogramtype = 'lspopt'
+    #spectogramtype = 'scipy'
 
     #tremorThrMult = {'S05': 20. }
     tremorThrMult = { }
@@ -1439,15 +1598,26 @@ if __name__ == '__main__':
     #plot_onlyMainSide             = True
     plot_onlyMainSide             = False
     # I have selected them myself, not the ones chosen by Jan
-    favoriteLFPch_perSubj = {'S01': ['LFPR23', 'LFPL12' ], 'S02': ['LFPR12', 'LFPL12'], 'S03': ['LFPR12'] } 
+    # those with more apparent contrast between background and beta and tremor
+
+
+    plot_timeIntervalsPerSubj = { 'S01_off_hold':[ (180,210) ], 'S01_on_hold':[ (0,30) ], 
+            'S02_off_hold':[ (0,300) ]   }
+    #plot_timeIntervalsPerSubj = {}
+
+    favoriteLFPch_perSubj = {'S01': ['LFPR23', 'LFPL12' ], 
+            'S02': ['LFPR12', 'LFPL12'], 'S03': ['LFPR12'] } 
     plot_time_start = 0
-    plot_time_end = 100
+    plot_time_end = 300
 
     plot_minFreqInSpec = 6
     plot_minFreqInSpec = 0
     #plot_maxFreqInSpec = 50
     #plot_maxFreqInSpec = 80
-    plot_maxFreqInSpec = 35
+    #plot_maxFreqInSpec = 35
+    plot_maxFreqInSpec = 20
+    plot_MEGsrc_sortBand = 'tremor'
+    plot_numBestMEGsrc = 3
 
 
     EMGlimsBySubj =  { 'S01':(0,0.001) }  
@@ -1461,6 +1631,8 @@ if __name__ == '__main__':
     LFPlimsBandPowBySubj =  {}; #{ 'S01':(0,1e-11), 'S02':(0,1e-11) }  
 
     MEGsrclimsBandPowBySubj =  { 'S01':(0,400),  'S02':(0,600), 'S03':(0,700)  }
+    MEGsrclimsBandPowBySubj =  { 'S01':(0,1.5e8),  'S02':(0,600), 'S03':(0,700)  }
+    MEGsrclimsBandPowBySubj =  {  }
 
     EMGplotPar = {'shiftMean':True, 
             'axLims':EMGlimsBySubj, 'axLims_meanshifted':EMGlimsBySubj_meanshifted,
@@ -1482,9 +1654,6 @@ if __name__ == '__main__':
             #'axLims':LFPlimsBySubj, 'axLims_meanshifted':LFPlimsBySubj_meanshifted,
             #'axLims_bandPow':LFPlimsBandPowBySubj  }
 
-    # those with more apparent contrast between background and beta and tremor
-    plot_timeIntervalsPerSubj = { 'S01':[ (0,30) ], 'S02':[ (30,150) ], 'S03':[ (0,300) ]   }
-    #plot_timeIntervalsPerSubj = {}
 
     plot_paramsPerModality = {}
     plot_paramsPerModality = {'EMG':EMGplotPar, 'LFP':LFPplotPar, 
@@ -1509,12 +1678,6 @@ if __name__ == '__main__':
     tremIntDef_minlen=50
     tremIntDef_extFactor=0.25
 
-    ########################################## Data selection
-    # used on the level of chanTuples generation first, so for unselected nothing will be computed 
-    MEGsrc_inds_toshow = None
-    MEGsrc_inds_toshow = np.arange(10)   
-    MEGsrc_inds_toshow = np.arange(20)   
-    #MEGsrc_inds_toshow = [74,75,76]   # used on the level of chanTuples generation first, so for unselected nothing will be computed
 
     # Set plot params
     show_timecourse = 1
@@ -1534,35 +1697,6 @@ if __name__ == '__main__':
     ww = 20
     legendloc = 'lower right'
 
-    MEGsrc_roi = ['Brodmann area 4']
-    #MEGsrc_roi = ['Brodmann area 6']
-
-    subjinds = [1,2,3,4,5,6,7,8,9,10]
-    tasks = ['hold', 'move', 'rest']
-    medconds = ['off', 'on']
-
-    subjinds = [4,5,6]
-    #tasks = ['hold']
-    tasks = ['rest', 'move', 'hold']
-    medconds = ['off', 'on']
-
-    subjinds = [1,2,3]
-    #tasks = ['hold']
-    tasks = ['rest', 'move', 'hold']
-    medconds = ['off', 'on']
-
-    #tasks = ['hold']
-    #subjinds = [1]
-
-    #subjinds = [4]
-    ###tasks = ['hold']
-    #tasks = ['rest', 'move']
-    #medconds = ['off', 'on']
-
-    #subjinds = [3,4,5,6]
-    ##tasks = ['hold']
-    #tasks = ['rest', 'move', 'hold']
-    #medconds = ['off', 'on']
 
     #############  Generate filenames ############
     fnames_noext = []
@@ -1723,28 +1857,34 @@ if __name__ == '__main__':
         if 'chantuples' not in subjinfo: # assume human has fixed set of channels 
             chnames = raws[k].info['ch_names'] 
             rr = genChanTuples(k, chnames) 
-            orderEMG, ind_tuples, name_tuples, LFPnames_perSide, EMGnames_perSide, MEGsrcnames_perSide = rr 
+            #orderEMG, ind_tuples, name_tuples, LFPnames_perSide, EMGnames_perSide, MEGsrcnames_perSide = rr 
             chantuples = {}
             
-            subjinfo['LFPnames_perSide'] = LFPnames_perSide 
-            subjinfo['EMGnames_perSide'] = EMGnames_perSide 
+            subjinfo['LFPnames_perSide'] = rr['LFPnames'] 
+            subjinfo['EMGnames_perSide'] = rr['EMGnames']   
             if len(srcs) > 0:
-                subjinfo['MEGsrcnames_perSide'] = MEGsrcnames_perSide 
-            for i in range(len(orderEMG) ):
+                subjinfo['MEGsrcnames_perSide'] = rr['MEGsrcnames'] 
+            for side in rr['order'] :
                 yy = {}
-                yy['indtuples'] = ind_tuples 
-                yy['nametuples'] = name_tuples 
-                chantuples[ orderEMG[i] ] = yy
+                yy['indtuples'] = rr['indtuples'][side]
+                yy['nametuples'] = rr['nametuples'][side]     
+                chantuples[ side ] = yy
 
             subjinfo['chantuples' ] = chantuples
+    #['S01']['chantuples']['left']['nametuples']['EMG']
 
-    if MEGsrc_inds_toshow is None:
+    #import pdb; pdb.set_trace()
+
+    if MEGsrc_names_toshow is None:
         n = 0
+        MEGsrc_names_toshow = []
         MEGsrcnames = list( gen_subj_info.values() )[0 ] ['MEGsrcnames_perSide']
         for side in MEGsrcnames:
             n+= len( MEGsrcnames[side] )
-        MEGsrc_inds_toshow = np.arange(n)  # differnt roi's will have repeating indices? No because the way I handle it in getChantuples!
-    print( 'MEGsrc_inds_toshow = ', MEGsrc_inds_toshow )
+            MEGsrc_names_toshow += MEGsrcnames[side]
+        #MEGsrc_inds_toshow = np.arange(n)  # differnt roi's will have repeating indices? No because the way I handle it in getChantuples!
+    #print( 'MEGsrc_inds_toshow = ', MEGsrc_inds_toshow )
+    print( 'MEGsrc_names_toshow = ', MEGsrc_names_toshow )
 
 
     for subj in gen_subj_info:
@@ -1759,13 +1899,24 @@ if __name__ == '__main__':
             json.dump(gen_subj_info, info_json)
 
     # compute spectrograms for all channels (can be time consuming, so do it only if we don't find them in the memory)
+    loadSpecgrams = False
+    saveSpecgrams = True
     try: 
         specgrams
     except NameError:
-        specgrams = precomputeSpecgrams(raws,NFFT=NFFT)
+        specgramFname = 'nraws{}_nsrcs{}_specgrams.npz'.format( len(raws), len(srcs) )
+        specgramFname = os.path.join(data_dir, specgramFname)
+        if loadSpecgrams:
+            specgrams = np.load(specgramFname)
+        else:
+            specgrams = precomputeSpecgrams(raws,NFFT=NFFT)
+            if saveSpecgrams:
+                np.savez(specgramFname, specgrams)
     else:
         print('----- Using previously precomuted spectrograms')
 
+
+    ############################################################
     #time_start, time_end = 0,1000
     time_start_forstats, time_end_forstats = 0,300
     freq_min_forstats, freq_max_forstats = 0, NFFT//2   #NFFT//2
@@ -1807,13 +1958,18 @@ if __name__ == '__main__':
     ltype_tremorThr = '-.'
     #plot_colorsEMGClust = [ 'blue', 'red' ] 
 
-    plot_specgramCmapPerModality = {'LFP': 'hot', 'MEGsrc':'viridis' }
+    plot_specgramCmapPerModality = {'LFP': 'inferno', 'MEGsrc':'viridis' }
     plot_MEGsrc_separateRoi = False
 
     #cmap = 'hot'
     #cmap = 'gist_rainbow'
     #cmap = 'viridis'
 
+    ############# # update in place gen_
+    for subj in subjs_analyzed:
+        for modality in ['MEGsrc']:
+            for fbname in ['tremor']:
+                sortChans(subj, modality, fbname, replace=True, numKeep = plot_numBestMEGsrc)
 
     ##############   compute some statisitics, like max, min, mean, cluster in subbands, etc -- can be time consuming
     try:
