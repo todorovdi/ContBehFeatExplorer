@@ -1542,6 +1542,7 @@ if __name__ == '__main__':
     medconds = ['off', 'on']
 
     subjinds = [1]
+    subjinds = [2]
     tasks = ['hold']
     medconds = ['off', 'on']
 
