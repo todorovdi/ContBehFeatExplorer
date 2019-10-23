@@ -12,8 +12,9 @@ medconds = ["off", "on"];
 tasks = ["rest", "move", "hold"];
 
 % Brodmann 4 -- M1,   Brodmann 6 -- PMC
-%roi = {"Brodmann area 4","Brodmann area 6"};
-roi = {"Brodmann area 6"};
+roi = {"Brodmann area 4","Brodmann area 6"};
+%roi = {"Brodmann area 4"};
+%roi = {"Brodmann area 6"};
 save_srcrec          = 1;
 remove_bad_channels = 1;
 

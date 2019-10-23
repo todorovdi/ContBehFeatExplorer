@@ -136,26 +136,48 @@ def sortChans(subj, modality, fbname, replace=False, numKeep = 3):
     fbs,fbe = freqBands[fbname]
     for side in cht:
         chtcur = cht[side]['nametuples']
-        bpt = []
         if modality not in chtcur :
             raise ValueError('No such modality!')
         chnames = chtcur[modality]
-        for chn in chnames:
-            freq, bins, Sxx = specgrams[k][chn]
-            f,b,bandspec = getSubspec(freq,bins,Sxx, fbs,fbe)
-            #bandpow = np.sum( bandspec, axis=0 )
-            bandpow_total = np.sum( bandspec )
-            bpt += [bandpow_total]
+        bpt = np.zeros( len(chnames) )
+        for chi,chn in enumerate(chnames):
+            bandpow_total = 0  # across conditions
+            wasBadChan = 0
+            for medcond in medconds:
+                for task in tasks:
+                    rawname = '{}_{}_{}'.format(subj,medcond,task)
+                    if rawname not in raws:
+                        continue
+                    bad = isMEGsrcchanBad(rawname,chn)
+                    if bad == 1:
+                        bandpow_cur = 0
+                        wasBadChan = 1
+                    elif bad == -1:
+                        bandpow_cur = 0
+                        #print('Found bad channel ',chn)
+                    else:
+                        freq, bins, Sxx = specgrams[rawname][chn]
+                        f,b,bandspec = getSubspec(freq,bins,Sxx, fbs,fbe)
+                        #bandpow = np.sum( bandspec, axis=0 )
+                        bandpow_cur = np.sum(bandspec) * ( b[1] - b[0] )  * ( f[1] - f[0] )
+                        #print('{} chn {} totalpow {}'.format(rawname,chn,bandpow_cur) )
+                bandpow_total += bandpow_cur
+            if wasBadChan:
+                bandpow_total = 0
+            bpt[chi] = bandpow_total
         #sortinds = np.argsort(bpt)
         #srt = chtcur[modality][sortinds][::-1]   # first the largest one 
         ss = '{}_{}_sorted'.format(modality,fbname )
 
         from operator import itemgetter
-        srt = sorted( zip(bpt,chnames), key = itemgetter(1) )[::-1]
-        srt = [ chn for chi,chn in srt ] 
+        srt_ = sorted( zip(bpt,chnames), key = itemgetter(0) )[::-1]
+        srt = [ chn for bp,chn in srt_ ] 
+
         chtcur[ ss  ] = srt
         if replace:
             chtcur[modality] = srt[:numKeep]
+            print(subj,  srt_[:numKeep] )
+
 
 ########  Gen stats across conditions
 def getStatPerChan(time_start,time_end,freq_min,freq_max,modalities=None):
@@ -176,14 +198,18 @@ def getStatPerChan(time_start,time_end,freq_min,freq_max,modalities=None):
 
                 raw = raws[k]
                 #chnames = list( sp.keys() )
-                chnames = raw.info['ch_names'] 
-                orderEMG, chinds_tuples, chnames_tuples = getTuples(sind_str)
+                #chnames = raw.info['ch_names'] 
+
+                cht = gen_subj_info[ subj ]['chantuples']
+
+                #orderEMG, chinds_tuples, chnames_tuples = getTuples(sind_str)
                 #chnames2 = []
-                for side_ind in range(len(orderEMG) ): 
+                for side in cht:
                     #chnames2 = chnames_tuples[side_ind]['LFP'] + chnames_tuples[side_ind]['EMG']
+
                     chnames2 = []
                     for modality in modalities:
-                        chnames2 += chnames_tuples[side_ind][modality]
+                        chnames2 += cht[side]['nametuples'][modality]
                     #chnamesEMG = chnames_tuples[side_ind]['EMG']
 
                     #chis = mne.pick_channels(chnames,include=chnames2, ordered=True )
@@ -329,7 +355,7 @@ def getStatPerChan(time_start,time_end,freq_min,freq_max,modalities=None):
                             ax.set_xscale('log')
                             ax.set_yscale('log')
 
-                            plt.savefig('Scatters_{}_{}.pdf'.format( k,orderEMG[side_ind]))
+                            plt.savefig('Scatters_{}_{}.pdf'.format( k,side))
                             plt.close()
 
                         ythr = ythr_sep
@@ -744,6 +770,7 @@ def genChanTuples(rawname, chnames ):
 
     MEGsrc_inds = { 'left':[], 'right':[] } 
     MEGsrc_names = { 'left':[], 'right':[] } 
+    MEGsrc_names_unfilt = { 'left':[], 'right':[] } 
 
     indshift = 0
     for roistr in sorted(MEGsrc_roi):  # very important to use sorted!
@@ -762,6 +789,7 @@ def genChanTuples(rawname, chnames ):
         for side in order_by_EMGside:
             for ind in curinds[side]:
                 chn = 'MEGsrc_{}_{}'.format(roistr,ind)
+                MEGsrc_names_unfilt[side] += [chn]
                 if MEGsrc_names_toshow is None or chn in MEGsrc_names_toshow:
                     MEGsrc_names[side] += [chn]
 
@@ -808,6 +836,7 @@ def genChanTuples(rawname, chnames ):
     r['LFPnames'] = LFPnames
     r['MEGsrcnames'] = MEGsrc_names
     r['EMGnames'] = EMGnames
+    r['MEGsrcnames_all'] = MEGsrc_names_unfilt
     #return order_by_EMGside, chinds_tuples, chnames_tuples, LFPnames, EMGnames, MEGsrc_names
     return r
 
@@ -851,6 +880,7 @@ def MEGsrcChname2data(rawname,chns,ts=None,te=None,rettimes=False):
 
     f = None
     srcvals = []
+    times = None
     for i,chn in enumerate(chns):  
         #m = re.match('MEGsrc_(.+)_(.+)', chn)
         #roistr = m.groups()[0]
@@ -860,19 +890,39 @@ def MEGsrcChname2data(rawname,chns,ts=None,te=None,rettimes=False):
         sind_str,medcond,task = getParamsFromRawname(rawname)
         srcname = 'srcd_{}_{}_{}_{}'.format(sind_str,medcond,task,roistr)
         f = srcs[srcname]
+        times = f['source_data']['time'][ts:te,0]
+
         src = f['source_data'] 
-        ref = src['avg']['mom']     
+        ref = src['avg']['mom'] [0,srci]
         # maybe I can make more efficient data extraction of multiple channels at once 
         # later if needed, if I bundle all channels from the same source file 
-        srcval = f[ref[0,srci] ][ts:te,0]   # 1D array with reconstructed source activity
+        if f[ref].size > 10:
+            srcval = f[ref ][ts:te,0]   # 1D array with reconstructed source activity
+        else:
+            srcval = np.ones( len(times) ) * -1e-20
+            print('{}  {} does not contain stuff'.format(srcname, srci) )
         srcvals += [srcval]
     r = np.vstack(srcvals)
 
     if rettimes:
-        times = f['source_data']['time'][ts:te,0]
         return r, times
     else:
         return r
+
+def isMEGsrcchanBad(rawname, chn):
+    roistr,srci = parseMEGsrcChname(chn)
+    sind_str,medcond,task = getParamsFromRawname(rawname)
+
+    srcname = 'srcd_{}_{}_{}_{}'.format(sind_str,medcond,task,roistr)
+    if srcname not in srcs:
+        return -1
+    f = srcs[srcname]
+    src = f['source_data'] 
+    ref = src['avg']['mom'] [0,srci]
+    if  (f[ref].size < 10):
+        return 1
+    else:
+        return 0
 
 def MEGsrcChind2data(rawname,chi):
     indshift = 0
@@ -996,7 +1046,8 @@ def plotSpectralData(plt,time_start = 0,time_end = 400, chanTypes_toshow = None,
 
     # MEGsrcnames = list( gen_subj_info.values() )[0 ] ['MEGsrcnames_perSide']
     # assume that already taken into account MEGsrc_inds_toshow
-    MEGsrcnames_subj0 = list( gen_subj_info.values() )[0] ['MEGsrcnames_perSide']
+    s0 = list( subjs_analyzed.keys() )[0]
+    MEGsrcnames_subj0 = subjs_analyzed[s0] ['MEGsrcnames_perSide']
     n = max( len( MEGsrcnames_subj0['left'] ), len( MEGsrcnames_subj0['right'] )  )  # since we can have different sides for different subjects
     nchans_perModality['MEGsrc'] = min( n , plot_numBestMEGsrc)
     
@@ -1113,7 +1164,7 @@ def plotSpectralData(plt,time_start = 0,time_end = 400, chanTypes_toshow = None,
 
                 addstr = ''
                 for i in range(chdata.shape[0] ):
-                    addstr = ''
+                    #addstr = ''
                     #chn = chnames[chs[i]]
                     chn = ch_toplot_timecourse[i]
                     if chn.find(modality) < 0:
@@ -1127,6 +1178,7 @@ def plotSpectralData(plt,time_start = 0,time_end = 400, chanTypes_toshow = None,
                     if pars['shiftMean']:
                         ys -= mn
                         addstr += ', meanshited'
+                    # either bandpass or low/highpass
                     if 'bandpass_freq' in pars:
                         bandpassFltorder =  pars['bandpass_order'] 
                         bandpassFreq = pars['bandpass_freq']
@@ -1541,8 +1593,7 @@ if __name__ == '__main__':
     tasks = ['rest', 'move', 'hold']
     medconds = ['off', 'on']
 
-    subjinds = [1]
-    subjinds = [2]
+    subjinds = [1,2,3]
     tasks = ['hold']
     medconds = ['off', 'on']
 
@@ -1558,11 +1609,17 @@ if __name__ == '__main__':
 
     # used on the level of chanTuples generation first, so for unselected nothing will be computed 
     MEGsrc_names_toshow = ['MEGsrc_Brodmann area 4_0', 'MEGsrc_Brodmann area 4_10', 'MEGsrc_Brodmann area 4_15'  ]  # right
-    MEGsrc_names_toshow += [ 'MEGsrc_Brodmann area 4_3', 'MEGsrc_Brodmann area 4_30', 'MEGsrc_Brodmann area 4_74' ]  # left
-    MEGsrc_names_toshow = []
-    MEGsrc_names_toshow = None
+    MEGsrc_names_toshow += [ 'MEGsrc_Brodmann area 4_3', 'MEGsrc_Brodmann area 4_30', 'MEGsrc_Brodmann area 4_60' ]  # left
+    MEGsrc_names_toshow += [ 'MEGsrc_Brodmann area 6_3', 'MEGsrc_Brodmann area 6_60', 'MEGsrc_Brodmann area 4_299' ]  # right
+    MEGsrc_names_toshow += [ 'MEGsrc_Brodmann area 6_0', 'MEGsrc_Brodmann area 6_71', 'MEGsrc_Brodmann area 4_340', 'MEGsrc_Brodmann area 4_75'  ]  # left
+    #MEGsrc_names_toshow = []
+    MEGsrc_names_toshow = None    # more accurate but requires computation of spectrograms for all channels, which can be long
     
     # left indices in Brodmann 4 --  [3, 4, 7, 8, 9, 13, 14, 16, 18, 22, 23, 24, 26, 30, 31, 32, 34, 36, 37, 40, 41, 43, 45, 46, 47, 51, 52, 58, 59, 60, 63, 64, 67, 68, 72, 73, 74]
+    # left indiced in Brodmann 6 -- '
+    '''
+    0, 2, 3, 4, 5, 7, 9, 11, 12, 14, 15, 19, 20, 21, 22, 23, 29, 30, 31, 32, 34, 35, 36, 41, 42, 47, 48, 49, 50, 53, 54, 55, 56, 62, 63, 64, 69, 70, 71, 74, 75, 76, 77, 79, 80, 81, 86, 87, 88, 92, 93, 96, 97, 101, 102, 105, 106, 107, 108, 111, 112, 113, 116, 117, 118, 121, 123, 124, 125, 126, 129, 131, 132, 135, 136, 137, 138, 139, 145, 146, 147, 148, 149, 156, 157, 161, 162, 163, 164, 165, 172, 173, 174, 175, 176, 177, 183, 186, 188, 189, 190, 191, 195, 196, 197, 198, 199, 203, 204, 205, 208, 209, 210, 214, 215, 216, 217, 218, 223, 224, 225, 226, 227, 233, 234, 235, 236, 240, 241, 242, 243, 247, 248, 249, 253, 254, 257, 258, 259, 261, 262, 263, 264, 267, 268, 269, 270, 271, 272, 277, 278, 279, 284, 285, 288, 289, 290, 294, 295, 296, 297, 301, 302, 303, 307, 308, 309, 310, 313, 314, 315, 318, 319, 322, 324, 326, 327, 328, 329, 333, 334, 335, 336, 339, 340, 341, 342, 343, 349, 350, 353, 355, 356, 359, 360, 361, 365, 367, 368, 369] 
+    '''
                 
     raws = {}
     srcs = {}
@@ -1603,7 +1660,7 @@ if __name__ == '__main__':
 
 
     plot_timeIntervalsPerSubj = { 'S01_off_hold':[ (180,210) ], 'S01_on_hold':[ (0,30) ], 
-            'S02_off_hold':[ (0,300) ]   }
+            'S02_off_hold':[ (20,50) ], 'S02_on_hold':[ (20,60) ]   }
     #plot_timeIntervalsPerSubj = {}
 
     favoriteLFPch_perSubj = {'S01': ['LFPR23', 'LFPL12' ], 
@@ -1611,37 +1668,43 @@ if __name__ == '__main__':
     plot_time_start = 0
     plot_time_end = 300
 
-    plot_minFreqInSpec = 6
-    plot_minFreqInSpec = 0
+    plot_minFreqInSpec = 2.5  # to get rid of heart rate
+    plot_minFreqInBandpow = 2.5  # to get rid of heart rate
     #plot_maxFreqInSpec = 50
     #plot_maxFreqInSpec = 80
     #plot_maxFreqInSpec = 35
-    plot_maxFreqInSpec = 20
+    plot_maxFreqInSpec = 35 # max beta
+    plot_maxFreqInSpec = 100
     plot_MEGsrc_sortBand = 'tremor'
     plot_numBestMEGsrc = 3
+    if MEGsrc_names_toshow is not None:
+        plot_numBestMEGsrc = len( MEGsrc_names_toshow ) // 2
 
 
     EMGlimsBySubj =  { 'S01':(0,0.001) }  
     #EMGlimsBySubj_meanshifted =  { 'S01':(-0.0001,0.0001),  'S02':(-0.0002,0.0002)}   # without highpassing
-    EMGlimsBySubj_meanshifted =  { 'S01':(-0.00005,0.00005),  'S02':(-0.0002,0.0002)}  
-    EMGlimsBandPowBySubj = {}; # { 'S01':(0,1e-10), 'S02':(0,1e-10) }  
+    EMGlimsBySubj_meanshifted =  { 'S01':(-0.00005,0.00005),  'S02':(-0.0002,0.0002), 
+            'S03':(-0.0002,0.0002)}  
+    EMGlimsBandPowBySubj =  {  'S02':(0,200) }  
       
     LFPlimsBySubj = {}
     #LFPlimsBySubj =  { 'S01':(0,0.001) }  
     LFPlimsBySubj_meanshifted =  { 'S01':(-0.000015,0.000015), 'S02':(-0.000015,0.000015) }  
     LFPlimsBandPowBySubj =  {}; #{ 'S01':(0,1e-11), 'S02':(0,1e-11) }  
+    LFPlimsBandPowBySubj = { 'S01':(0,1e-11), 'S02':(0,1e-11) }  
+    LFPlimsBandPowBySubj = { 'S01':(0,0.22), 'S02':(0,0.2) }  
 
     MEGsrclimsBandPowBySubj =  { 'S01':(0,400),  'S02':(0,600), 'S03':(0,700)  }
-    MEGsrclimsBandPowBySubj =  { 'S01':(0,1.5e8),  'S02':(0,600), 'S03':(0,700)  }
-    MEGsrclimsBandPowBySubj =  {  }
+    MEGsrclimsBandPowBySubj =  { 'S01':(0,2.5e8),  'S02':(0,3e8), 'S03':(0,1e9)  }
+    #MEGsrclimsBandPowBySubj =  {  }
 
     EMGplotPar = {'shiftMean':True, 
             'axLims':EMGlimsBySubj, 'axLims_meanshifted':EMGlimsBySubj_meanshifted,
             'axLims_bandPow':EMGlimsBandPowBySubj  }
     #EMGplotPar.update( {'lowpass_freq':15, 'lowpass_order':10} )
-    EMGplotPar.update( {'bandpass_freq':(0.5,15), 'bandpass_order':10} )
+    EMGplotPar.update( {'bandpass_freq':(plot_minFreqInBandpow,15), 'bandpass_order':10} )
 
-    LFPplotPar = {'shiftMean':True, 'highpass_freq': 1.5, 'highpass_order':10, 
+    LFPplotPar = {'shiftMean':True, 'highpass_freq': plot_minFreqInBandpow, 'highpass_order':10, 
             'axLims':LFPlimsBySubj, 'axLims_meanshifted':LFPlimsBySubj_meanshifted,
             'axLims_bandPow':LFPlimsBandPowBySubj  }
 
@@ -1650,7 +1713,8 @@ if __name__ == '__main__':
             #'axLims_bandPow':LFPlimsBandPowBySubj,
             # 'highpass_freq': 1.5, 'highpass_order':10 , }
 
-    MEGsrcplotPar = {'shiftMean':True, 'highpass_freq': 1.5, 'highpass_order':10, 'axLims': {},
+    MEGsrcplotPar = {'shiftMean':True, 'highpass_freq': plot_minFreqInBandpow, 
+            'highpass_order':10, 'axLims': {},
             'axLims_meanshifted':{}, 'axLims_bandPow': MEGsrclimsBandPowBySubj }
             #'axLims':LFPlimsBySubj, 'axLims_meanshifted':LFPlimsBySubj_meanshifted,
             #'axLims_bandPow':LFPlimsBandPowBySubj  }
@@ -1713,21 +1777,24 @@ if __name__ == '__main__':
 
     srcPerRawname = {}
     fnames_src_noext = []
-    for subjind in subjinds:
-        for medcond in medconds:
-            for task in tasks:
-                rawname = getRawname(subjind,medcond,task)
-                srcPerRawname[rawname] = []
-                for curroi in MEGsrc_roi:
-                    if curroi.find('_') >= 0:
-                        raise ValueError("Src roi contains underscore, we'll have poblems with parsing")
+    for raw_fname in fnames_noext:
+        subjstr,medcond,task = getParamsFromRawname(raw_fname)
+        subjind = int( subjstr[1:] )
+    #for subjind in subjinds:
+    #    for medcond in medconds:
+    #        for task in tasks:
+        rawname = getRawname(subjind,medcond,task)
+        srcPerRawname[rawname] = []
+        for curroi in MEGsrc_roi:
+            if curroi.find('_') >= 0:
+                raise ValueError("Src roi contains underscore, we'll have poblems with parsing")
 
-                    #fn = 'srcd_S{:02d}_{}_{}_{}'.format(subjind,medcond,task,curroi)
-                    fn = getSrcname(subjind,medcond,task,curroi)
-                    srcPerRawname[rawname] += [fn]
-                    if fn in fnames_src_noext:
-                        continue
-                    fnames_src_noext = fnames_src_noext + [fn]
+            #fn = 'srcd_S{:02d}_{}_{}_{}'.format(subjind,medcond,task,curroi)
+            fn = getSrcname(subjind,medcond,task,curroi)
+            srcPerRawname[rawname] += [fn]
+            if fn in fnames_src_noext:
+                continue
+            fnames_src_noext = fnames_src_noext + [fn]
     print('Filenames src to be read ',fnames_noext)
 
     ###########  Read raw data ###################
@@ -1863,8 +1930,12 @@ if __name__ == '__main__':
             
             subjinfo['LFPnames_perSide'] = rr['LFPnames'] 
             subjinfo['EMGnames_perSide'] = rr['EMGnames']   
+
+            #subjs_analyzed[sind_str]['MEGsrcnames_perSide_all'] = rr['MEGsrcnames_all'] 
             if len(srcs) > 0:
-                subjinfo['MEGsrcnames_perSide'] = rr['MEGsrcnames'] 
+                subjinfo['MEGsrcnames_perSide_all'] = rr['MEGsrcnames_all'] 
+                subjs_analyzed[sind_str]['MEGsrcnames_perSide'] = rr['MEGsrcnames'] 
+                #subjinfo['MEGsrcnames_perSide'] = rr['MEGsrcnames'] 
             for side in rr['order'] :
                 yy = {}
                 yy['indtuples'] = rr['indtuples'][side]
@@ -1879,7 +1950,8 @@ if __name__ == '__main__':
     if MEGsrc_names_toshow is None:
         n = 0
         MEGsrc_names_toshow = []
-        MEGsrcnames = list( gen_subj_info.values() )[0 ] ['MEGsrcnames_perSide']
+        k0 = list(subjs_analyzed.keys() )[0]
+        MEGsrcnames = subjs_analyzed[k0 ]  ['MEGsrcnames_perSide']
         for side in MEGsrcnames:
             n+= len( MEGsrcnames[side] )
             MEGsrc_names_toshow += MEGsrcnames[side]
@@ -1900,15 +1972,17 @@ if __name__ == '__main__':
             json.dump(gen_subj_info, info_json)
 
     # compute spectrograms for all channels (can be time consuming, so do it only if we don't find them in the memory)
-    loadSpecgrams = False
+    loadSpecgrams = True
     saveSpecgrams = True
     try: 
         specgrams
     except NameError:
         specgramFname = 'nraws{}_nsrcs{}_specgrams.npz'.format( len(raws), len(srcs) )
+        specgramFname = 'specgrams_1,2,3.npz'
         specgramFname = os.path.join(data_dir, specgramFname)
+        print('Loading specgrams from ',specgramFname)
         if loadSpecgrams:
-            specgrams = np.load(specgramFname)
+            specgrams = np.load(specgramFname, allow_pickle=True)['arr_0'][()]
         else:
             specgrams = precomputeSpecgrams(raws,NFFT=NFFT)
             if saveSpecgrams:
@@ -1950,7 +2024,7 @@ if __name__ == '__main__':
     freqBands = {'tremor':(tremorBandStart,tremorBandEnd), 'beta':betaBand,
             'lowgamma':lowGammaBand, 'gamma_motor':motorGammaBand }
     plot_freqBandNames_perModality = {'EMG': ['tremor' ], 'LFP': ['beta','lowgamma'], 
-            'MEGsrc':['tremor','beta'], 'EOG':['lowgamma'] }
+            'MEGsrc':['tremor','beta', 'gamma_motor' ], 'EOG':['lowgamma'] }
     plot_freqBandsLineStyle = {'tremor':'-', 'beta':'--', 'lowgamma':':', 'gamma_motor':':'  }
 
     ############## plotting params 

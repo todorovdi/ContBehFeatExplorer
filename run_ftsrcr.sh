@@ -3,6 +3,8 @@
 #typestr = 'move';
 #medstr  = 'off';
 subjstrs='["S01", "S02", "S03"]'
+subjstrs='["S02"]'
+subjstrs='["S03"]'
 #subjstrs='["S01"]'
 vardefstr="subjstrs=$subjstrs"
 echo "$vardefstr"
