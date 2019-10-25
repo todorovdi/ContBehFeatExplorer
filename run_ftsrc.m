@@ -23,7 +23,7 @@ if 1 ~= exist("Info")
 end
 
 
-load('head_scalemat')
+load('head_scalemat');
 
 for subji = 1:length(subjstrs)
   subjstr = subjstrs(subji);
@@ -74,7 +74,7 @@ for subji = 1:length(subjstrs)
         for roii = 1:length(roi) 
           roicur = roi{roii};
 
-          S = scalemat(subjstr)
+          S = scalemat(subjstr);
           source_data = srcrec(datall,hdmf,{roicur},bads,S);
           source_data.roi = {roicur};
 
