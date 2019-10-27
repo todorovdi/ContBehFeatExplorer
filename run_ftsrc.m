@@ -15,8 +15,14 @@ tasks = ["rest", "move", "hold"];
 roi = {"Brodmann area 4","Brodmann area 6"};
 %roi = {"Brodmann area 4"};
 %roi = {"Brodmann area 6"};
+roi = {"HirschPt2011"};
 save_srcrec          = 1;
 remove_bad_channels = 1;
+
+
+
+
+
 
 if 1 ~= exist("Info")
   load(strcat(data_dir,"/Info.mat") );
@@ -24,6 +30,21 @@ end
 
 
 load('head_scalemat');
+
+afni = ft_read_atlas('~/soft/fieldtrip-20190716/template/atlas/afni/TTatlas+tlrc.HEAD');  % goes deeper in the sulcus
+%singleshell = load('~/soft/fieldtrip-20190716/template/headmodel/standard_singleshell');
+srs = load('~/soft/fieldtrip-20190716/template/sourcemodel/standard_sourcemodel3d5mm');
+% pts_converted = mni2icbm_spm( pts )
+% atlas.  pts_converted = mni2icbm_spm( pts )
+atlas = ft_convert_units(afni,'cm'); % ftrop and our sourcemodels have cm units
+
+cfg_vlookup = [];
+cfg_vlookup.atlas = atlas;
+cfg_vlookup.roi = roi;
+%cfg_vlookup.roi = atlas.tissuelabel;
+cfg_vlookup.inputcoord = 'mni';  % coord of the source
+%cfg_vlookup.inputcoord = 'tal';
+mask = ft_volumelookup(cfg_vlookup,srs.sourcemodel);  % selecting only a subset
 
 for subji = 1:length(subjstrs)
   subjstr = subjstrs(subji);
@@ -75,7 +96,7 @@ for subji = 1:length(subjstrs)
           roicur = roi{roii};
 
           S = scalemat(subjstr);
-          source_data = srcrec(datall,hdmf,{roicur},bads,S);
+          source_data = srcrec(datall,hdmf,{roicur},bads,S,srs,mask);
           source_data.roi = {roicur};
 
           if save_srcrec

@@ -62,6 +62,49 @@ save("head_scalemat",'scalemat')
 S = scalemat(subjstr);
 
 
+% get matrix mapping MNI to my coords
+vecinds = [1 2 3]
+vecinds = [2 3 4]
+vecinds = [1 200 3000 10000]
+preX = srsstd.sourcemodel.pos;   % in each ROW -- x,y,z
+preY = hdmf.mni_aligned_grid.pos;
+% M * X = Y 
+X0 = preX( vecinds, : );  %3x3
+Y0 = preY( vecinds, : );  %3x3
+
+X1 = transpose(X0);
+Y1 = transpose(Y0);
+
+%X = [X1; [0 0 0 1] ];
+%Y = [Y1; [0 0 0 1] ];
+X = [X1; [1 1 1 1] ];
+Y = [Y1; [1 1 1 1] ];
+
+d = det(Y)
+if abs(d) < 1e-10
+  printf("Bad selection of vectors")
+  return
+end
+
+M = Y * inv(X)
+%M = Y \ X
+tryinds = [7 13 567];
+ii = 2;
+dev = M * transpose( [ preX(tryinds(ii), :) 1] ) - transpose( [preY(tryinds(ii),:) 1] );
+dev(1:3)
+
+%dev = M * transpose( preX(tryinds(ii), :) ) - transpose( preY(tryinds(ii),:) )
+
+%return
+
+
+
+coords_Jan_MNI =  transpose( [ [33 -22 57] ; [-33 -22 57] ] ) / 10. ;
+coords_Jan_MNI_t = [ coords_Jan_MNI; [1 1] ];
+yy = M * coords_Jan_MNI_t   
+coords_Jan_actual = transpose( yy(1:3,:)  )
+
+
 cfg = [];
 cfg.atlas = atlas;
 cfg.roi = {'Brodmann area 4'};
@@ -81,11 +124,12 @@ tmpstd = srsstd.sourcemodel.inside;
 tmpsubj = hdmf.mni_aligned_grid.inside;  % this one will be used for source reconstruction
 
 %%%%%%%%---------------
-
+ 
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%% Plot
 close all
 viewarrs = [ [0 -90 0]; [0 0 90] ];
+nr = 4
 for i = 1:2 
   figure(i);
   viewarr = viewarrs(i,:);
@@ -94,7 +138,7 @@ for i = 1:2
   srsstd.sourcemodel.inside    = tmpstd; % define inside locations according to the atlas based mask 
   hdmf.mni_aligned_grid.inside = tmpstd;  % this one will be used for source reconstruction
 
-  subplot(3,2,1)
+  subplot(nr,2,1)
   hold on     % plot all objects in one figure
   %%% Plot standard stuff
   hdmstdf = load('~/soft/fieldtrip-20190716/template/headmodel/standard_singleshell.mat');  % just for plotting
@@ -106,7 +150,7 @@ for i = 1:2
 
 
   %% Plot Jan's stuff
-  subplot(3,2,2)
+  subplot(nr,2,2)
   hold on     % plot all objects in one figure
   ft_plot_headmodel(hdmf.hdm,  'facecolor', 'cortex', 'edgecolor', 'none');alpha 0.5; camlight;
   ft_plot_mesh(hdmf.mni_aligned_grid.pos(hdmf.mni_aligned_grid.inside,:)); % plot only locations inside the volume
@@ -120,7 +164,7 @@ for i = 1:2
   %hdmf.mni_aligned_grid.inside = tmp;  % this one will be used for source reconstruction
 
   %%% Plot standard stuff
-  subplot(3,2,3)
+  subplot(nr,2,3)
   hold on     % plot all objects in one figure
   hdmstdf = load('~/soft/fieldtrip-20190716/template/headmodel/standard_singleshell.mat');  % just for plotting
   ft_plot_headmodel(hdmstdf.vol,  'facecolor', 'cortex', 'edgecolor', 'none');alpha 0.5; camlight;
@@ -132,7 +176,7 @@ for i = 1:2
 
 
   %% Plot Jan's stuff
-  subplot(3,2,4)
+  subplot(nr,2,4)
   hold on     % plot all objects in one figure
   ft_plot_headmodel(hdmf.hdm,  'facecolor', 'cortex', 'edgecolor', 'none');alpha 0.5; camlight;
   ft_plot_mesh(hdmf.mni_aligned_grid.pos(tmp,:)); % plot only locations inside the volume
@@ -144,7 +188,7 @@ for i = 1:2
 
 
   %% Plot Jan's stuff
-  subplot(3,2,5)
+  subplot(nr,2,5)
   hold on     % plot all objects in one figure
   ft_plot_headmodel(hdmf.hdm,  'facecolor', 'cortex', 'edgecolor', 'none');alpha 0.5; camlight;
   Q = hdmf.mni_aligned_grid.pos(hdmf.mni_aligned_grid.inside,:);
@@ -159,7 +203,7 @@ for i = 1:2
 
 
   %% Plot Jan's stuff
-  subplot(3,2,6)
+  subplot(nr,2,6)
   hold on     % plot all objects in one figure
   ft_plot_headmodel(hdmf.hdm,  'facecolor', 'cortex', 'edgecolor', 'none');alpha 0.5; camlight;
   Q = hdmf.mni_aligned_grid.pos(tmp,:);
@@ -169,6 +213,37 @@ for i = 1:2
   end
   ft_plot_mesh(Q2); % plot only locations inside the volume
   title(sprintf('%s %s, mask of mni_aligned_grid, scaled %3f,%3f,%3f',subjstr,roistr,sx,sy,sz))
+  hold off
+
+  view (viewarr)
+
+
+  %% Plot Jan's pts
+  subplot(nr,2,7)
+  hold on     % plot all objects in one figure
+  ft_plot_headmodel(hdmf.hdm,  'facecolor', 'cortex', 'edgecolor', 'none');alpha 0.5; camlight;
+  Q = coords_Jan_MNI;
+  Q2 = zeros(size(Q));
+  for i=1:size(Q,2)
+    Q2(:,i) = Q(:,i) ;
+  end
+  ft_plot_mesh( transpose(Q2) ); % plot only locations inside the volume
+  title( sprintf('%s standard head inside, sclaed %.3f,%.3f,%.3f',subjstr,sx,sy,sz)) 
+  hold off
+  view (viewarr)
+
+
+  %% Plot Jan's stuff
+  subplot(nr,2,8)
+  hold on     % plot all objects in one figure
+  ft_plot_headmodel(hdmf.hdm,  'facecolor', 'cortex', 'edgecolor', 'none');alpha 0.5; camlight;
+  Q = coords_Jan_actual;
+  Q2 = zeros(size(Q))  ;
+  for i=1:size(Q,1);
+    Q2(i,:) = S *  transpose( Q(i,:)  );
+  end
+  ft_plot_mesh( Q2 ); % plot only locations inside the volume
+  title(sprintf('%s %s, actual coords, scaled %3f,%3f,%3f',subjstr,roistr,sx,sy,sz))
   hold off
 
   view (viewarr)

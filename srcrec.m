@@ -1,4 +1,4 @@
-function output = srcrec(datall,hdmf,roi,bads,S)
+function output = srcrec(datall,hdmf,roi,bads,S,srs,mask)
   %cd 
 
   do_load_only_ifnew   = 1;
@@ -21,34 +21,45 @@ function output = srcrec(datall,hdmf,roi,bads,S)
 
   if 1~= exist("mconly") || (1==exist("mconly") && ~do_lookup_only_ifnew)
     %m1 = ft_read_atlas('HMAT_Right_M1.nii')  % goes deeper in the sulcus
-    afni = ft_read_atlas('~/soft/fieldtrip-20190716/template/atlas/afni/TTatlas+tlrc.HEAD');  % goes deeper in the sulcus
-    %singleshell = load('~/soft/fieldtrip-20190716/template/headmodel/standard_singleshell');
-    srs = load('~/soft/fieldtrip-20190716/template/sourcemodel/standard_sourcemodel3d5mm');
-
-    % pts_converted = mni2icbm_spm( pts )
-    % atlas.  pts_converted = mni2icbm_spm( pts )
-    atlas = ft_convert_units(afni,'cm'); % ftrop and our sourcemodels have cm units
-
-    cfg_vlookup = [];
-    cfg_vlookup.atlas = atlas;
-    cfg_vlookup.roi = roi;
-    %cfg_vlookup.roi = atlas.tissuelabel;
-    cfg_vlookup.inputcoord = 'mni';  % coord of the source
-    %cfg_vlookup.inputcoord = 'tal';
-    mask = ft_volumelookup(cfg_vlookup,srs.sourcemodel);  % selecting only a subset
 
 
-    %tmp                  = repmat(srs.sourcemodel.inside,1,1);
-    %tmp(tmp==1)          = 0;
-    %tmp(mask)            = 1;
-    % define inside locations according to the atlas based mask
-    %srs.sourcemodel.inside = tmp;
+    if strcmp(roi{1} , "HirschPt2011" ) == 1
+      % compute transformation matrix
+      vecinds = [1 200 3000 10000]
+      preX = srs.sourcemodel.pos;   % in each ROW -- x,y,z
+      preY = hdmf.mni_aligned_grid.pos;
+      % M * X = Y 
+      X0 = preX( vecinds, : );  %3x3
+      Y0 = preY( vecinds, : );  %3x3
 
+      X1 = transpose(X0);
+      Y1 = transpose(Y0);
 
-    mconly_ = hdmf.mni_aligned_grid.pos(mask,:);
-    mconly = zeros(size(mconly_));
-    for i=1:length(mconly)
-      mconly(i,:) = S * transpose( mconly_(i,:) );
+      %X = [X1; [0 0 0 1] ];
+      %Y = [Y1; [0 0 0 1] ];
+      X = [X1; [1 1 1 1] ];
+      Y = [Y1; [1 1 1 1] ];
+
+      d = det(Y);
+      if abs(d) < 1e-10
+        printf("Bad selection of vectors")
+        return
+      end
+
+      M = Y * inv(X);
+
+      coords_Jan_ = [ [33 -22 57] ; [-33 -22 57] ] ;
+      coords_Jan_MNI =  transpose( coords_Jan_ ) / 10. ;
+      coords_Jan_MNI_t = [ coords_Jan_MNI; [1 1] ];
+      yy = M * coords_Jan_MNI_t;
+      coords_Jan_actual = transpose( yy(1:3,:)  );
+      mconly = coords_Jan_actual
+    else
+      mconly_ = hdmf.mni_aligned_grid.pos(mask,:);
+      mconly = zeros(size(mconly_));
+      for i=1:length(mconly)
+        mconly(i,:) = S * transpose( mconly_(i,:) );
+      end
     end
     %hdmf.mni_aligned_grid.inside = tmp;  % this one will be used for source reconstruction
   end
