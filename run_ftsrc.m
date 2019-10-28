@@ -16,6 +16,7 @@ roi = {"Brodmann area 4","Brodmann area 6"};
 %roi = {"Brodmann area 4"};
 %roi = {"Brodmann area 6"};
 roi = {"HirschPt2011"};
+roi = {"HirschPt2011,2013direct"}
 save_srcrec          = 1;
 remove_bad_channels = 1;
 

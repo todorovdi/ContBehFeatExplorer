@@ -10,6 +10,7 @@ subjstrs='["S07", "S08", "S09", "S10"]'
 #subjstrs='["S08","S09"]'
 #subjstrs='["S01"]'
 vardefstr="subjstrs=$subjstrs"
+vardefstr=""
 echo "$vardefstr"
 
 matlab -nodisplay -nosplash -r "$vardefstr; run_ftsrc; quit"

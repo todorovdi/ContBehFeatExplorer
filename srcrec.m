@@ -19,11 +19,11 @@ function output = srcrec(datall,hdmf,roi,bads,S,srs,mask)
   %cfg_sel.latency = [tstart tend];
   %seldat = ft_preprocessing(cfg_sel,data)
 
-  if 1~= exist("mconly") || (1==exist("mconly") && ~do_lookup_only_ifnew)
+  if 1~= exist("srcpos") || (1==exist("srcpos") && ~do_lookup_only_ifnew)
     %m1 = ft_read_atlas('HMAT_Right_M1.nii')  % goes deeper in the sulcus
 
 
-    if strcmp(roi{1} , "HirschPt2011" ) == 1
+    if strcmp(roi{1} , "HirschPt2011,2013direct" ) == 1
       % compute transformation matrix
       vecinds = [1 200 3000 10000]
       preX = srs.sourcemodel.pos;   % in each ROW -- x,y,z
@@ -48,17 +48,27 @@ function output = srcrec(datall,hdmf,roi,bads,S,srs,mask)
 
       M = Y * inv(X);
 
-      coords_Jan_ = [ [33 -22 57] ; [-33 -22 57] ] ;
+      % places where cortico-muscular coherence (at trem freq) changed during tremor
+      %
+      %They were located in the primary motor cortex (MNI coordinates:
+      % 60, 15, 50), premotor cortex (MNI coordinates:  30, 10, 70)
+      %and posterior parietal cortex (MNI coordinates:  20, 75, 50).
+      coords_tremCohTremFreq_M1 = [ [ 60, 15, 50]; [-60,16,50] ];
+      coords_tremCohTremFreq_PMC = [ [ 30 10 70]; [ -30 10 70]  ];
+      coords_betaCohMax = [ [33 -22 57] ; [-33 -22 57] ] ;  % spatial maxima where where beta coherence between PreCG (putative M1) and LFPs are largest 
+
+      coords_Jan_ = [coords_betaCohMax; coords_tremCohTremFreq_M1; coords_tremCohTremFreq_PMC]
       coords_Jan_MNI =  transpose( coords_Jan_ ) / 10. ;
-      coords_Jan_MNI_t = [ coords_Jan_MNI; [1 1] ];
+      size(coords_Jan_MNI)
+      coords_Jan_MNI_t = [ coords_Jan_MNI; ones(1, size(coords_Jan_MNI, 2) )  ];
       yy = M * coords_Jan_MNI_t;
       coords_Jan_actual = transpose( yy(1:3,:)  );
-      mconly = coords_Jan_actual
+      srcpos = coords_Jan_actual
     else
-      mconly_ = hdmf.mni_aligned_grid.pos(mask,:);
-      mconly = zeros(size(mconly_));
-      for i=1:length(mconly)
-        mconly(i,:) = S * transpose( mconly_(i,:) );
+      srcpos_ = hdmf.mni_aligned_grid.pos(mask,:);
+      srcpos = zeros(size(srcpos_));
+      for i=1:length(srcpos)
+        srcpos(i,:) = S * transpose( srcpos_(i,:) );
       end
     end
     %hdmf.mni_aligned_grid.inside = tmp;  % this one will be used for source reconstruction
@@ -80,9 +90,9 @@ function output = srcrec(datall,hdmf,roi,bads,S,srs,mask)
   cfg_srcrec.headmodel=hdmf.hdm;
   %cfg_srcrec.grid=mni_aligned_grid;
   cfg_srcrec.sourcemodel = [];
-  cfg_srcrec.sourcemodel.pos = mconly;
+  cfg_srcrec.sourcemodel.pos = srcpos;
   %cfg_srcrec.grid = [];
-  %cfg_srcrec.grid.pos = mconly;
+  %cfg_srcrec.grid.pos = srcpos;
 
   cfg_srcrec.supchan = bads;
 

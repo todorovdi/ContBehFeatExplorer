@@ -1058,6 +1058,9 @@ def plotSpectralData(plt,time_start = 0,time_end = 400, chanTypes_toshow = None,
         #    chanTypes_toshow[ 'EMGcorr'] = {'chantypes':['EMG', 'LFP', 'MEGsrc', 'EOG'] }
         if show_EMG_band_corr:
             chanTypes_toshow[ 'EMGband_corr'] = {'chantypes':['EMG', 'LFP', 'MEGsrc'] }
+        else:
+            chanTypes_toshow[ 'EMGband_corr'] = {'chantypes':[] }
+
 
 
     
@@ -1136,7 +1139,7 @@ def plotSpectralData(plt,time_start = 0,time_end = 400, chanTypes_toshow = None,
     if 'LFP' in chanTypes_toshow['bandpow']['chantypes'] and plot_LFP_rowPerBand:
         chanTypes_toshow['bandpow']['nplots'] += (-1) + len( plot_freqBandNames_perModality['LFP'] )
 
-    chanTypes_toshow['EMGband_corr']['nplots'] = chanTypes_toshow['bandpow']['nplots']
+    chanTypes_toshow['EMGband_corr']['nplots'] = chanTypes_toshow['bandpow']['nplots'] * show_EMG_band_corr
     chanTypes_toshow['timecourse']['nplots'] = len(chanTypes_toshow['timecourse']['chantypes'] )
     chanTypes_toshow['tremcvl']['nplots'] = 1
 
@@ -1793,6 +1796,7 @@ if __name__ == '__main__':
     MEGsrc_roi = ['Brodmann area 4', 'Brodmann area 6']
     #MEGsrc_roi = ['Brodmann area 6']
     MEGsrc_roi = ['HirschPt2011']
+    #MEGsrc_roi = ['HirschPt2011,2013direct']
 
     subjinds = [1,2,3,4,5,6,7,8,9,10]
     tasks = ['hold', 'move', 'rest']
@@ -1816,6 +1820,7 @@ if __name__ == '__main__':
 
     subjinds = [1,2,3,8,9]
     subjinds = [1,2,3,4,5,6]
+    subjinds = [1,2,3,4]
     #subjinds = [4]
     tasks = ['hold', 'rest', 'move']
 
@@ -1897,7 +1902,8 @@ if __name__ == '__main__':
     plot_MEGsrc_spectrogram       = True
     #plot_onlyMainSide             = True
     plot_onlyMainSide             = False
-    show_EMG_band_corr            = True
+    #show_EMG_band_corr            = True
+    show_EMG_band_corr            = False
     # I have selected them myself, not the ones chosen by Jan
     # those with more apparent contrast between background and beta and tremor
 
@@ -1930,8 +1936,13 @@ if __name__ == '__main__':
     EMGlimsBySubj =  { 'S01':(0,0.001) }  
     #EMGlimsBySubj_meanshifted =  { 'S01':(-0.0001,0.0001),  'S02':(-0.0002,0.0002)}   # without highpassing
     EMGlimsBySubj_meanshifted =  { 'S01':(-0.00005,0.00005),  'S02':(-0.0002,0.0002), 
-            'S03':(-0.0002,0.0002), 'S08':(-0.0002,0.0002), 'S09':(-0.0002,0.0002)   }  
-    EMGlimsBandPowBySubj =  { 'S01':(0,15),  'S02':(0,200), 'S03':(0,200),  'S08':(0,700), 'S09':(0,700) }  
+            'S03':(-0.0002,0.0002), 'S04':(-0.0001,0.0001), 
+            'S05':(-0.0004,0.0004), 'S06':(-0.0002,0.0002), 
+            'S07':(-0.0002,0.0002), 'S10':(-0.0002,0.0002), 
+            'S08':(-0.0002,0.0002), 'S09':(-0.0002,0.0002)   }  
+    EMGlimsBandPowBySubj =  { 'S01':(0,15),  'S02':(0,200), 'S03':(0,200),  'S04':(0,200), 
+            'S05':(0,200),
+            'S08':(0,700), 'S09':(0,700) }  
       
     LFPlimsBySubj = {}
     #LFPlimsBySubj =  { 'S01':(0,0.001) }  
@@ -1940,12 +1951,23 @@ if __name__ == '__main__':
     LFPlimsBandPowBySubj = { 'S01':(0,1e-11), 'S02':(0,1e-11) }  
     bandlims = {'default':(0,0.2), 'tremor':(0,2.6 ), 'beta':(0,0.32), 'gamma_motor':(0,0.23) }
     LFPlimsBandPowBySubj = { 'S01': bandlims,   'S02':(0,0.2) }  
-    bandlims = {'default':(0,0.2), 'tremor':(0,4000 ), 'beta':(0,800), 'gamma_motor':(0,600) }
+    bandlims = {'default':(0,0.2), 'tremor':(0,0.3 ), 'beta':(0,0.3), 'gamma_motor':(0,0.07) }
+    LFPlimsBandPowBySubj[ 'S02' ]  = bandlims
+    bandlims = {'default':(0,0.2), 'tremor':(0,8 ), 'beta':(0,5), 'gamma_motor':(0,0.2) }
     LFPlimsBandPowBySubj[ 'S03' ]  = bandlims
+    bandlims = {'default':(0,0.2), 'tremor':(0,100 ), 'beta':(0,6), 'gamma_motor':(0,0.2) }
+    LFPlimsBandPowBySubj[ 'S04' ]  = bandlims
+    bandlims = {'default':(0,8), 'tremor':(0,5 ), 'beta':(0,6), 'gamma_motor':(0,0.3) }
+    LFPlimsBandPowBySubj[ 'S05' ]  = bandlims
 
     MEGsrclimsBandPowBySubj =  { 'S01':(0,400),  'S02':(0,600), 'S03':(0,700)  }
+
     MEGsrclimsBandPowBySubj =  { 'S01':(0,2.5e8),  'S02':(0,3e8), 'S03':(0,2e9)  }
     MEGsrclimsBandPowBySubj =  {  }
+    bandlims = {'default':(0,4e9), 'tremor':(0,6e9 ), 'beta':(0,2e8 ), 'gamma_motor':(0,1e8) }
+    MEGsrclimsBandPowBySubj['S03'] = bandlims
+    bandlims = {'default':(0,4e9), 'tremor':(0,8e8 ), 'beta':(0,4e8 ), 'gamma_motor':(0,1e8) }
+    MEGsrclimsBandPowBySubj['S02'] = bandlims
 
     EMGplotPar = {'shiftMean':True, 
             'axLims':EMGlimsBySubj, 'axLims_meanshifted':EMGlimsBySubj_meanshifted,
@@ -1988,21 +2010,22 @@ if __name__ == '__main__':
     #tremorDetect_customThr['S01'] = {'off':_off, 'on':_on }
 
     # left
-    _off = {'left': { 'EMG063_old': 200  , 'EMG064_old': 200   } }
-    _on  = {'left': { 'EMG063_old': 200  , 'EMG064_old': 200   } }
-    # right
-    _off.update( {'right': { 'EMG061_old': 200  , 'EMG062_old': 200   } } )
-    _on.update(  {'right': { 'EMG061_old': 200  , 'EMG062_old': 200   } } )
+    thrLeft = 200
+    _off = {'left': { 'EMG063_old': thrLeft  , 'EMG064_old': thrLeft   } }
+    _on  = {'left': { 'EMG063_old': thrLeft  , 'EMG064_old': thrLeft   } }
+    thrRight = 200
+    _off.update( {'right': { 'EMG061_old': thrRight  , 'EMG062_old': thrRight   } } )
+    _on.update(  {'right': { 'EMG061_old': thrRight  , 'EMG062_old': thrRight   } } )
     tremorDetect_customThr['S08'] = {'off':_off, 'on':_on }
     tremorDetect_customThr['S09'] = {'off':_off, 'on':_on }
 
     # left
-    thrLeft = 6
+    thrLeft = 4.5
     _off = {'left': { 'EMG063_old': thrLeft  , 'EMG064_old': thrLeft   } }
     _on  = {'left': { 'EMG063_old': thrLeft  , 'EMG064_old': thrLeft   } }
-    # right
-    _off.update( {'right': { 'EMG061_old': 15  , 'EMG062_old': 15   } } )
-    _on.update(  {'right': { 'EMG061_old': 15  , 'EMG062_old': 15   } } )
+    thrRight = 4.5
+    _off.update( {'right': { 'EMG061_old': thrRight  , 'EMG062_old': thrRight   } } )
+    _on.update(  {'right': { 'EMG061_old': thrRight  , 'EMG062_old': thrRight   } } )
     tremorDetect_customThr['S01'] = {'off':_off, 'on':_on }
 
     # left
@@ -2020,18 +2043,28 @@ if __name__ == '__main__':
     _off = {'left': { 'EMG063_old': thrLeft  , 'EMG064_old': thrLeft   } }
     _on  = {'left': { 'EMG063_old': thrLeft  , 'EMG064_old': thrLeft   } }
     # right
-    thrRight = 100
+    thrRight = 70
     _off.update( {'right': { 'EMG061_old': thrRight  , 'EMG062_old': thrRight   } } )
     _on.update(  {'right': { 'EMG061_old': thrRight  , 'EMG062_old': thrRight   } } )
     tremorDetect_customThr['S03'] = {'off':_off, 'on':_on }
 
+    # left
+    thrLeft = 100
+    _off = {'left': { 'EMG063_old': thrLeft  , 'EMG064_old': thrLeft   } }
+    _on  = {'left': { 'EMG063_old': thrLeft  , 'EMG064_old': thrLeft   } }
+    # right
+    thrRight = 200
+    _off.update( {'right': { 'EMG061_old': thrRight  , 'EMG062_old': thrRight   } } )
+    _on.update(  {'right': { 'EMG061_old': thrRight  , 'EMG062_old': thrRight   } } )
+    tremorDetect_customThr['S04'] = {'off':_off, 'on':_on }
+
     # recall that we have 1s window, sliding by 1s * overlap
     tremIntDef_convWidth = 10
-    tremIntDef_convThr   = 0.25
-    tremIntDef_incNbins   = 3
-    tremIntDef_percentthr=0.8
+    tremIntDef_convThr   = 0.3
+    tremIntDef_incNbins   = 1
+    tremIntDef_percentthr=0.7
     tremIntDef_minlen=1
-    tremIntDef_extFactorL=1.1
+    tremIntDef_extFactorL=1.5
     tremIntDef_extFactorR=0.12
 
 
