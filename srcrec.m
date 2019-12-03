@@ -1,4 +1,4 @@
-function output = srcrec(datall,hdmf,roi,bads,S,srs,mask)
+function output = srcrec(subjstr,datall,hdmf,roi,bads,S,srs,mask)
   %cd 
 
   do_load_only_ifnew   = 1;
@@ -23,46 +23,60 @@ function output = srcrec(datall,hdmf,roi,bads,S,srs,mask)
     %m1 = ft_read_atlas('HMAT_Right_M1.nii')  % goes deeper in the sulcus
 
 
-    if strcmp(roi{1} , "HirschPt2011,2013direct" ) == 1
-      % compute transformation matrix
-      vecinds = [1 200 3000 10000]
-      preX = srs.sourcemodel.pos;   % in each ROW -- x,y,z
-      preY = hdmf.mni_aligned_grid.pos;
-      % M * X = Y 
-      X0 = preX( vecinds, : );  %3x3
-      Y0 = preY( vecinds, : );  %3x3
-
-      X1 = transpose(X0);
-      Y1 = transpose(Y0);
-
-      %X = [X1; [0 0 0 1] ];
-      %Y = [Y1; [0 0 0 1] ];
-      X = [X1; [1 1 1 1] ];
-      Y = [Y1; [1 1 1 1] ];
-
-      d = det(Y);
-      if abs(d) < 1e-10
-        printf("Bad selection of vectors")
-        return
-      end
-
-      M = Y * inv(X);
+    if strcmp(roi{1} , "HirschPt2011,2013direct" ) == 1 || strcmp(roi{1} , "HirschPt2011" ) == 1 
 
       % places where cortico-muscular coherence (at trem freq) changed during tremor
       %
       %They were located in the primary motor cortex (MNI coordinates:
       % 60, 15, 50), premotor cortex (MNI coordinates:  30, 10, 70)
       %and posterior parietal cortex (MNI coordinates:  20, 75, 50).
-      coords_tremCohTremFreq_M1 = [ [ 60, 15, 50]; [-60,16,50] ];
-      coords_tremCohTremFreq_PMC = [ [ 30 10 70]; [ -30 10 70]  ];
-      coords_betaCohMax = [ [33 -22 57] ; [-33 -22 57] ] ;  % spatial maxima where where beta coherence between PreCG (putative M1) and LFPs are largest 
+      fn = strcat( subjstr, '_modcoord.mat');
+      if exist(fn,'file') > 0
+        sprintf('Loading %s',fn)
+        load(fn);
+      else
+        sprintf('CoordFile %s does not exist',fn)
+        load('coordsJan.mat')
 
-      coords_Jan_ = [coords_betaCohMax; coords_tremCohTremFreq_M1; coords_tremCohTremFreq_PMC]
-      coords_Jan_MNI =  transpose( coords_Jan_ ) / 10. ;
-      size(coords_Jan_MNI)
-      coords_Jan_MNI_t = [ coords_Jan_MNI; ones(1, size(coords_Jan_MNI, 2) )  ];
-      yy = M * coords_Jan_MNI_t;
-      coords_Jan_actual = transpose( yy(1:3,:)  );
+        % compute transformation matrix
+        vecinds = [1 200 3000 10000];
+        vecinds = [8157       16509          99       22893];
+        preX = srs.sourcemodel.pos;   % in each ROW -- x,y,z
+        preY = hdmf.mni_aligned_grid.pos;
+        % M * X = Y 
+        X0 = preX( vecinds, : );  %3x3
+        Y0 = preY( vecinds, : );  %3x3
+
+        X1 = transpose(X0);
+        Y1 = transpose(Y0);
+
+        %X = [X1; [0 0 0 1] ];
+        %Y = [Y1; [0 0 0 1] ];
+        X = [X1; [1 1 1 1] ];
+        Y = [Y1; [1 1 1 1] ];
+
+        d = det(Y);
+        if abs(d) < 1e-10
+          printf("Bad selection of vectors")
+          return
+        end
+
+        M = Y * inv(X);
+
+        %coords_tremCohTremFreq_M1 = [ [ 60, 15, 50]; [-60,16,50] ];
+        %coords_tremCohTremFreq_PMC = [ [ 30 10 70]; [ -30 10 70]  ];
+        %coords_betaCohMax = [ [33 -22 57] ; [-33 -22 57] ] ;  % spatial maxima where where beta coherence between PreCG (putative M1) and LFPs are largest 
+
+        %coords_Jan_ = [coords_betaCohMax; coords_tremCohTremFreq_M1; coords_tremCohTremFreq_PMC]
+        coords_Jan_ = coords;
+        coords_Jan_MNI =  transpose( coords_Jan_ ) ;
+        %size(coords_Jan_MNI)
+        coords_Jan_MNI_t = [ coords_Jan_MNI; ones(1, size(coords_Jan_MNI, 2) )  ];
+        yy = M * coords_Jan_MNI_t;
+        coords_Jan_actual = transpose( yy(1:3,:)  );
+      end
+
+
       srcpos = coords_Jan_actual
     else
       srcpos_ = hdmf.mni_aligned_grid.pos(mask,:);

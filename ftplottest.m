@@ -9,7 +9,7 @@ srsstd = load('~/soft/fieldtrip-20190716/template/sourcemodel/standard_sourcemod
 
 
 data_dir = getenv('DATA_DUSS');
-subjstr = 'S10';
+subjstr = 'S05';
 basename_head = sprintf('/headmodel_grid_%s.mat',subjstr);
 fname_head = strcat(data_dir, basename_head );
 hdmf = load(fname_head);   %hdmf.hdm, hdmf.mni_aligned_grid
@@ -63,9 +63,11 @@ S = scalemat(subjstr);
 
 
 % get matrix mapping MNI to my coords
-vecinds = [1 2 3]
-vecinds = [2 3 4]
-vecinds = [1 200 3000 10000]
+vecinds = [1 2 3];
+vecinds = [2 3 4];
+vecinds = [1 200 3000 10000];
+vecinds = randi( [1,  length( hdmf.mni_aligned_grid.pos ) ], 1, 4 );
+vecinds = [8157       16509          99       22893];
 preX = srsstd.sourcemodel.pos;   % in each ROW -- x,y,z
 preY = hdmf.mni_aligned_grid.pos;
 % M * X = Y 
@@ -91,18 +93,43 @@ M = Y * inv(X)
 tryinds = [7 13 567];
 ii = 2;
 dev = M * transpose( [ preX(tryinds(ii), :) 1] ) - transpose( [preY(tryinds(ii),:) 1] );
-dev(1:3)
+devv = dev(1:3)
 
 %dev = M * transpose( preX(tryinds(ii), :) ) - transpose( preY(tryinds(ii),:) )
 
 %return
 
+load('coordsJan.mat')
+%coords_Jan_MNI =  transpose( [ [33 -22 57] ; [-33 -22 57] ] ) / 10. ;
+coords_Jan_MNI = transpose( coords );
+coords_Jan_MNI_t = [ coords_Jan_MNI; ones( 1, size(coords_Jan_MNI,2) ) ];
+yy = M * coords_Jan_MNI_t ;
+coords_Jan_actual = transpose( yy(1:3,:)  );
 
+orig = [0 0 0];
 
-coords_Jan_MNI =  transpose( [ [33 -22 57] ; [-33 -22 57] ] ) / 10. ;
-coords_Jan_MNI_t = [ coords_Jan_MNI; [1 1] ];
-yy = M * coords_Jan_MNI_t   
-coords_Jan_actual = transpose( yy(1:3,:)  )
+tris = hdmf.hdm.bnd.tri;
+for i = 1:length(coords_Jan_actual)
+  dir = coords_Jan_actual(i,:);
+  for j = 1:length(tris)
+    tri_inds = tris(j,:);
+    vecs = hdmf.hdm.bnd.pos(tri_inds,:);
+    v1 = vecs(1,:); v2=vecs(2,:); v3=vecs(3,:);
+    [isec, t,u,v,xcoor] = TriangleRayIntersection(orig, dir, v1,v2,v3, ... 
+      'lineType','segment','fullReturn',1);
+    if isec
+      dir = dir * t * 0.95;
+      coords_Jan_actual(i,:) = dir;
+      [isec, t,u,v,xcoor] = TriangleRayIntersection(orig, dir, v1,v2,v3, ... 
+        'lineType','segment','fullReturn',1);
+      if isec
+        sprintf('coordInd %d, numTri %d, %d, dist %f',i,j,isec,t)
+      end
+    end
+  end
+end
+
+save( strcat(subjstr,'_modcoord'),  'coords_Jan_actual', 'labels' )
 
 
 cfg = [];

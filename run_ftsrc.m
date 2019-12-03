@@ -16,7 +16,7 @@ roi = {"Brodmann area 4","Brodmann area 6"};
 %roi = {"Brodmann area 4"};
 %roi = {"Brodmann area 6"};
 roi = {"HirschPt2011"};
-roi = {"HirschPt2011,2013direct"}
+%roi = {"HirschPt2011,2013direct"}
 save_srcrec          = 1;
 remove_bad_channels = 1;
 
@@ -97,7 +97,7 @@ for subji = 1:length(subjstrs)
           roicur = roi{roii};
 
           S = scalemat(subjstr);
-          source_data = srcrec(datall,hdmf,{roicur},bads,S,srs,mask);
+          source_data = srcrec(subjstr,datall,hdmf,{roicur},bads,S,srs,mask);
           source_data.roi = {roicur};
 
           if save_srcrec
