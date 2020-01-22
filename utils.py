@@ -401,8 +401,8 @@ def getBindsInside(bins, b1, b2, retBool = True):
         return np.where(binsbool)
 
 def filterArtifacts(k, chn, bins, retBool = True):
-    validbins_bool = [True] * len(bins)
-    if gv.artifact_intervals is not None and k in gv.artifact_intervals and chn in gv.artifact_intervals[k]:
+    validbins_bool = np.ones( len(bins) )
+    if gv.artifact_intervals is not None and (k in gv.artifact_intervals) and (chn in gv.artifact_intervals[k] ):
         artifact_intervals = gv.artifact_intervals[k][chn]
         for a,b in artifact_intervals:
             validbins_bool = np.logical_and( validbins_bool , np.logical_or(bins < a, bins > b)  ) 
@@ -786,7 +786,16 @@ def getBandpow(k,chn,fbname,time_start,time_end, mean_corr = False):
         #    validbininds = np.where( validbins_bool )[0]
         #    bins_b = bins_b[validbins_bool]
         #    Sxx_b = Sxx_b[validbininds]
-        validbins_bool = filterArtifacts(k,chn,bins_b)
+
+        spec_thrBadScaleo = 0.8
+        nonTaskTimeEnd = 300
+        validbins_bool0 = getBindsInside(bins_b, max(time_start,spec_thrBadScaleo), 
+                min(nonTaskTimeEnd-spec_thrBadScaleo, time_end), retBool = True) 
+
+        validbins_bool1 = filterArtifacts(k,chn,bins_b)
+        validbins_bool = np.logical_and( validbins_bool0, validbins_bool1)
+        #if chn.find('LFP') >= 0:
+        #    print('getBandpow: {}_ invalid bins {} of {}'.format( chn, len(bins_b) - np.sum(validbins_bool), len(bins_b) ) )
         bins_b = bins_b[validbins_bool]
         Sxx_b = Sxx_b[:,validbins_bool]
 

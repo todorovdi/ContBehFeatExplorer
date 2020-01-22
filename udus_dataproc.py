@@ -277,7 +277,7 @@ def getStatPerChan(time_start,time_end, glob_stats = None, singleRaw = None, mer
                         #st = stat_ch(k, f,b,spdata, chdat, chn, stat_leaflevel, time_start,time_end,
                         #        len(raws_from_subj), n_splits, gsarg )
 
-                    if glob_stats is None and len(raws) == 1 and not forceOneCore:
+                    if glob_stats is None and len(raws) == 1 and not forceOneCore_statch:
                         ncores = mpr.cpu_count()
                         p = mpr.Pool( min(len(args), ncores)  )
                         pr = p.map(stat_ch_proxy, args)
@@ -513,28 +513,26 @@ def stat_ch(rawname, f,b,spdata, chdat, chn, stat_leaflevel,
         r = utils.getBandpow(k,chn,fbname, time_start, time_end) 
         bins_b, bandpower = r
         assert not isinstance( bandpower[0], complex) 
-        bandpows[fbname] = bandpower 
+        bandpows[fbname] = bins_b, bandpower 
 
     # 3-48, 60-80
     st = {}
-    #if chn.find('EMG') >= 0: 
-    #    if tremrDet_clusterMultiFreq:
-    #        cnt = utils.getDataClusters( spdatat ) 
-    #        st['tremorfreq_clusters'] = cnt
-    #    else:
-    #        thrs = [0] * len(ft)
-    #        for freqi in range( len(ft) ):  # separately per frequency subband
-    #            #thr = calcSpecThr( spdatat[freqi,:]  )
-    #            cnt = utils.getDataClusters( spdatat[freqi,:] ) 
-    #            thr = np.mean(cnt)
+    if chn.find('EMG') >= 0 and useEMG_cluster: 
+        if tremrDet_clusterMultiFreq:
+            cnt = utils.getDataClusters( spdatat ) 
+            st['tremorfreq_clusters'] = cnt
+        else:
+            thrs = [0] * len(ft)
+            for freqi in range( len(ft) ):  # separately per frequency subband
+                #thr = calcSpecThr( spdatat[freqi,:]  )
+                cnt = utils.getDataClusters( spdatat[freqi,:] ) 
+                thr = np.mean(cnt)
 
-    #            m = tremorThrMult.get(subj,1.)  # maybe we have customized it a bit
-    #            thr *= m
-    #            thrs[freqi] = thr
+                m = tremorThrMult.get(subj,1.)  # maybe we have customized it a bit
+                thr *= m
+                thrs[freqi] = thr
 
-    #        st['thrPerFreq_trem'] = thrs
-    st['tremorfreq_clusters'] = np.zeros( (len(ft) , 2 ) ) 
-    st['thrPerFreq_trem'] = [0,0]
+            st['thrPerFreq_trem'] = thrs
 
     # get subspdata
     st['max_spec'] = 0
@@ -565,18 +563,20 @@ def stat_ch(rawname, f,b,spdata, chdat, chn, stat_leaflevel,
     mifNeeded('sum', 'mean_spec',  me )
     mifNeeded('sum', 'mean',  np.mean(chdat) / nraws_from_subj         )
 
-    mn_nout, mx_nout, me_nout = utils.calcNoutMMM_specgram(spdata, thr=nout_thr_spec )
+
+    validbins_bool = utils.getBindsInside(b, max(time_start,spec_thrBadScaleo), 
+            min(nonTaskTimeEnd-spec_thrBadScaleo, time_end), retBool = True) 
+
+    validbins_bool2 = utils.filterArtifacts(k,chn,b)
+    validbins_bool = np.logical_and( validbins_bool, validbins_bool2)
+
+    mn_nout, mx_nout, me_nout = utils.calcNoutMMM_specgram(spdata[:,validbins_bool], thr=nout_thr_spec )
     mifNeeded('sum', 'mean_spec_nout_full',  me_nout  / nraws_from_subj           )
 
     goodfreqs = f > spec_minfreq
     goodfreqs = np.logical_and( goodfreqs , 
             np.logical_or(f < spec_DCfreq - spec_DCoffs, f > spec_DCfreq + spec_DCoffs) )
 
-    validbins_bool = utils.getBindsInside(b, max(time_start,spec_thrBadScaleo), 
-            time_end, retBool = True) 
-
-    validbins_bool2 = utils.filterArtifacts(k,chn,b)
-    validbins_bool = np.logical_and( validbins_bool, validbins_bool2)
     #goodinds_bool  = utils.filterRareOutliers_specgram(spdata,retBool = True, thr=4e-3)
     #goodinds_bool = np.logical_and(validbins_bool, goodinds_bool)
     #spdata_good = spdata[:,goodinds_bool]
@@ -623,43 +623,43 @@ def stat_ch(rawname, f,b,spdata, chdat, chn, stat_leaflevel,
     mifNeeded('min', 'min3_spec_mc_nout', m1 )
     mifNeeded('max', 'max3_spec_mc_nout', m2 )
 
-    goodfreqs30 = np.logical_and(goodfreqs, f < 30) 
-    goodfreqs100 = np.logical_and(goodfreqs, f < 100)
+    #goodfreqs30 = np.logical_and(goodfreqs, f < 30) 
+    #goodfreqs100 = np.logical_and(goodfreqs, f < 100)
 
-    mn_nout30, mx_nout30, me_nout30, spdata_mc30  = gett(goodfreqs30, validbins_bool)
-    mn_nout100, mx_nout100, me_nout100, spdata_mc100  = gett(goodfreqs100, validbins_bool)
+    #mn_nout30, mx_nout30, me_nout30, spdata_mc30  = gett(goodfreqs30, validbins_bool)
+    #mn_nout100, mx_nout100, me_nout100, spdata_mc100  = gett(goodfreqs100, validbins_bool)
 
-    mifNeeded('sum', 'mean_spec_nout30',  me_nout30  / nraws_from_subj           )
-    mifNeeded('max', 'min_spec_nout30',  mx_nout30         )
-    mifNeeded('min', 'max_spec_nout30',  mn_nout30         )
-    mxn = ( mx_nout30 - me_nout30) / me_nout30
-    mnn = ( mn_nout30 - me_nout30) / me_nout30
-    mifNeeded('max', 'max_spec_mc_nout30', mxn )
-    mifNeeded('min', 'min_spec_mc_nout30', mnn )
+    #mifNeeded('sum', 'mean_spec_nout30',  me_nout30  / nraws_from_subj           )
+    #mifNeeded('max', 'min_spec_nout30',  mx_nout30         )
+    #mifNeeded('min', 'max_spec_nout30',  mn_nout30         )
+    #mxn = ( mx_nout30 - me_nout30) / me_nout30
+    #mnn = ( mn_nout30 - me_nout30) / me_nout30
+    #mifNeeded('max', 'max_spec_mc_nout30', mxn )
+    #mifNeeded('min', 'min_spec_mc_nout30', mnn )
 
-    mnn, mxn, men = utils.calcNoutMMM_specgram(spdata_mc30, thr=nout_thr_spec )
-    mifNeeded('max', 'max2_spec_mc_nout30', mxn )
-    mifNeeded('min', 'min2_spec_mc_nout30', mnn )
+    #mnn, mxn, men = utils.calcNoutMMM_specgram(spdata_mc30, thr=nout_thr_spec )
+    #mifNeeded('max', 'max2_spec_mc_nout30', mxn )
+    #mifNeeded('min', 'min2_spec_mc_nout30', mnn )
 
-    m1,m2 = utils.getSpecEffMax(spdata_mc30, thr=nout_thr_spec) 
-    mifNeeded('min', 'min3_spec_mc_nout30', m1 )
-    mifNeeded('max', 'max3_spec_mc_nout30', m2 )
+    #m1,m2 = utils.getSpecEffMax(spdata_mc30, thr=nout_thr_spec) 
+    #mifNeeded('min', 'min3_spec_mc_nout30', m1 )
+    #mifNeeded('max', 'max3_spec_mc_nout30', m2 )
 
-    mifNeeded('sum', 'mean_spec_nout100',  me_nout100  / nraws_from_subj           )
-    mifNeeded('max', 'min_spec_nout100',  mx_nout100         )
-    mifNeeded('min', 'max_spec_nout100',  mn_nout100         )
-    mxn = ( mx_nout100 - me_nout100) / me_nout100
-    mnn = ( mn_nout100 - me_nout100) / me_nout100
-    mifNeeded('max', 'max_spec_mc_nout100', mxn )
-    mifNeeded('min', 'min_spec_mc_nout100', mnn )
+    #mifNeeded('sum', 'mean_spec_nout100',  me_nout100  / nraws_from_subj           )
+    #mifNeeded('max', 'min_spec_nout100',  mx_nout100         )
+    #mifNeeded('min', 'max_spec_nout100',  mn_nout100         )
+    #mxn = ( mx_nout100 - me_nout100) / me_nout100
+    #mnn = ( mn_nout100 - me_nout100) / me_nout100
+    #mifNeeded('max', 'max_spec_mc_nout100', mxn )
+    #mifNeeded('min', 'min_spec_mc_nout100', mnn )
 
-    mnn, mxn, men = utils.calcNoutMMM_specgram(spdata_mc100, thr=nout_thr_spec )
-    mifNeeded('max', 'max2_spec_mc_nout100', mxn )
-    mifNeeded('min', 'min2_spec_mc_nout100', mnn )
+    #mnn, mxn, men = utils.calcNoutMMM_specgram(spdata_mc100, thr=nout_thr_spec )
+    #mifNeeded('max', 'max2_spec_mc_nout100', mxn )
+    #mifNeeded('min', 'min2_spec_mc_nout100', mnn )
 
-    m1,m2 = utils.getSpecEffMax(spdata_mc100, thr=nout_thr_spec) 
-    mifNeeded('min', 'min3_spec_mc_nout100', m1 )
-    mifNeeded('max', 'max3_spec_mc_nout100', m2 )
+    #m1,m2 = utils.getSpecEffMax(spdata_mc100, thr=nout_thr_spec) 
+    #mifNeeded('min', 'min3_spec_mc_nout100', m1 )
+    #mifNeeded('max', 'max3_spec_mc_nout100', m2 )
 
     def di(k,add=''):
         if chn!= 'LFPL12':
@@ -669,23 +669,25 @@ def stat_ch(rawname, f,b,spdata, chdat, chn, stat_leaflevel,
             t = max(t)
         print('{:12}: {:20}={:20}'.format(add, k,t )  )
 
-    di('mean_spec_nout',    'good freq only' )
-    di('max_spec_nout',     'good freq only')
-    di('max_spec_mc_nout',  'good freq only, arithm on orig max')
-    di('max2_spec_mc_nout', 'good freq only, calcNoutMMM on mc')
-    di('max3_spec_mc_nout', 'good freq only, EffMax on mc')
+    printLog = 0
+    if printLog:
+        di('mean_spec_nout',    'good freq only' )
+        di('max_spec_nout',     'good freq only')
+        di('max_spec_mc_nout',  'good freq only, arithm on orig max')
+        di('max2_spec_mc_nout', 'good freq only, calcNoutMMM on mc')
+        di('max3_spec_mc_nout', 'good freq only, EffMax on mc')
 
-    di('mean_spec_nout30',    'good freq only' )
-    di('max_spec_nout30',     'good freq only')
-    di('max_spec_mc_nout30',  'good freq only, arithm on orig max')
-    di('max2_spec_mc_nout30', 'good freq only, calcNoutMMM on mc')
-    di('max3_spec_mc_nout30', 'good freq only, EffMax on mc')
+        di('mean_spec_nout30',    'good freq only' )
+        di('max_spec_nout30',     'good freq only')
+        di('max_spec_mc_nout30',  'good freq only, arithm on orig max')
+        di('max2_spec_mc_nout30', 'good freq only, calcNoutMMM on mc')
+        di('max3_spec_mc_nout30', 'good freq only, EffMax on mc')
 
-    di('mean_spec_nout100',    'good freq only' )
-    di('max_spec_nout100',     'good freq only')
-    di('max_spec_mc_nout100',  'good freq only, arithm on orig max')
-    di('max2_spec_mc_nout100', 'good freq only, calcNoutMMM on mc')
-    di('max3_spec_mc_nout100', 'good freq only, EffMax on mc')
+        di('mean_spec_nout100',    'good freq only' )
+        di('max_spec_nout100',     'good freq only')
+        di('max_spec_mc_nout100',  'good freq only, arithm on orig max')
+        di('max2_spec_mc_nout100', 'good freq only, calcNoutMMM on mc')
+        di('max3_spec_mc_nout100', 'good freq only, EffMax on mc')
 
 
 
@@ -710,7 +712,7 @@ def stat_ch(rawname, f,b,spdata, chdat, chn, stat_leaflevel,
         s1normMeanDiv_L1 = '{}{}'. format(s0, 'meanDiv_L1' )
         s1normMeanDiv_L2 = '{}{}'. format(s0, 'meanDiv_L2' )
 
-        absval = bandpows[fbname]
+        bins_cbp, absval = bandpows[fbname]          # alredy only valid inds
         #s1mean = '{}_{}'.format('mean',s0)
         if s1max in st:
             st[s1max  ] = max( st[s1max], np.max(bpc ))
@@ -719,18 +721,22 @@ def stat_ch(rawname, f,b,spdata, chdat, chn, stat_leaflevel,
             st[s1max] = np.max(absval)
             st[s1min] = np.min(absval)
         
-        q = utils.getDataClusters_fromDistr(absval, n_splits=n_splits, 
-                clusterType='outmostPeaks', lbl = '{} {}'.format(chn,fbname))
 
-        if s1max_distr not in st:
-            st[s1max_distr] = q[1]
-            st[s1min_distr] = q[0]
-        else:
-            st[s1max_distr  ] = max( st[s1max_distr], q[1] )
-            st[s1min_distr] = min( st[s1min_distr], q[0] )
+        if stat_computeDistrMax:
+            q = utils.getDataClusters_fromDistr(absval, n_splits=n_splits, 
+                    clusterType='outmostPeaks', lbl = '{} {}'.format(chn,fbname))
+            if s1max_distr not in st:
+                st[s1max_distr] = q[1]
+                st[s1min_distr] = q[0]
+            else:
+                st[s1max_distr  ] = max( st[s1max_distr], q[1] )
+                st[s1min_distr] = min( st[s1min_distr], q[0] )
 
         mn,mx = utils.getSpecEffMax( absval , thr=nout_thr_bandpow)
+        #binBool0 = absval <= mx 
+        #binBool = np.logical_and( binBool0 , validbins_bool)
         binBool = absval <= mx 
+
         bininds = np.where( binBool )[0]
         me = np.mean( absval[bininds] )
         st[s1mean_nout] = me
@@ -743,7 +749,8 @@ def stat_ch(rawname, f,b,spdata, chdat, chn, stat_leaflevel,
         st[s1mc_min_nout] = mn_mc
         st[s1mc_max_nout] = mx_mc
 
-        duration = ( bins_b[-1] - bins_b[0] ) * ( len(bininds) / len(bins_b)  ) # take into account thrown away bins
+        # we don't want to check binBool, since artifacts can be long
+        duration = ( bins_b[-1] - bins_b[0] ) * ( np.sum(binBool) / len(bins_b)  ) # take into account thrown away bins
         if glob_stats is None:
             assert duration > (time_end - time_start) * 0.9
 
@@ -763,12 +770,19 @@ def stat_ch(rawname, f,b,spdata, chdat, chn, stat_leaflevel,
             st[s1normMeanDiv_L2] = np.sum( np.power(bpc2,2)  ) / duration
 
 
-            st[s1max_distr_pct  ] = st[s1max_distr] / glob_stats[s1max_distr] 
+            if stat_computeDistrMax:
+                st[s1max_distr_pct  ] = st[s1max_distr] / glob_stats[s1max_distr] 
             st[s1max_pct  ]      = st[s1max] / glob_stats[s1max]
             st[s1max_nout_pct  ] = st[s1max_nout] / glob_stats[s1max_nout]
         #st[s1mean] += np.mean(spdatat) / len(raws_from_subj)
 
     return st
+
+def stat_proxy( arg ):
+
+    t1,t2,rawname, gs,intind = arg
+    st = getStatPerChan(t1,t2,singleRaw = rawname, mergeTasks=False, glob_stats=gs )
+    return  rawname, intind, st
  
 def getStatsFromTremIntervals(intervalDict):
     '''
@@ -780,6 +794,7 @@ def getStatsFromTremIntervals(intervalDict):
     #intervalTypes =   [ 'pre', 'post', 'middle_full', 'no_tremor' ]  # ,'pre', 'post'
     stats = {}
 
+    args = []
     for rawname in intervalDict:
         if rawname not in raws:
             continue
@@ -791,9 +806,26 @@ def getStatsFromTremIntervals(intervalDict):
                 continue
 
             sind_str,medcond, task = getParamsFromRawname(rawname)
-            st = getStatPerChan(t1,t2,singleRaw = rawname, mergeTasks=False, glob_stats=gv.glob_stats )
-            statlist[intind] = st[sind_str][ medcond][ task]
+
+            args += [ (t1,t2,rawname, gv.glob_stats, intind) ]
+
+            #st = getStatPerChan(t1,t2,singleRaw = rawname, mergeTasks=False, glob_stats=gv.glob_stats )
+            #statlist[intind] = st[sind_str][ medcond][ task]
         stats[rawname] = statlist
+
+    if len(args) > 1 and (not statsInterval_forceOneCore):
+        ncores = mpr.cpu_count()
+        p = mpr.Pool( min(len(args), ncores)  )
+        pr = p.map(stat_proxy, args)
+        p.close()
+        p.join()
+
+        for k,intind,st in pr:
+            stats[k][intind] = st
+    else:
+        for arg in args:
+            k,intind,st = stat_proxy(arg)
+            stats[k][intind] = st 
 
     return stats
 
@@ -1138,6 +1170,7 @@ def plotSpectralData(plt,time_start = 0,time_end = 400, chanTypes_toshow = None,
         ncformal = 2   # don'a make sinlge row because it would ruin adressing
         gridspec_kw={'width_ratios': [1, 0.001]}
         wweff *= 10
+        wweff *= (plot_time_end / 300)
         wspace = 0.01
 
     fig, axs = plt.subplots(ncols = ncformal, nrows=nr, figsize= (wweff*nc,hh*nr), sharey='none',
@@ -1464,7 +1497,7 @@ def plotSpectralData(plt,time_start = 0,time_end = 400, chanTypes_toshow = None,
 
                         maxpow_band = 0
                         axcoordy = rowshift2
-                        title = '{}, {}, {} Freq bands powers'.format(k, modality, fbname)
+                        title = '{}, {}, Freq bands powers: {}'.format(k, modality, fbname)
                         #if modality.find( 'MEGsrc') >= 0 or modality.find('LFP') >= 0 :
                         #    if plot_MEGsrc_rowPerBand or plot_LFP_rowPerBand:   # assume MEGsrc are always the last to plot 
                         #        axcoordy += fbi
@@ -1545,20 +1578,21 @@ def plotSpectralData(plt,time_start = 0,time_end = 400, chanTypes_toshow = None,
 
 
                         # end of cycle over freq bands
-                        if modality.find('EMG') >= 0:
+                        if modality.find('EMG') >= 0 and useEMG_cluster:
                             # computed using k-means 
                             clust = gv.glob_stats[sind_str][medcond][task]['tremorfreq_clusters_allEMG'][chn]
-                            if tremrDet_clusterMultiMEG:
-                                for clusti in range(len(clust) ):
-                                    ax.axhline(y = clust[clusti], 
-                                            label = '{} clust{}'.format(chn,clusti) ,
-                                            #ls = plot_freqBandsLineStyle['tremor' ], 
-                                            ls='--', 
-                                            c=plot_colorsEMG[colorEMGind-1] )
-                            else:
-                                thrs = gv.glob_stats[sind_str][medcond][task][chn]['thrPerFreq_trem'] 
-                                ax.axhline(y = freqres * np.sum(thrs), 
-                                        label = '{} tremor thr'.format(chn) ,ls = ltype_tremorThr)
+                            if useEMG_cluster:
+                                if tremrDet_clusterMultiMEG:
+                                    for clusti in range(len(clust) ):
+                                        ax.axhline(y = clust[clusti], 
+                                                label = '{} clust{}'.format(chn,clusti) ,
+                                                #ls = plot_freqBandsLineStyle['tremor' ], 
+                                                ls='--', 
+                                                c=plot_colorsEMG[colorEMGind-1] )
+                                else:
+                                    thrs = gv.glob_stats[sind_str][medcond][task][chn]['thrPerFreq_trem'] 
+                                    ax.axhline(y = freqres * np.sum(thrs), 
+                                            label = '{} tremor thr'.format(chn) ,ls = ltype_tremorThr)
 
                             if tremorDetectUseCustomThr:
                                 try:
@@ -1718,10 +1752,10 @@ def plotSpectralData(plt,time_start = 0,time_end = 400, chanTypes_toshow = None,
                         ax.patch.set_facecolor(otherSideColor)
         print('Plotting {} finished'.format(k))
 
-        #if intervalType == 'entire' and nc == 1:
-        for ri in range(nr):
-            ax = axs[ri, colind]
-            ax.set_xticks( np.arange(plot_time_start, plot_time_end, 2 ) )
+        if nc == 1:
+            for ri in range(nr):
+                ax = axs[ri, colind]
+                ax.set_xticks( np.arange(plot_time_start, plot_time_end, 2 ) )
 
     if plot_setBandlims_naively:  # just take max over what is plotted
         # second pass to set right limits
@@ -2137,7 +2171,12 @@ if __name__ == '__main__':
     plot_time_end = 300
 
     time_start_forstats, time_end_forstats = 0,300
-    forceOneCore = 1
+    forceOneCore_statch = 0
+    statsInterval_forceOneCore = 1
+
+    nonTaskTimeEnd = 300
+    spec_time_end=nonTaskTimeEnd
+    stat_computeDistrMax = False
 
     import sys, getopt
     helpstr = 'Usage example\nudus_dataproc.py -i <comma sep list> -t <comma sep list> -m <comma sep list> -s'
@@ -2146,7 +2185,8 @@ if __name__ == '__main__':
         opts, args = getopt.getopt(effargv,"hi:t:m:r:s",
                 ["subjinds=","tasks=","medconds=","MEG_ROI=","singleraw",'rawname=',
                     'update_spec', 'update_stats', 'barplot', 'no_specload', 'skipPlot' ,
-                    "plot_time_start=", "plot_time_end=", "time_end_forstats=" ]) 
+                    "plot_time_start=", "plot_time_end=", "time_end_forstats=", 
+                    "spec_time_end="]) 
         print(sys.argv, opts, args)
 
         for opt, arg in opts:
@@ -2206,6 +2246,8 @@ if __name__ == '__main__':
                 plot_time_end = float(arg)
             elif opt == '--time_end_forstats': 
                 time_end_forstats = float(arg)
+            elif opt == '--spec_time_end': 
+                spec_time_end = float(arg)
             else:
                 print('Unk option {}, exiting'.format(opt) )
                 sys.exit(1)
@@ -2278,15 +2320,15 @@ if __name__ == '__main__':
     #c_parameter = 3
     #NFFT = 256  # for spectrograms
     NFFT = 256  # for spectrograms
-    nonTaskTimeEnd = 300
     specgram_scaling = 'spectrum'  # power, not normalized by freq band (i.e. not denisty)
     gv.gparams['specgram_scaling'] = specgram_scaling
  
     # which time range use to compute spectrograms
     spec_time_start=0 
-    spec_time_end=nonTaskTimeEnd
     spec_wavelet = "cmor1.5-1.5"     # first is width of the Gaussian, second is number of cycles
     spec_wavelet = "cmor1-1.5"    
+    #
+    #spec_wavelet = "cmor1.5-1.5"     # test
     spec_FToverlap = 0.75
     spec_specgramtype = 'lspopt'
     spec_specgramtype = 'scaleogram'
@@ -2329,7 +2371,8 @@ if __name__ == '__main__':
     plot_highPassLFP = True
 
     tremrDet_clusterMultiFreq = True
-    tremrDet_clusterMultiMEG = True
+    useEMG_cluster = False
+    tremrDet_clusterMultiMEG = useEMG_cluster
     gv.gparams['tremDet_useTremorBand'] = False
     gv.gparams['tremDet_timeStart'] = 0
     gv.gparams['tremDet_timeEnd'] = nonTaskTimeEnd
@@ -2969,12 +3012,13 @@ if __name__ == '__main__':
                         del s4p[0]
 
                     if intType.find('artifact') >= 0:
+                        print(rawname,intType, s4p)
                         r = re.match( "artifact_(.+)", intType ).groups()
                         chn = r[0]
                         if rawname in gv.artifact_intervals:
                             gv.artifact_intervals[rawname][chn] = s4p
                         else:
-                            gv.artifact_intervals = { rawname: { chn: s4p } }
+                            gv.artifact_intervals[ rawname] ={ chn: s4p } 
 
                     tremdat[intType] = s4p  # array of 2el lists
                     
@@ -2985,6 +3029,7 @@ if __name__ == '__main__':
                     #print(subjstr,medcond,task,kt,len(s4p), s4p)
 
     print('Found artifacts info: ',gv.artifact_intervals)
+    #sys.exit(0)
 
 
     doStatLoad = 0   #var for technical use
