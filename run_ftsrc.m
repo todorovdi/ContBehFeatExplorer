@@ -61,6 +61,7 @@ for subji = 1:length(subjstrs)
       typestr = tasks(taski);
 
       basename = sprintf('/%s_%s_%s_resample_raw.fif',subjstr,medstr,typestr);
+      %basename = sprintf('/%s_%s_%s_resample_maxwell_raw.fif',subjstr,medstr,typestr);
       fname = strcat(data_dir, basename );
       if isfile(fname)
         fprintf("%s\n",fname)

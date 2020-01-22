@@ -11,6 +11,7 @@ global gen_subj_info
 global subjs_analyzed
 
 global gparams
+global artifact_intervals      
 
 specgrams                           = None
 freqBands                           = None
@@ -23,5 +24,6 @@ plot_timeIntervalPerRaw             = None
 gen_subj_info                       = None
 subjs_analyzed                      = None
 srcs                                = None
+artifact_intervals                  = None
 
 gparams                              = {}

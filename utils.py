@@ -27,6 +27,8 @@ def processJanIntervals( intervalData, intvlen, loffset, roffset, time_end, mvtT
             return [( a,b, 'middle' ) ]
         if itype == 'middle_full':
             return [( a,b, 'middle_full' ) ]
+        #if itype == 'unk_activity_full':
+        #    return [( a,b, 'unk_activity_full' ) ]
 
         if a < loffset:  # if tremor starts at the recording beginning
             if itype == 'longToLeft':
@@ -63,7 +65,7 @@ def processJanIntervals( intervalData, intvlen, loffset, roffset, time_end, mvtT
             return []
         return [( a1,b1, intType ) ]
 
-    tipr = {}  # to plot all intervals
+    tipr = {}  # to plot all intervals, tipr[rawname] is a list of 2-el list with interval ends
     for k in intervalData:
         ti = intervalData[k]
         for side in ti:
@@ -73,37 +75,45 @@ def processJanIntervals( intervalData, intvlen, loffset, roffset, time_end, mvtT
             
             tipr[k] = [] 
             for mvtType in mvtTypes:
+                if mvtType not in tis:
+                    continue
+
                 ti2 = tis[mvtType]
-                if len(ti2) > 0:
-                    i = 0
+                if len(ti2) == 0:
+                    continue
 
-                    for p in ti2:
-                        intType = ''
-                        a,b = p 
-                        if a >= time_end:
-                            continue
+                #i = 0
+                for p in ti2:  # list of interval ends 
+                    intType = ''
+                    a,b = p 
+                    if a >= time_end:
+                        continue
 
-                        if mvtType == 'tremor':
-                            intsToAdd = []
-                            #if b - a >= intvlen * 3:
-                            intsToAdd += intervalParse(a,b, 'longToLeft')
-                            intsToAdd += intervalParse(a,b, 'middle')
-                            intsToAdd += intervalParse(a,b, 'middle_full')
-                            intsToAdd += intervalParse(a,b, 'longToRight')
-                            intsToAdd += intervalParse(a,b, 'pre')
-                            intsToAdd += intervalParse(a,b, 'post')
+                    if mvtType == 'tremor':
+                        intsToAdd = []
+                        #if b - a >= intvlen * 3:
+                        intsToAdd += intervalParse(a,b, 'longToLeft')
+                        intsToAdd += intervalParse(a,b, 'middle')
+                        intsToAdd += intervalParse(a,b, 'middle_full')
+                        intsToAdd += intervalParse(a,b, 'longToRight')
+                        intsToAdd += intervalParse(a,b, 'pre')
+                        intsToAdd += intervalParse(a,b, 'post')
 
 
-                        else:
-                            a = max(leftoffset, a)
-                            assert b > a
-                            b = min(b, a+ intvlen)
-                            intType = 'no_tremor'
-                            intsToAdd = [ (a,b,intType) ] 
+                    elif mvtType == 'unk_activity':
+                        intsToAdd = [ (a,b, 'unk_activity_full') ]
 
-                        tipr[k]  += intsToAdd
+                    elif mvtType == 'no_tremor':
+                        a = max(leftoffset, a)
+                        assert b > a
+                        b = min(b, a+ intvlen)
+                        intType = 'no_tremor'
+                        intsToAdd = [ (a,b,intType) ] 
+
+                    tipr[k]  += intsToAdd
             if len(tipr[k]) == 0:
-                tipr[k]  = [ (0,time_end,'unk') ] 
+                #tipr[k]  = [ (0,time_end,'unk') ] 
+                tipr[k]  = [ (0,time_end,'entire') ] 
 
     return tipr
 
@@ -382,6 +392,98 @@ def getTuples(sind_str):
     #chns = chnames_tuples[pair_ind]['EMG']
     return sides, indtuples, nametuples
 
+def getBindsInside(bins, b1, b2, retBool = True):
+    binsbool  = np.logical_and(bins >= b1 , bins <= b2)
+
+    if retBool:
+        return binsbool
+    else:
+        return np.where(binsbool)
+
+def filterArtifacts(k, chn, bins, retBool = True):
+    validbins_bool = [True] * len(bins)
+    if gv.artifact_intervals is not None and k in gv.artifact_intervals and chn in gv.artifact_intervals[k]:
+        artifact_intervals = gv.artifact_intervals[k][chn]
+        for a,b in artifact_intervals:
+            validbins_bool = np.logical_and( validbins_bool , np.logical_or(bins < a, bins > b)  ) 
+
+    if retBool:
+        return validbins_bool
+    else:
+        return np.where( validbins_bool )[0]
+
+def filterRareOutliers(dat, nbins=200, thr=0.01, takebin = 20, retBool = False): 
+    '''
+    for non-negative data, 1D only [so flatten explicitly before]
+    thr is amount of probability [=proportion of time] we throw away
+    returns indices of good bins
+    '''
+    assert dat.ndim == 1
+    mn,mx = getSpecEffMax(dat, nbins, thr, takebin)
+    binBool = dat <= mx 
+    if retBool:
+        return binBool
+    else:
+        bininds = np.where( binBool )[0]
+        return bininds
+
+#minNbins = 3
+#minNbins * sampleFreq
+
+def filterRareOutliers_specgram(Sxx, nbins=200, thr=0.01, takebin = 20, retBool = False):
+    ''' 
+    for non-negative data
+    removesOutliers per frequency
+    first dim is freqs 
+    '''
+    numfreqs = Sxx.shape[0]
+    binBool = [0] * numfreqs
+    ntimebins =  Sxx.shape[1] 
+    for freqi in range(numfreqs):
+        r = filterRareOutliers( Sxx[freqi], nbins, thr, takebin, retBool = True ) 
+        binBool[freqi] = r
+
+    binBoolRes = np.ones(ntimebins )
+    for freqi in range(numfreqs):
+        r = binBool[freqi]
+        binBoolRes = np.logical_and(r  , binBoolRes )
+        #ratio = np.sum(r) / ntimebins
+        #ratio2 = np.sum(binBoolRes) / ntimebins 
+        #print(ratio, ratio2)
+
+    indsRes = np.where(binBoolRes)[0]
+    ratio = np.sum(binBoolRes) / ntimebins
+    assert ratio  > 0.95, str(ratio)  # check that after intersecting we still have a lot of data 
+
+    if retBool:
+        return binBoolRes
+    else:
+        return indsRes
+
+
+def calcNoutMMM_specgram(Sxx, nbins=200, thr=0.01, takebin = 20, retBool = False):
+    ''' 
+    for non-negative data
+    removesOutliers per frequency
+    first dim is freqs 
+    '''
+    numfreqs = Sxx.shape[0]
+    binBool = [0] * numfreqs
+    ntimebins =  Sxx.shape[1] 
+    mn = np.zeros(numfreqs)
+    mx = np.zeros(numfreqs)
+    me = np.zeros(numfreqs)
+    for freqi in range(numfreqs):
+        dat = Sxx[freqi,:]
+        mn_,mx_ = getSpecEffMax(dat, nbins, thr, takebin)
+        #r = filterRareOutliers( Sxx[freqi, :], nbins, thr, takebin, retBool = True ) 
+        r =  dat <= mx_
+        mn[freqi] = mn_
+        mx[freqi] = mx_
+        me[freqi] = np.mean( dat[r] )
+
+    return mn,mx,me
+
 ############################# Tremor-related
 
 def getIntervals(bininds,width=100,thr=0.1, percentthr=0.8,inc=5, minlen=50, 
@@ -499,13 +601,13 @@ def findTremor(k,thrSpec = None, thrInt=0.13, width=40, percentthr=0.8, inc=1, m
                     else:
                         if tremrDet_clusterMultiMEG:
                             # thresholds per channel
-                            thr = glob_stats[sind_str][medcond]['thrPerCh_trem_allEMG'][chn]  # computed using k-means
+                            thr = gv.glob_stats[sind_str][medcond]['thrPerCh_trem_allEMG'][chn]  # computed using k-means
                             logcond = np.sum( bandspec, axis=0 ) > thr # sum over freq
                             pp = np.where( logcond )
                             #import pdb; pdb.set_trace()
                             trembini = pp[0]
                         else:
-                            thrPerFreq = glob_stats[sind_str][medcond][chn]['thrPerFreq_trem']  # computed using k-means
+                            thrPerFreq = gv.glob_stats[sind_str][medcond][chn]['thrPerFreq_trem']  # computed using k-means
                             assert len(thrPerFreq) == len(freq), '{}, {}'.format(thrPerFreq, freq)
                             logcond = bandspec[0,:] > thrPerFreq[0] 
                             for freqi in range(len(freq)): # indices of indices
@@ -655,16 +757,50 @@ def mergeTremorIntervals(intervals, mode='intersect'):
     return newintervals
 
 ############################# Spec helper funcions
-
-def getBandpow(k,chn,fbname,time_start,time_end):
+def getBandpow(k,chn,fbname,time_start,time_end, mean_corr = False):
+    '''
+    can return not all bins, because filters artifacts!
+    '''
     specgramsComputed = gv.specgrams[k]
     freqs, bins, Sxx = specgramsComputed[chn]
     fbs,fbe = gv.freqBands[fbname]
     r = getSubspec(freqs,bins,Sxx, fbs,fbe, 
             time_start,time_end)
 
+
     if r is not None:
         freqs_b, bins_b, Sxx_b = r
+
+        if isinstance(Sxx_b[0,0], complex):
+            Sxx_b = np.abs(Sxx_b)
+
+        #gv.gparams['artifacts'][k][chn]
+        #validbins_bool = np.ones( len(bins_b) )
+        #if gv.artifact_intervals is not None and k in gv.artifact_intervals and chn in gv.artifact_intervals[k]:
+        #    artifact_intervals = gv.artifact_intervals[k][chn]
+        #    validbins_bool_ = [True] * len(bins_b)
+        #    for a,b in artifact_intervals:
+        #        validbins_bool_ = np.logical_and( validbins , np.logical_or(bins_b < a, bins_b > b)  ) 
+
+        #    validbins_bool = validbins_bool_
+        #    validbininds = np.where( validbins_bool )[0]
+        #    bins_b = bins_b[validbins_bool]
+        #    Sxx_b = Sxx_b[validbininds]
+        validbins_bool = filterArtifacts(k,chn,bins_b)
+        bins_b = bins_b[validbins_bool]
+        Sxx_b = Sxx_b[:,validbins_bool]
+
+        if mean_corr:
+            #time_start_mecomp = max(time_start, b[0] + thrBadScaleo) 
+            #time_end_mecomp = min(time_end, b[-1] - thrBadScaleo)
+
+            #goodinds = filterRareOutliers_specgram(Sxx_b)
+            #goodinds = np.where( goodinds )[0]
+            #me = np.mean(Sxx_b[:,goodinds] , axis=1) 
+            sind_str, medcond, task = getParamsFromRawname(k)
+            me = gv.glob_stats[sind_str][medcond][task][chn][ 'mean_spec_nout_full' ]
+            me = me[ np.logical_and( freqs >= fbs, freqs <= fbe ) ]
+            Sxx_b =  ( Sxx_b -  me[:,None] ) / me[:,None]    # divide by mean
 
 
         if gv.gparams['specgram_scaling'] == 'psd':
@@ -672,9 +808,9 @@ def getBandpow(k,chn,fbname,time_start,time_end):
         else:
             freqres = 1.
 
-        if isinstance(Sxx_b[0,0], complex):
-            Sxx_b = np.abs(Sxx_b)
-        bandpower = np.sum(Sxx_b,axis=0) * freqres
+        # divide by number of freqs to later compare between different bands, which have dif width
+        bandpower = np.sum(Sxx_b,axis=0) * freqres / Sxx_b.shape[0]
+
         return bins_b, bandpower
     else:
         return None
@@ -720,11 +856,31 @@ def getSubspec(freqs,bins,Sxx,freq_min,freq_max,time_start=None,time_end=None):
 
 ##############################  general data sci
 
-def getSpecEffMax(dat, nbins=400, thr=0.05):
-    '''for log-distributed data'''
-    r, bins = np.histogram(dat.flatten(), bins = nbins, density=False)
-    cs = np.cumsum(r) 
-    cs = cs / cs[-1]
+def getSpecEffMax(dat, nbins=200, thr=0.01, takebin = 20):
+    '''for non-negative data'''
+
+    short = False
+    dat = dat.flatten() 
+    if len(dat) / 10 < nbins:
+        short = True
+        nbins = int(len(dat) / 10)
+    maxnbins = 1e4
+    checkval = 1
+    bins = None
+    cs = None
+
+    while checkval > 1 - thr and (short or nbins <= len(dat) / 10):
+        #print('nbins = ',nbins)
+        if bins is not None:
+            inds = np.where( dat < bins[takebin] )[0]  
+            dat = dat[inds]
+            
+        r, bins = np.histogram(dat, bins = nbins, density=False)
+        cs = np.cumsum(r) 
+        cs = cs / cs[-1]
+        checkval = cs[0] # prob accumulated in 1st bin
+        nbins *= 2
+
     first = np.where(cs > 1 - thr)[0][0]
     bincoord = bins[first]
 
