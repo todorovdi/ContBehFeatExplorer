@@ -428,12 +428,13 @@ def filterArtifacts(k, chn, bins, retBool = True):
     validbins_bool = np.ones( len(bins) )
     if gv.artifact_intervals is not None and (k in gv.artifact_intervals):
         if chn.find('MEGsrc') >= 0:
-            cond = 'MEG' in gv.artifact_intervals[k]
+            chneff = 'MEG'
         else:
-            cond = chn in gv.artifact_intervals[k]
+            chneff = chn
+        cond = ( chneff in gv.artifact_intervals[k])
 
         if cond:
-            artifact_intervals = gv.artifact_intervals[k][chn]
+            artifact_intervals = gv.artifact_intervals[k][chneff]
             for a,b in artifact_intervals:
                 validbins_bool = np.logical_and( validbins_bool , np.logical_or(bins < a, bins > b)  ) 
 
@@ -505,12 +506,14 @@ def calcNoutMMM_specgram(Sxx, nbins=200, thr=0.01, takebin = 20, retBool = False
     me = np.zeros(numfreqs)
     for freqi in range(numfreqs):
         dat = Sxx[freqi,:]
-        mn_,mx_ = getSpecEffMax(dat, nbins, thr, takebin)
-        #r = filterRareOutliers( Sxx[freqi, :], nbins, thr, takebin, retBool = True ) 
-        r =  dat <= mx_
-        mn[freqi] = mn_
-        mx[freqi] = mx_
-        me[freqi] = np.mean( dat[r] )
+        ret = getSpecEffMax(dat, nbins, thr, takebin) 
+        if ret is not None:
+            mn_,mx_ = ret
+            #r = filterRareOutliers( Sxx[freqi, :], nbins, thr, takebin, retBool = True ) 
+            r =  dat <= mx_
+            mn[freqi] = mn_
+            mx[freqi] = mx_
+            me[freqi] = np.mean( dat[r] )
 
     return mn,mx,me
 
@@ -800,6 +803,8 @@ def getBandpow(k,chn,fbname,time_start,time_end, mean_corr = False):
 
     if r is not None:
         freqs_b, bins_b, Sxx_b = r
+        if Sxx_b.size == 0:
+            return None
 
         if isinstance(Sxx_b[0,0], complex):
             Sxx_b = np.abs(Sxx_b)
@@ -907,6 +912,9 @@ def getSpecEffMax(dat, nbins=200, thr=0.01, takebin = 20):
     checkval = 1
     bins = None
     cs = None
+
+    if nbins == 0:
+        return None
 
     while checkval > 1 - thr and (short or nbins <= len(dat) / 10):
         #print('nbins = ',nbins)

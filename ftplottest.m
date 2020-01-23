@@ -9,7 +9,7 @@ srsstd = load('~/soft/fieldtrip-20190716/template/sourcemodel/standard_sourcemod
 
 
 data_dir = getenv('DATA_DUSS');
-subjstr = 'S05';
+subjstr = 'S10';
 basename_head = sprintf('/headmodel_grid_%s.mat',subjstr);
 fname_head = strcat(data_dir, basename_head );
 hdmf = load(fname_head);   %hdmf.hdm, hdmf.mni_aligned_grid
@@ -106,6 +106,9 @@ coords_Jan_MNI_t = [ coords_Jan_MNI; ones( 1, size(coords_Jan_MNI,2) ) ];
 yy = M * coords_Jan_MNI_t ;
 coords_Jan_actual = transpose( yy(1:3,:)  );
 
+coords_Jan_actual
+coords_Jan_actual_upd = coords_Jan_actual;
+
 orig = [0 0 0];
 
 tris = hdmf.hdm.bnd.tri;
@@ -117,9 +120,10 @@ for i = 1:length(coords_Jan_actual)
     v1 = vecs(1,:); v2=vecs(2,:); v3=vecs(3,:);
     [isec, t,u,v,xcoor] = TriangleRayIntersection(orig, dir, v1,v2,v3, ... 
       'lineType','segment','fullReturn',1);
-    if isec
+    if isec & t > 0.8 
+      sprintf('0_coordInd %d, numTri %d, %d, dist %f',i,j,isec,t)
       dir = dir * t * 0.95;
-      coords_Jan_actual(i,:) = dir;
+      coords_Jan_actual_upd(i,:) = dir;
       [isec, t,u,v,xcoor] = TriangleRayIntersection(orig, dir, v1,v2,v3, ... 
         'lineType','segment','fullReturn',1);
       if isec
@@ -129,6 +133,7 @@ for i = 1:length(coords_Jan_actual)
   end
 end
 
+coords_Jan_actual = coords_Jan_actual_upd
 save( strcat(subjstr,'_modcoord'),  'coords_Jan_actual', 'labels' )
 
 

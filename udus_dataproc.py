@@ -283,7 +283,7 @@ def getStatPerChan(time_start,time_end, glob_stats = None, singleRaw = None, mer
                         #st = stat_ch(k, f,b,spdata, chdat, chn, stat_leaflevel, time_start,time_end,
                         #        len(raws_from_subj), n_splits, gsarg )
 
-                    if glob_stats is None and len(raws) == 1 and not forceOneCore_statch:
+                    if glob_stats is None and len(raws) == 1 and not forceOneCore_globStats:
                         ncores = mpr.cpu_count()
                         p = mpr.Pool( min(len(args), ncores)  )
                         pr = p.map(stat_ch_proxy, args)
@@ -519,6 +519,8 @@ def stat_ch(rawname, f,b,spdata, chdat, chn, stat_leaflevel,
         r = utils.getBandpow(k,chn,fbname, time_start, time_end) 
         if r is not None:
             bins_b, bandpower = r
+            if bandpower.size == 0:
+                continue
             assert not isinstance( bandpower[0], complex) 
             bandpows[fbname] = bins_b, bandpower 
 
@@ -573,9 +575,16 @@ def stat_ch(rawname, f,b,spdata, chdat, chn, stat_leaflevel,
 
     validbins_bool = utils.getBindsInside(b, max(time_start,spec_thrBadScaleo), 
             min(nonTaskTimeEnd-spec_thrBadScaleo, time_end), retBool = True) 
+    if np.sum(validbins_bool ) == 0:
+        print ( 'WARNING stat_ch: No valid bins! {}:{} {}-{}'.format(rawname,chn, time_start,time_end ))
+        return { 'error':'no_valid_bins' }
 
     validbins_bool2 = utils.filterArtifacts(k,chn,b)
     validbins_bool = np.logical_and( validbins_bool, validbins_bool2)
+
+    if np.sum(validbins_bool ) == 0:
+        print ( 'WARNING stat_ch: No valid bins! {}:{} {}-{}'.format(rawname,chn, time_start,time_end ))
+        return { 'error':'no_valid_bins' }
 
     mn_nout, mx_nout, me_nout = utils.calcNoutMMM_specgram(spdata[:,validbins_bool], thr=nout_thr_spec )
     mifNeeded('sum', 'mean_spec_nout_full',  me_nout  / nraws_from_subj           )
@@ -1236,7 +1245,9 @@ def plotSpectralData(plt,time_start = 0,time_end = 400, chanTypes_toshow = None,
             maxBandpowPerRaw[k] = {}
 
         if tremor_intervals_use_merged:
-            tremorIntervals = tremIntervalMerged[k]
+            tremorIntervals = tremIntervalMerged.get(k, 
+                    { 'left': [ (plot_time_start,plot_time_end,'entire') ],
+                    'right': [ (plot_time_start,plot_time_end,'entire') ], } )
         else:
             tremorIntervals = tremIntervalPerRaw[k]
  
@@ -1879,6 +1890,8 @@ def removeBadIntervals(rawname ):
     '''
     remove pre and post that intersect tremor
     '''
+    if len(timeIntervalPerRaw_processed) == 0:
+        return []
     intervals = timeIntervalPerRaw_processed[rawname]
 
     ivalis = {}  # dict of indices of interval
@@ -2468,7 +2481,7 @@ if __name__ == '__main__':
     plot_time_end = 300
 
     time_start_forstats, time_end_forstats = 0,300
-    forceOneCore_statch = 0
+    forceOneCore_globStats     = 0
     statsInterval_forceOneCore = 0
 
     nonTaskTimeEnd = 300
@@ -2491,7 +2504,7 @@ if __name__ == '__main__':
                 ["subjinds=","tasks=","medconds=","MEG_ROI=","singleraw","rawname=",
                     "update_spec", "update_stats", "barplot", "no_specload", "skipPlot" ,
                     "plot_time_start=", "plot_time_end=", "time_end_forstats=", 
-                    "spec_time_end="]) 
+                    "spec_time_end=", "debug"]) 
         print(sys.argv, opts, args)
 
         for opt, arg in opts:
@@ -2554,6 +2567,9 @@ if __name__ == '__main__':
                 time_end_forstats = float(arg)
             elif opt == '--spec_time_end': 
                 spec_time_end = float(arg)
+            elif opt == '--debug': 
+                forceOneCore_globStats     = 1
+                statsInterval_forceOneCore = 1
             else:
                 print('Unk option {}, exiting'.format(opt) )
                 sys.exit(1)

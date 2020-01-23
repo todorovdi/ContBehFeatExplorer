@@ -225,6 +225,28 @@ S07_on_move
 *126.3-142.3 tremor [ there's beta increase around 127 that may be related to prev tremor episode, then I'd shift the start of the current one to 130 or so ]
 *280-
 
+S08_on_rest
+203-208 -- artifact?
+            "artifact_LFPR12":
+            {
+            },
+            "artifact_LFPR56":
+            {
+            },
+            "artifact_LFPR23":
+            {
+            },
+            "artifact_LFPR67":
+            {
+            },
+            "artifact_LFPR78":
+            {
+            },
+
+S09_off_rest
+tremor increases from zero to max (around 24s) and stays there until 189j
+
+
 S10_off_move [all MEG are bad]
 0-20 strange EMG bursts, perhaps not tremor
 *22.3-43 tremor
@@ -235,3 +257,6 @@ S10_off_move [all MEG are bad]
 158.3-228 strange EMG bursts, perhaps not tremor
 243.7-274 strange EMG bursts, perhaps not tremor
   prominent tremor band in LFPL01 almost all time
+
+S10_off_rest
+there is really strong activity during tremor
