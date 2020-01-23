@@ -177,7 +177,7 @@ def precomputeSpecgrams(raws,ks=None,NFFT=256, specgramoverlap=0.75,forceRecalc=
 #    return getStatPerChan(**argdict)
 
 ########  Gen stats across conditions
-def getStatPerChan(time_start,time_end, glob_stats = None, singleRaw = None, mergeTasks = False, modalities=None):
+def getStatPerChan(time_start,time_end, glob_stats = None, singleRaw = None, mergeTasks = False, modalities=None, datPrep = None):
     '''
     returns task independent
     stats = glob_stats[sind_str][medcond][chname]
@@ -195,6 +195,8 @@ def getStatPerChan(time_start,time_end, glob_stats = None, singleRaw = None, mer
         print('Starting computing glob stats for modalities {}, singleRaw {}, ({},{})'.
                 format(modalities, singleRaw,time_start,time_end) )
         subjs = gv.subjs_analyzed.keys()
+
+                
 
     res = {}
     for subj in subjs:   # over subjects 
@@ -230,15 +232,19 @@ def getStatPerChan(time_start,time_end, glob_stats = None, singleRaw = None, mer
                 for side in cht:
                     #chnames2 = chnames_tuples[side_ind]['LFP'] + chnames_tuples[side_ind]['EMG']
 
-                    chnames2 = []
-                    for modality in modalities:
-                        chnames2 += cht[side]['nametuples'][modality]
-                    #chnamesEMG = chnames_tuples[side_ind]['EMG']
+                    if datPrep is not None:
+                        chnames2, chdata = datPrep[singleRaw][side]
+                    else:
+                        chnames2 = []
+                        for modality in modalities:
+                            chnames2 += cht[side]['nametuples'][modality]
+                        #chnamesEMG = chnames_tuples[side_ind]['EMG']
 
-                    #chis = mne.pick_channels(chnames,include=chnames2, ordered=True )
-                    #ts,te = raw.time_as_index([time_start, time_end])
-                    #chdata, chtimes = raw[chis,ts:te]
-                    chdata, chtimes = utils.getData(k, chnames2 )
+                        #chis = mne.pick_channels(chnames,include=chnames2, ordered=True )
+                        #ts,te = raw.time_as_index([time_start, time_end])
+                        #chdata, chtimes = raw[chis,ts:te]
+
+                        chdata, chtimes = utils.getData(k, chnames2 )
 
                     specsTremorEMGcurSide = []
 
@@ -511,9 +517,10 @@ def stat_ch(rawname, f,b,spdata, chdat, chn, stat_leaflevel,
     fbnames = ['slow', 'tremor','beta', 'gamma_motor']
     for fbname in fbnames:
         r = utils.getBandpow(k,chn,fbname, time_start, time_end) 
-        bins_b, bandpower = r
-        assert not isinstance( bandpower[0], complex) 
-        bandpows[fbname] = bins_b, bandpower 
+        if r is not None:
+            bins_b, bandpower = r
+            assert not isinstance( bandpower[0], complex) 
+            bandpows[fbname] = bins_b, bandpower 
 
     # 3-48, 60-80
     st = {}
@@ -691,7 +698,7 @@ def stat_ch(rawname, f,b,spdata, chdat, chn, stat_leaflevel,
 
 
 
-    for fbname in fbnames:
+    for fbname in bandpows:
         s0 = '{}_bandpow_'.format(fbname)
         s1max = '{}{}'.    format(s0, 'max')
         s1min = '{}{}'.    format(s0, 'min')
@@ -780,8 +787,10 @@ def stat_ch(rawname, f,b,spdata, chdat, chn, stat_leaflevel,
 
 def stat_proxy( arg ):
 
-    t1,t2,rawname, gs,intind = arg
-    st = getStatPerChan(t1,t2,singleRaw = rawname, mergeTasks=False, glob_stats=gs )
+    t1,t2,rawname, gs,intind, itype, datPrep = arg
+
+    print('{}: starting {} No {} stats computation'.format(rawname, itype, intind) )
+    st = getStatPerChan(t1,t2,singleRaw = rawname, mergeTasks=False, glob_stats=gs, datPrep = datPrep )
     return  rawname, intind, st
  
 def getStatsFromTremIntervals(intervalDict):
@@ -789,8 +798,10 @@ def getStatsFromTremIntervals(intervalDict):
     time_start, time_end, intervalType = intervals [rawname][interval index]
     intervalType from  [ incPre,incPost,incBoth,middle, no_tremor ]
     '''
-    intervalTypes =   [ 'pre', 'post', 'incPre', 'incPost', 'incBoth', 'middle', 
-            'middle_full', 'no_tremor', 'entire', 'unk_activity_full' ]  # ,'pre', 'post' -- some are needed for barplot, some for naive vis
+    intervalTypes =   [ 'pre', 'post', 'initseg', 'endseg', 'incBoth',
+             'middle', 'middle_full', 'no_tremor', 'unk_activity_full' ]  # ,'pre', 'post' -- some are needed for barplot, some for naive vis
+
+    # 'incPre', 'incPost',  'entire'
     #intervalTypes =   [ 'pre', 'post', 'middle_full', 'no_tremor' ]  # ,'pre', 'post'
     stats = {}
 
@@ -805,9 +816,33 @@ def getStatsFromTremIntervals(intervalDict):
             if itype not in intervalTypes:
                 continue
 
+            isect =  getIntervalIntersection(t1,t2,time_start_forstats,time_end_forstats)
+            if len(isect) == 0 or isect[1] - isect[0] < 1:
+                continue
+
+            t1eff,t2eff = isect
+
             sind_str,medcond, task = getParamsFromRawname(rawname)
 
-            args += [ (t1,t2,rawname, gv.glob_stats, intind) ]
+            # extract data to put it to subprocess
+            modalities = ['LFP', 'EMG', 'EOG', 'MEGsrc']
+            dtcr = {}
+            cht = gv.gen_subj_info[ sind_str ]['chantuples']
+
+            #orderEMG, chinds_tuples, chnames_tuples = getTuples(sind_str)
+            #chnames2 = []
+            for side in cht:
+                chnames2 = []
+                for modality in modalities:
+                    chnames2 += cht[side]['nametuples'][modality]
+                chdata, chtimes = utils.getData(rawname, chnames2 )
+
+                dtcr[side] = chnames2, chdata 
+
+            datPrep = {}
+            datPrep[rawname] = dtcr
+
+            args += [ (t1eff,t2eff,rawname, gv.glob_stats, intind, itype, datPrep) ]
 
             #st = getStatPerChan(t1,t2,singleRaw = rawname, mergeTasks=False, glob_stats=gv.glob_stats )
             #statlist[intind] = st[sind_str][ medcond][ task]
@@ -1351,10 +1386,15 @@ def plotSpectralData(plt,time_start = 0,time_end = 400, chanTypes_toshow = None,
                 #print( 'PAIRSSSSSSSSSSS ',k,len(special_intervals), special_intervals )
                 for intervalType in plot_intervalColors:
                     clrfb = plot_intervalColors[intervalType]
-                    if intervalType not in special_intervals:
-                        continue
-                    for pa in special_intervals[intervalType]:
-                        ax.fill_between( list(pa) , ymin, ymax, facecolor=clrfb, alpha=plot_intFillAlpha)
+                    #if intervalType not in special_intervals:
+                    #    continue
+                    #for pa in special_intervals[intervalType]:
+                    #    ax.fill_between( list(pa) , ymin, ymax, facecolor=clrfb, alpha=plot_intFillAlpha)
+                    for pa in timeIntervalPerRaw_processed[k]:
+                        t1,t2,ity = pa
+                        if ity != intervalType:
+                            continue
+                        ax.fill_between( [t1,t2] , ymin, ymax, facecolor=clrfb, alpha=plot_intFillAlpha)
 
                 addstr = ''
                 if pars['shiftMean']:
@@ -1418,7 +1458,7 @@ def plotSpectralData(plt,time_start = 0,time_end = 400, chanTypes_toshow = None,
                             bins = chtimes
                         #from IPython.core.debugger import Tracer; debug_here = Tracer(); debug_here()
 
-                        print(chn,'plot cvl max', np.max(ys),'argmax ',np.argmax(ys) )
+                        #print(chn,'plot cvl max', np.max(ys),'argmax ',np.argmax(ys) )
                         ax.plot(bins, ys, label=chn)
                 
                 ymin = 0
@@ -1433,9 +1473,15 @@ def plotSpectralData(plt,time_start = 0,time_end = 400, chanTypes_toshow = None,
                 for intervalType in plot_intervalColors:
                     if intervalType not in special_intervals:
                         continue
-                    clrfb = plot_intervalColors[intervalType]
-                    for pa in special_intervals[intervalType]:
-                        ax.fill_between( list(pa) , ymin, ymax, facecolor=clrfb, alpha=plot_intFillAlpha)
+                    #clrfb = plot_intervalColors[intervalType]
+                    #for pa in special_intervals[intervalType]:
+                    #    ax.fill_between( list(pa) , ymin, ymax, facecolor=clrfb, alpha=plot_intFillAlpha)
+
+                    for pa in timeIntervalPerRaw_processed[k]:
+                        t1,t2,ity = pa
+                        if ity != intervalType:
+                            continue
+                        ax.fill_between( [t1,t2] , ymin, ymax, facecolor=clrfb, alpha=plot_intFillAlpha)
 
                 if side_body == gv.gen_subj_info[sind_str]['tremor_side']:
                     ax.patch.set_facecolor(mainSideColor)
@@ -1627,10 +1673,15 @@ def plotSpectralData(plt,time_start = 0,time_end = 400, chanTypes_toshow = None,
                         #special_intervals = tremIntervalMerged[k][side_body]
                         for intervalType in plot_intervalColors:
                             clrfb = plot_intervalColors[intervalType]
-                            if intervalType not in special_intervals:
-                                continue
-                            for pa in special_intervals[intervalType]:
-                                ax.fill_between( list(pa) , ymin, ymax, facecolor=clrfb, alpha=plot_intFillAlpha)
+                            #if intervalType not in special_intervals:
+                            #    continue
+                            #for pa in special_intervals[intervalType]:
+                            #    ax.fill_between( list(pa) , ymin, ymax, facecolor=clrfb, alpha=plot_intFillAlpha)
+                            for pa in timeIntervalPerRaw_processed[k]:
+                                t1,t2,ity = pa
+                                if ity != intervalType:
+                                    continue
+                                ax.fill_between( [t1,t2] , ymin, ymax, facecolor=clrfb, alpha=plot_intFillAlpha)
 
                         rowshift2 += 1
                     # end of cycle over freq bands
@@ -1813,27 +1864,76 @@ def plotSpectralData(plt,time_start = 0,time_end = 400, chanTypes_toshow = None,
     print('Plotting all finished')
 
 
+def getIntervalIntersection(a1,b1, a2, b2):
+    if b1 < a2:
+        return []
+    if a1 > b2:
+        return []
+    r =  [ max(a1,a2), min(b1,b2) ]
+    if r[1] - r[0] > 1e-2:
+        return r
+    else:
+        return []
 
-
-def makeBarPlot( ax, rawname, chname, legloc = None, printLog = False, xoffset = 0, axtop=None,
-        spaceBetweenGroups = 2):
-    intTypes = ['pre', 'post', 'middle_full', 'no_tremor', 'unk_activity_full' ]
-    statTypes = ['max_nout_pct', 'L1', 'L2', 'L05' ]
-    incCoef = {'max_nout_pct': 100 }  # to look normal on the plot
-
-    intType2col =  {'pre':'blue', 'post':'gold', 'middle_full':'red', 'no_tremor':'green',
-            'unk_activity_full': 'cyan' }
+def removeBadIntervals(rawname ):
+    '''
+    remove pre and post that intersect tremor
+    '''
     intervals = timeIntervalPerRaw_processed[rawname]
-    intervalStats = glob_stats_perint[rawname]
 
-    ivalis = {}
+    ivalis = {}  # dict of indices of interval
     for itype in intTypes:
         ivit = []
         for i,interval in enumerate(intervals):
             t1,t2,it = interval
             if it == itype:
                 ivit += [i]
-        ivalis[itype] = ivit
+        if len(ivit) > 0:
+            ivalis[itype] = ivit
+
+    tremIntInds = ivalis.get( 'middle_full', [] )
+    if len(tremIntInds) > 0:
+        for tii in tremIntInds:
+            t1,t2,it = intervals[tii]
+            for itype in ['pre','post']:
+                tiis = ivalis.get(itype, None)
+                if tiis is None:
+                    continue
+
+                indsToRemove = []
+                for tii2 in tiis:
+                    tt1,tt2,tit = intervals[tii2]
+                    isect = getIntervalIntersection(t1,t2,tt1,tt2)
+                    if len(isect) > 0:
+                        indsToRemove += [tii2]
+                        print(indsToRemove, isect, t1,t2,tt1,tt2)
+                        intervals[ tii2] = (tt1,tt2, tit+'_isecTrem' )
+                remainInds = list( set( tiis ) - set(indsToRemove) )
+                ivalis[itype] = remainInds
+
+    return intervals
+
+def makeBarPlot( ax, rawname, chname, legloc = None, printLog = False, xoffset = 0, axtop=None,
+        spaceBetweenGroups = 2, skipPlot = False, binwidth = 1):
+    #statTypes = ['max_nout_pct', 'L1', 'L2', 'L05' ]
+    statTypes = ['max_nout_pct', 'meanDiv_L1', 'meanDiv_L2', 'meanDiv_L05' ]
+    incCoef = {'max_nout_pct': 200 }  # to look normal on the plot
+
+    intervals = timeIntervalPerRaw_processed[rawname]
+    intervalStats = gv.glob_stats_perint[rawname]
+
+
+    ivalis = {}  # dict of indices of interval
+    for itype in intTypes:
+        ivit = []
+        for i,interval in enumerate(intervals):
+            t1,t2,it = interval
+            
+            if it == itype and not isinstance(intervalStats[i ], int) :
+                ivit += [i]
+        if len(ivit) > 0:
+            ivalis[itype] = ivit
+
 
 
     skipLegendMode = False
@@ -1845,31 +1945,51 @@ def makeBarPlot( ax, rawname, chname, legloc = None, printLog = False, xoffset =
     binnamesDict = {}
     bincoordsDict = {}
 
-    binwidth = 1
     totnum = 0
 
     modality = utils.chname2modality(chname)
 
+    #import pdb; pdb.set_trace()
+
+    sind_str,medcond,task = getParamsFromRawname(rawname)
     #find out how many bars we'll have in each group
     statNum = 0
     for iti,itype in enumerate(intTypes):
+        if itype not in ivalis:
+            continue
         inds = ivalis[itype]  
         if len(inds) == 0:
             continue
         for fbname in plot_freqBandNames_perModality[modality]:
             for statType in statTypes:
                 s0 = '{}_bandpow_{}'.format(fbname, statType)
-                pp = intervalStats[inds[0] ][chname]
-                if s0 not in pp:
-                    if printLog:
-                        print('{} is not in {}{}{}'.format(s0,chname,fbname,itype ) )
-                    continue
-                else:
-                    statNum += 1
+                
+                # if at least one of the indices of current type has this statistic
+                for ii in inds:
+                    intst = intervalStats[ii ]
+                    if isinstance(intst,int):
+                        continue
+
+                    pp = intervalStats[ii ] [sind_str][medcond][task]  [chname]
+                    if s0 not in pp:
+                        if printLog:
+                            print('{} is not in {}{}{}'.format(s0,chname,fbname,itype ) )
+                        continue
+                    else:
+                        statNum += 1
+
+                    break
         break
+
+    #print('makeBarPlot: ivalis = ',ivalis)
+    #print('makeBarPlot: statNum = ',statNum)
+    #print('makeBarPlot: intervalStats types = ',[type(kkk) for kkk in intervalStats] )
+    #printLog = 1
 
     iti = 0
     for itype in intTypes:
+        if itype not in ivalis:
+            continue
         inds = ivalis[itype]  
         if len(inds) == 0:
             continue
@@ -1886,12 +2006,30 @@ def makeBarPlot( ax, rawname, chname, legloc = None, printLog = False, xoffset =
             for statType in statTypes:
                 #gv.freqBands[modality]
                 s0 = '{}_bandpow_{}'.format(fbname, statType)
-                pp = intervalStats[inds[0] ][chname]
-                if s0 not in pp:
-                    if printLog:
-                        print('{} is not in {}{}{}'.format(s0,chname,fbname,itype ) )
+                
+
+                #import pdb; pdb.set_trace()
+                leaveLoop = True
+                vals = []
+                for i in inds:
+                    intst  = intervalStats[i] 
+                    if isinstance(intst,int):
+                        #print('ind {} is int, continue'.format(i) )
+                        continue
+
+                    prer = intst[sind_str][medcond][task] [chname]
+                    if s0 not in prer:
+                        if printLog:
+                            print('{} is not in {} itype {}'.format(s0,chname,itype ) )
+                        break
+                    
+                    r = intst[sind_str][medcond][task] [chname][s0]
+                    vals += [r]
+                    leaveLoop = False
+
+                if leaveLoop:
                     continue
-                vals = [ intervalStats[i][chname][s0] for i in inds]
+
                 coef = incCoef.get( statType, 1)
                 mn = np.mean(vals) * coef
                 std = np.std(vals) * coef
@@ -1922,6 +2060,9 @@ def makeBarPlot( ax, rawname, chname, legloc = None, printLog = False, xoffset =
     for iti,itype in enumerate(bincoordsDict):
 
         xscur = bincoordsDict[itype] 
+        if len(xscur) == 0:
+            continue
+
         for sti  in range(statNum):
             xscur[sti] += sti * spaceBetweenGroups 
 
@@ -1931,8 +2072,10 @@ def makeBarPlot( ax, rawname, chname, legloc = None, printLog = False, xoffset =
         if not skipLegendMode:
             lbl = itype
         # note that xscur already have offset in it
-        ax.bar( xscur, binvalsDict[itype], binwidth, 
-                yerr=binerrssDict[itype], label = lbl, color = intType2col[itype] )
+        #if ax is not None:
+        if not skipPlot:
+            ax.bar( xscur, binvalsDict[itype], binwidth, 
+                    yerr=binerrssDict[itype], label = lbl, color = intType2col[itype] )
 
 
     #ticklab = [0] * len(intTypes) * len(binnames)
@@ -1941,6 +2084,8 @@ def makeBarPlot( ax, rawname, chname, legloc = None, printLog = False, xoffset =
     #        ticklab[ len(intTypes) * bni + iti ] = binname
     #ax.set_xticklabels ( ticklab ,rotation=45)
 
+    if len(bincoordsDict ) == 0:
+        return 0, {}, {}, {}, {}
     xticks = list(bincoordsDict.values() )[0]
     xlabels = binnames
 
@@ -1960,12 +2105,18 @@ def makeBarPlot( ax, rawname, chname, legloc = None, printLog = False, xoffset =
         xlabels_existing = [item.get_text() for item in ax.get_xticklabels()]
         xlabels = xlabels_existing + binnames
 
+    #if ax is not None:
     ax.set_xticks( xticks  )
     ax.set_xticklabels(xlabels, rotation=90)
 
     if axtop is not None:
         xticksTop = np.array( [xoffset] )
-        xlabelsTop = [  utils.getMEGsrc_chname_nice( chname) ]
+
+        chlbl = chname
+        if gv.gen_subj_info[sind_str]['lfpchan_used_in_paper'] == chname:
+            chlbl = '* ' + chname
+
+        xlabelsTop = [  utils.getMEGsrc_chname_nice( chlbl) ]
     
         if xoffset > 0:
             xticksTop_existing = axtop.get_xticks()
@@ -1976,23 +2127,30 @@ def makeBarPlot( ax, rawname, chname, legloc = None, printLog = False, xoffset =
 
             #print(xticksTop, xlabelsTop)
 
-        axtop.set_xticks( xticksTop  )
-        axtop.set_xticklabels(xlabelsTop, rotation=0)
+        if axtop is not None:
+            axtop.set_xticks( xticksTop  )
+            axtop.set_xticklabels(xlabelsTop, rotation=0)
 
     #print(binnames)
                         
     if legloc is None:
         legloc = legendloc
-    if not skipLegendMode:
+    if not skipLegendMode and not skipPlot:
         ax.legend(loc=legloc,framealpha = legalpha)
 
 
-    ax.set_title('{} {}'.format(rawname, chname) )
+    if not skipPlot:
+        ax.set_title('{} {}'.format(rawname, chname) )
 
-    totbarwidth = np.max( xticks ) - xoffset
+    if len(xticks) == 0:
+        totbarwidth = xoffset
+    else:
+        totbarwidth = np.max( xticks ) - xoffset
     #totbarwidth = ( totnum + statNum  * spaceBetweenGroups ) 
+
+    return totbarwidth, binvalsDict, binnamesDict, binerrssDict, bincoordsDict
             
-    return totbarwidth
+    #return totbarwidth
 
     #nbins = len(binvals)
 
@@ -2013,22 +2171,32 @@ def makeBarPlot( ax, rawname, chname, legloc = None, printLog = False, xoffset =
     # better do in in jupyter
     # merge EMG channels somehow
 
-def plotMultiBarplots(modalities):
+def plotBarplotTable(modalities):
+    '''
+    plot for several raws, outer function
+    '''
     ww = 23
     hh = 10
 
-    nc = max( len(raws), 2)
+    nc = max( len(raws), 2) + 1
     nr = max( len(modalities) , 2)
     fig,axs = plt.subplots(nrows = nr, ncols = nc, figsize = (nc*ww, nr*hh) )
 
     pair_inds = [0,1]
     
-    spaceBetween = 10
+    spaceBetween = 15
 
-    for rawi, k in enumerate(raws ):
-        sind_str,medcond, task  = getParamsFromRawname(k)
-        for modi, modality in enumerate(modalities ):
-            ax = axs[modi, rawi]
+    hshift = 1
+
+
+    chansPerModPerRaw = {}
+    # 1 raw per modality, 1 column per raw, 0th column is average
+    for modi, modality in enumerate(modalities ):
+        chperraw = {}
+        for rawi, k in enumerate(raws ):
+            ax = axs[modi, hshift + rawi]
+
+            sind_str,medcond, task  = getParamsFromRawname(k)
 
             orderEMG, chinds_tuples, chnames_tuples = utils.getTuples(sind_str)
             if plot_onlyMainSide:
@@ -2038,11 +2206,33 @@ def plotMultiBarplots(modalities):
             for pi in pair_inds:
                 chnames += chnames_tuples[pi][modality]
             
+            chperraw[ k ] = chnames
+
             makeMutliBarPlot(ax, k, chnames, spaceBetween )
-            ax.legend( loc = (1.05,0) )
-            #ax.set_title(k)
+            ax.legend( loc = (1.01,0) )
+            ax.set_title('{}: {} barplot '.format(k,modality) )
+
+        chansPerModPerRaw[modality] = chperraw
+
+    ################ now first column
+    sind_str,medcond, task  = getParamsFromRawname( list(raws.keys() )[0] )
+    for modi, modality in enumerate(modalities ):
+        ax = axs[modi, 0]
+
+        #orderEMG, chinds_tuples, chnames_tuples = utils.getTuples(sind_str)
+        #if plot_onlyMainSide:
+        #    pair_inds = [orderEMG.index( gv.gen_subj_info[sind_str]['tremor_side'] ) ]
+
+        #chnames = []
+        #for pi in pair_inds:
+        #    chnames += chnames_tuples[pi][modality]
+
+        makeMutliBarPlot(ax, list(raws.keys() ), chansPerModPerRaw[modality], spaceBetween )
+        ax.legend( loc = (1.01,0) )
+        ax.set_title('Averge  {} barplot '.format(modality) )
 
 
+    ##############################
     ss = []
     subjstr = ''
     for k in ks:
@@ -2074,20 +2264,125 @@ def plotMultiBarplots(modalities):
     else:
         print('Skipping saving fig')
 
-def makeMutliBarPlot(ax, rawname, chnames, spaceBetween=14):
+def makeMutliBarPlot(ax, rawname, chnames, spaceBetween=14, binwidth=1, spaceBetweenGroups = 2):
     '''
     plot several chnames on one horizontal plot
     '''
-    shift = 0
+    
+    multirawMode = False
+    if isinstance(chnames , dict):
+        multirawMode = True
+        chperraw = chnames
+        rawnames = rawname
+    else:
+        rawnames = [rawname]
+        chperraw = {rawname:chnames}
 
-    ax2 = ax.twiny()
-    for chni, chname in enumerate(chnames):
-        if chni == 0:
-            legloc_ = None
-        else:
-            legloc_ = -1
-        shift += makeBarPlot(ax, rawname, chname, xoffset=shift, legloc = legloc_, axtop=ax2 ) #legloc= (1.1,0))
-        shift += spaceBetween
+    bardata = {}
+    alliTypes = set()
+    rawsAvailPeriType = {}
+    numStats = -1
+    for rawni,rawn in enumerate(rawnames):
+        shift =0
+        sind_str,medcond,task = getParamsFromRawname(rawn)
+
+        ax2 = ax.twiny()
+        ret = None
+        itypes = None
+        
+        sublist = []
+        for chni, chname in enumerate(chperraw[rawn] ):
+            if chni == 0 and rawni == 0:
+                legloc_ = None
+            else:
+                legloc_ = -1
+
+            if chname.find('LFP') >= 0 and plot_barplotOnlyFavLFP:
+                if not gv.gen_subj_info[sind_str]['lfpchan_used_in_paper'] == chname:
+                    continue
+                    
+            #print('shift is ',shift)
+            ret = makeBarPlot(ax, rawn, chname, xoffset=shift, legloc = legloc_, axtop=ax2,
+                    skipPlot = multirawMode , binwidth = binwidth, 
+                    spaceBetweenGroups = spaceBetweenGroups) #legloc= (1.1,0)) 
+
+            totbarwidth, binvalsDict, binnamesDict, binerrssDict, bincoordsDict = ret
+            shift += totbarwidth
+            shift += spaceBetween
+            
+            #print(binvalsDict)
+
+            numStats = len( list(binvalsDict.values() )[0] )
+            itypes = binvalsDict.keys()
+            #print(rawn,itypes)
+            
+            kk = list(binnamesDict.keys() )[0]
+            #print( rawn, chname, len(binnamesDict), len( bincoordsDict[kk] ), bincoordsDict[kk] )
+
+            sublist += [ (chname,totbarwidth, binvalsDict, binnamesDict, binerrssDict, bincoordsDict) ]
+
+        # look at last
+        bardata[rawn] = sublist
+        #alliTypes += set( binvalsDict.keys() )
+
+        for intType in itypes:
+            if intType not in rawsAvailPeriType:
+                rawsAvailPeriType[intType] = [ rawn ]
+            else:
+                rawsAvailPeriType[intType] += [ rawn ]
+    
+    if multirawMode:
+        valsPerItype = {}
+        labels = []
+        labelset = False
+        for intType in rawsAvailPeriType:
+            ra = rawsAvailPeriType[intType]
+
+            ll = len(list(chperraw.values() )[0] )
+            vpi =  np.zeros( (len(ra) ,numStats * ll )  )
+            means = np.zeros( numStats * ll) 
+            errs  = np.zeros( numStats * ll)
+            xs = np.zeros( numStats * ll)
+            for rawni,rawn in enumerate(ra):
+                sublist = bardata[rawn]
+                for ii,sdcn in enumerate(sublist):
+                    #ii = chperraw[rawn].index(chname)
+                    #sdcn = subdict[chname]
+                    chname, totbarwidth, binvalsDict, binnamesDict, binerrssDict, bincoordsDict = sdcn
+                    #print('sublist',binvalsDict[intType] ) 
+                    #print(vpi[rawni,ii * numStats + np.arange( numStats) ])
+                    vpi[rawni,ii * numStats + np.arange( numStats) ] = binvalsDict[intType]
+
+                    xs[ii * numStats + np.arange( numStats)] = bincoordsDict[intType]
+                    
+                    #print(ii,chname)
+                #vals = binvalsDict[intType]
+                #vpi = np.vstack( (vpi, vals) )
+
+                #labels = list( binnamesDict[intType] )[0]
+
+            valsPerItype[intType] = vpi
+            #print(vpi.shape)
+
+            means = np.mean( vpi, axis=0)
+            errs = np.std( vpi, axis=0)
+            #means +=  np.array(vals)     # binvalsDict[intType] is a list 
+            #means /= numStats
+
+            if not labelset:
+                lbl = intType
+            else:
+                lbl = None
+            ax.bar( xs, means, binwidth, 
+                    yerr=errs, label = lbl, color = intType2col[intType] )
+            #labelset = True
+            #print('xs',xs)
+
+            #ax2 = ax.twiny()
+            #xlabels_existing = [item.get_text() for item in ax.get_xticklabels()]
+
+        legloc = legendloc
+        ax.legend(loc=legloc,framealpha = legalpha)
         
 
 import globvars as gv
@@ -2155,6 +2450,8 @@ if __name__ == '__main__':
     #tasks = ['rest', 'move', 'hold']
     #medconds = ['off', 'on']
 
+    plot_barplotOnlyFavLFP = 0
+
     timeIntervalsFromTremor = True
     rawnameList_fromCMDarg = False
 
@@ -2172,19 +2469,27 @@ if __name__ == '__main__':
 
     time_start_forstats, time_end_forstats = 0,300
     forceOneCore_statch = 0
-    statsInterval_forceOneCore = 1
+    statsInterval_forceOneCore = 0
 
     nonTaskTimeEnd = 300
     spec_time_end=nonTaskTimeEnd
     stat_computeDistrMax = False
 
+    singleRawMode = False
+    intTypes = ['pre', 'post', 'initseg', 'endseg', 'middle_full', 'no_tremor', 'unk_activity_full' ]
+    intType2col =  {'pre':'blue', 'post':'gold', 'middle_full':'red', 'no_tremor':'green',
+            'unk_activity_full': 'cyan', 'initseg': 'teal', 'endseg':'blueviolet' }
+
     import sys, getopt
     helpstr = 'Usage example\nudus_dataproc.py -i <comma sep list> -t <comma sep list> -m <comma sep list> -s'
     try:
         effargv = sys.argv[1:]  # to skip first
+        if sys.argv[0].find('ipykernel_launcher') >= 0:
+            effargv = sys.argv[3:]  # to skip first three
+
         opts, args = getopt.getopt(effargv,"hi:t:m:r:s",
-                ["subjinds=","tasks=","medconds=","MEG_ROI=","singleraw",'rawname=',
-                    'update_spec', 'update_stats', 'barplot', 'no_specload', 'skipPlot' ,
+                ["subjinds=","tasks=","medconds=","MEG_ROI=","singleraw","rawname=",
+                    "update_spec", "update_stats", "barplot", "no_specload", "skipPlot" ,
                     "plot_time_start=", "plot_time_end=", "time_end_forstats=", 
                     "spec_time_end="]) 
         print(sys.argv, opts, args)
@@ -2203,7 +2508,8 @@ if __name__ == '__main__':
             elif opt in ("-r", "--MEG_ROI"):
                 MEGsrc_roi = arg.split(',')
             elif opt in ("-s", "--singleraw"):
-                timeIntervalsFromTremor = False
+                #timeIntervalsFromTremor = False
+                singleRawMode = True
             elif opt == '--rawname':
                 fnames_noext = arg.split(',') 
                 rawnameList_fromCMDarg = True
@@ -2227,7 +2533,7 @@ if __name__ == '__main__':
                 #flag = int(arg)
                 #if flag:
                 save_stats = 1
-                save_stats_onlyIfNotExists = 0
+                save_stats_onlyIfNotExists = False
                 load_stats = 0
                 #else:
                 #    save_stats = 1
@@ -2252,9 +2558,10 @@ if __name__ == '__main__':
                 print('Unk option {}, exiting'.format(opt) )
                 sys.exit(1)
               
-    except (ValueError, getopt.GetoptError): 
-        print('Error in argument parsing!', helpstr) 
-        print('Putting hardcoded vals')
+    except (ValueError, getopt.GetoptError) as e: 
+        print('Error in argument parsing, exiting!', helpstr,str(e)) 
+        #print('Putting hardcoded vals')
+        sys.exit(0)
 
 
     #if plot_onlyMultiBarplot:
@@ -2327,6 +2634,7 @@ if __name__ == '__main__':
     spec_time_start=0 
     spec_wavelet = "cmor1.5-1.5"     # first is width of the Gaussian, second is number of cycles
     spec_wavelet = "cmor1-1.5"    
+    spec_wavelet = "cmor1-2"    
     #
     #spec_wavelet = "cmor1.5-1.5"     # test
     spec_FToverlap = 0.75
@@ -2340,7 +2648,7 @@ if __name__ == '__main__':
     spec_cwtscales = 2 + (np.logspace(0.0, 1, 25,base=base) - 1 ) * 400/base;
     spec_minfreq = 3
     spec_minfreq = 3
-    spec_DCoffs = 5
+    spec_DCoffs = 3
     spec_DCfreq = 50
     spec_thrBadScaleo = 0.8
 
@@ -2623,7 +2931,7 @@ if __name__ == '__main__':
     print('Filenames to be read ',fnames_noext)
 
 
-    if not timeIntervalsFromTremor:
+    if singleRawMode:
         assert len(fnames_noext) == 1, 'more than one raw cannot be used with singleRaw mode'
 
     srcPerRawname = {}
@@ -2872,6 +3180,7 @@ if __name__ == '__main__':
                     if not (saveSpecgrams_skipExist and os.path.exists(specgramFname) ):
                         np.savez(specgramFname, gv.specgrams)
         else:
+            no_needforspec = (plot_onlyMultiBarplot and load_stats)
             gv.specgrams = {}
             for k in raws:
                 sind_str,medcond,task = getParamsFromRawname(k)
@@ -2881,11 +3190,11 @@ if __name__ == '__main__':
                         len(MEGsrc_names_toshow  ), spec_specgramtype  )
                 #specgramFname = 'specgrams_1,2,3.npz'
                 specgramFname = os.path.join(data_dir, specgramFname)
-                if loadSpecgrams and os.path.exists(specgramFname) :
+                if loadSpecgrams and (not no_needforspec) and os.path.exists(specgramFname) :
                     print('Loading specgrams from ',specgramFname)
                     specgramscur = np.load(specgramFname, allow_pickle=True)['arr_0'][()]
                     gv.specgrams.update( specgramscur   )
-                elif not plot_onlyMultiBarplot:  #if yes, we don't apriory need specgrams, only stats
+                elif not no_needforspec and not loadSpecgrams:  #if yes, we don't apriory need specgrams, only stats
                     tmp = { k: raws[k] }
                     specur  = precomputeSpecgrams(tmp,NFFT=NFFT,specgramoverlap=spec_FToverlap)
                     gv.specgrams.update( specur   )
@@ -2936,7 +3245,7 @@ if __name__ == '__main__':
             'gamma_motor':motorGammaBand, 'slow':slowBand }
     #plot_freqBandNames_perModality = {'EMG': ['tremor' ], 'LFP': ['tremor', 'beta','gamma_motor'], 
     #        'MEGsrc':['tremor','beta', 'gamma_motor' ], 'EOG':['lowgamma'] }
-    plot_freqBandNames_perModality = {'EMG': ['tremor' ,'slow' ], 'LFP': ['tremor', 'beta', 'gamma_motor'], 
+    plot_freqBandNames_perModality = {'EMG': ['tremor' ], 'LFP': [ 'beta', 'gamma_motor'], 
             'MEGsrc':['tremor','beta', 'gamma_motor' ], 'EOG':['lowgamma'] }
     #plot_freqBandsLineStyle = {'tremor':'-', 'beta':'--', 'lowgamma':':', 'gamma_motor':':', 'slow':'-'  }
     plot_freqBandsLineStyle = {'tremor':'-', 'beta':'-', 'lowgamma':'-', 'gamma_motor':'-', 'slow':'-'  }
@@ -2953,7 +3262,8 @@ if __name__ == '__main__':
     #plot_setBandlims_naively = True
     plot_setBandlims_naively = False  # use stats for bandlims
 
-    plot_intervalColors = { 'tremor':'red',  'unk_activity':'yellow' }
+    plot_intervalColors = { 'middle_full':'red', 'tremor':'red',  'unk_activity':'yellow', 
+            'unk_activity_full':'yellow', 'post':'cyan', 'pre':'skyblue' }
     plot_intFillAlpha = 0.14
 
     #cmap = 'hot'
@@ -2979,6 +3289,8 @@ if __name__ == '__main__':
             for task in ss:
                 sss = ss[task]
                 rawname = getRawname(subjstr,medcond,task )
+                if rawname not in raws:
+                    continue
                 tremdat = {}
                 for intType in sss: # sss has keys -- interval types
                     s4 = sss[intType]
@@ -3038,7 +3350,7 @@ if __name__ == '__main__':
     except (NameError, AttributeError):
         if load_stats:
             try:
-                glob_stats_perint = {}
+                gv.glob_stats_perint = {}
                 gv.glob_stats = {}
                 timeIntervalPerRaw_processed = {}
                 for k in raws:
@@ -3048,7 +3360,7 @@ if __name__ == '__main__':
                     f = np.load(fn, allow_pickle=1)
 
                     assert f['rawname'] == k
-                    glob_stats_perint[k] = f['glob_stats_perint'][()]
+                    gv.glob_stats_perint[k] = f['glob_stats_perint'][()]
                     timeIntervalPerRaw_processed[k] = f['timeIntervalPerRaw_processed'][()]
                     if sind_str not in gv.glob_stats:
                         gv.glob_stats[sind_str] = {}
@@ -3062,7 +3374,7 @@ if __name__ == '__main__':
             except FileNotFoundError:
                 doStatLoad = 1
                 gv.glob_stats = {}
-                del glob_stats_perint
+                gv.glob_stats_perint = None
                 del timeIntervalPerRaw_processed
 
             #f = np.load(stats_fname, allow_pickle=1)
@@ -3080,6 +3392,7 @@ if __name__ == '__main__':
                 time_end_forstats)  # subj,channame, keys [! NO rawname!]
 
     ##############   find tremor intercals in all subjects and raws 
+    #if False:
     reuseExistingTremorInterval = False
     recalcTrem = 0
     try: 
@@ -3112,29 +3425,37 @@ if __name__ == '__main__':
     plotTremNegOffset = 2.
     plotTremPosOffset = 2.
     maxPlotLen = 6
+    addIntLenStat = 3
     longToLeft = True
     if timeIntervalsFromTremor:
         mvtTypes = ['tremor', 'no_tremor', 'unk_activity']
         timeIntervalPerRaw_processed = utils.processJanIntervals( tremIntervalJan, 
-                maxPlotLen, plotTremNegOffset, plotTremPosOffset, plot_time_end, mvtTypes=mvtTypes)
+                maxPlotLen, addIntLenStat, plotTremNegOffset, plotTremPosOffset, plot_time_end, mvtTypes=mvtTypes)
         # [rawname][interval index]
     else:
         timeIntervalPerRaw_processed = {}
         for k in raws:
             timeIntervalPerRaw_processed[k] = [ (plot_time_start, plot_time_end, 'entire') ]
+    #import pdb; pdb.set_trace()
 
     try:
-        glob_stats_perint
+        gv.glob_stats_perint.keys()
     except (NameError, AttributeError):
-        glob_stats_perint = getStatsFromTremIntervals(timeIntervalPerRaw_processed)
+        print('Computing interval stats!')
+        for k in raws:
+            ivals = removeBadIntervals(k)
+            timeIntervalPerRaw_processed[ k ] =ivals  # maybe not necessary but just in case
+
+        gv.glob_stats_perint = getStatsFromTremIntervals(timeIntervalPerRaw_processed)
     else:
         print('----- Using previously computed interval stats!')
     # [raw] -- list of 3-tuples
 
     # I want to make a copy where pre and post are not present (for plotting), but gather stats for all intervals
     plot_timeIntervalPerRaw = {}
-    if timeIntervalsFromTremor:
-        itypesExcludeFromPlotting =  ['pre', 'post', 'middle_full', 'entire']
+    if timeIntervalsFromTremor and not singleRawMode:
+        itypesExcludeFromPlotting =  ['pre', 'post', 'initseg', 'endseg', 'middle_full', 'entire']
+        itypesExcludeFromPlotting =  ['initseg', 'endseg', 'middle_full', 'entire']
         for k in timeIntervalPerRaw_processed:
             intervals = timeIntervalPerRaw_processed[k]
             res = []
@@ -3149,13 +3470,13 @@ if __name__ == '__main__':
             plot_timeIntervalPerRaw[k] = [ (plot_time_start, plot_time_end, 'entire') ]
 
     if save_stats:
-        for k in glob_stats_perint:
+        for k in gv.glob_stats_perint:
             sind_str,medcond,task = getParamsFromRawname(k)
             fn = stats_basefname + '_{}.npz'.format(k)
             fn = os.path.join(data_dir, fn)
             if not save_stats_onlyIfNotExists or  (not os.path.exists(fn) ):
                 gs = gv.glob_stats[sind_str][medcond][task]
-                gspi = glob_stats_perint[k]
+                gspi = gv.glob_stats_perint[k]
                 tirp = timeIntervalPerRaw_processed[k]
 
                 np.savez(fn , glob_stats_perint=gspi, 
@@ -3225,6 +3546,7 @@ if __name__ == '__main__':
                     chanTypes_toshow = chanTypes_toshow ) 
         else:
             plot_multibar_modalities = ['LFP', 'MEGsrc' ]
-            plotMultiBarplots(plot_multibar_modalities)
+            #cleanIntervals( )
+            plotBarplotTable(plot_multibar_modalities)
 
 

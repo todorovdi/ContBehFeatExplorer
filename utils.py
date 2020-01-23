@@ -5,17 +5,17 @@ import re
 import globvars as gv
 import scipy.signal as sig
 
-def processJanIntervals( intervalData, intvlen, loffset, roffset, time_end, mvtTypes = ['tremor'], leftoffset = 0.2  ):
+def processJanIntervals( intervalData, intvlen, intvlenStats, loffset, roffset, time_end, mvtTypes = ['tremor'], leftoffset = 0.2  ):
     '''
      intervalData -- dict of dicts, each subdict has 'tremor' and 'nontremor' -- list of 2-el lists
     '''
 
       # in sec. Don't want the interval to start with recording (there are artifacts)
-    def intervalParse(a,b, itype = 'longToLeft' ):
+    def intervalParse(a,b, itype = 'incPre' ):
         #if a <= loffset / 2:   # if a is close to the recoding beginning
         #    intType = 'incPost'
         #else: 
-        #    if itype = 'longToLeft':
+        #    if itype = 'incPre':
         #        intType = 'incPre'
         #    else:
         #        intType = 'incPost'
@@ -31,30 +31,40 @@ def processJanIntervals( intervalData, intvlen, loffset, roffset, time_end, mvtT
         #    return [( a,b, 'unk_activity_full' ) ]
 
         if a < loffset:  # if tremor starts at the recording beginning
-            if itype == 'longToLeft':
+            if itype == 'incPre':
                 return []
         elif time_end - b < roffset:  #if tremor ends at the recording end
-            if itype == 'longToRight':
+            if itype == 'incPost':
                 return []
 
         # now if the tremor is really long we can extract 3 plots from the same tremor interval
 
-        if itype == 'longToLeft':
+        if itype == 'incPre':
             a1 = a - loffset
             b1 = min( a1 + intvlen , time_end )
             intType = 'incPre'
-        elif itype == 'longToRight':
+        elif itype == 'incPost':
             b1 = b + roffset
             a1 = max(leftoffset, b1 - intvlen )
             intType = 'incPost'
         elif itype == 'pre':
-            a1 = max(leftoffset, a - intvlen)
+            a1 = max(leftoffset, a - intvlenStats)
             b1 = a
             intType = 'pre'
+            #print('preee')
         elif itype == 'post':
             a1 = b
-            b1 = min(b + intvlen, time_end)
+            b1 = min(b + intvlenStats, time_end)
             intType = 'post'
+            #print('postt')
+        elif itype == 'initseg':
+            a1 = a
+            b1 = min( a1 + intvlenStats , time_end )
+            intType = 'initseg'
+        elif itype == 'endseg':
+            b1 = b
+            a1 = max(leftoffset, b1 - intvlenStats )
+            intType = 'endseg'
         else:
             raise valueerror('bad itype!')
 
@@ -89,15 +99,23 @@ def processJanIntervals( intervalData, intvlen, loffset, roffset, time_end, mvtT
                     if a >= time_end:
                         continue
 
+                    #if k == 'S05_off_move':
+                    #    print(a,b)
+
                     if mvtType == 'tremor':
                         intsToAdd = []
                         #if b - a >= intvlen * 3:
-                        intsToAdd += intervalParse(a,b, 'longToLeft')
+                        # these are for plotting
+                        intsToAdd += intervalParse(a,b, 'incPre')
                         intsToAdd += intervalParse(a,b, 'middle')
+                        intsToAdd += intervalParse(a,b, 'incPost')
+                        # these are of stats
                         intsToAdd += intervalParse(a,b, 'middle_full')
-                        intsToAdd += intervalParse(a,b, 'longToRight')
                         intsToAdd += intervalParse(a,b, 'pre')
                         intsToAdd += intervalParse(a,b, 'post')
+                        #
+                        intsToAdd += intervalParse(a,b, 'endseg')
+                        intsToAdd += intervalParse(a,b, 'initseg')
 
 
                     elif mvtType == 'unk_activity':
@@ -106,14 +124,20 @@ def processJanIntervals( intervalData, intvlen, loffset, roffset, time_end, mvtT
                     elif mvtType == 'no_tremor':
                         a = max(leftoffset, a)
                         assert b > a
-                        b = min(b, a+ intvlen)
+                        #b = min(b, a+ intvlen)
                         intType = 'no_tremor'
                         intsToAdd = [ (a,b,intType) ] 
+
+                    #if k == 'S05_off_move':
+                    #    import pdb; pdb.set_trace()
 
                     tipr[k]  += intsToAdd
             if len(tipr[k]) == 0:
                 #tipr[k]  = [ (0,time_end,'unk') ] 
                 tipr[k]  = [ (0,time_end,'entire') ] 
+
+            #if k == 'S05_off_move':
+            #    print('fdsfsd ',tipr[k])
 
     return tipr
 
@@ -402,10 +426,16 @@ def getBindsInside(bins, b1, b2, retBool = True):
 
 def filterArtifacts(k, chn, bins, retBool = True):
     validbins_bool = np.ones( len(bins) )
-    if gv.artifact_intervals is not None and (k in gv.artifact_intervals) and (chn in gv.artifact_intervals[k] ):
-        artifact_intervals = gv.artifact_intervals[k][chn]
-        for a,b in artifact_intervals:
-            validbins_bool = np.logical_and( validbins_bool , np.logical_or(bins < a, bins > b)  ) 
+    if gv.artifact_intervals is not None and (k in gv.artifact_intervals):
+        if chn.find('MEGsrc') >= 0:
+            cond = 'MEG' in gv.artifact_intervals[k]
+        else:
+            cond = chn in gv.artifact_intervals[k]
+
+        if cond:
+            artifact_intervals = gv.artifact_intervals[k][chn]
+            for a,b in artifact_intervals:
+                validbins_bool = np.logical_and( validbins_bool , np.logical_or(bins < a, bins > b)  ) 
 
     if retBool:
         return validbins_bool
@@ -654,7 +684,7 @@ def findTremor(k,thrSpec = None, thrInt=0.13, width=40, percentthr=0.8, inc=1, m
                 avflt /= np.sum(avflt)   # normalize
                 cvl = np.convolve(rect,avflt,mode='same')
 
-                print('{} cvl max {}, widthBins {}'.format( chn,  np.max(cvl), widthBins) )
+                #print('{} cvl max {}, widthBins {}'.format( chn,  np.max(cvl), widthBins) )
 
                 cvlskip,pairs = getIntervals(None, widthBins, thrInt,
                         percentthr, inc,  minlen, extFactorL, extFactorR, endbin=None, cvl=cvl )

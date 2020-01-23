@@ -30,6 +30,10 @@ S02_off_move
 * 213-234.5 tremor
 Есть какая-то доп активность beta in the LFP in the beginning of tremor
 for the second episode there is also smth in MEG
+There is short pause in tremor around 50 and something happens in
+LFP tremor and beta, also in MEG gamma
+LFP tremor looks weird
+in the begininng of second tremor there is LFP tremor and beta increase
 
 S02_off_hold
 * 0-4 tremor
@@ -39,11 +43,22 @@ S02_off_hold
 * 134-145 low amplitude tremor
 there is pronounced LFP activity in the very first short episode in the beginning,
 and also towards the part with the most high amplitude tremor
+LFP tremor rises before the end of the tremor
+
+S02_on_hold
+* 0-33
+* 33-113
+* 113-208
+* 224-274  small tremor
+tremor pause around 33, accompanied by strong beta and gamma in MEG
+there are mauch more activity before 71 in all LFP
+LFP tremor has bullshit
 
 S02_on_move
 * 0-14  low amplitude tremor
 * 109.7-152 pronounced high amplitude tremor
 * 156-184 -- low amplitude (continues up to 199)
+220-238 some EMG activty
 246-48 -- artifact in one (not main) LFP channel
 high LFP activity during strongest tremor, higher MEG activity towards the end of the strong tremor period
 
@@ -61,7 +76,12 @@ EMG has rythmicity 1.5Hz
 * 152.6 - 157.9
 * 184.7 - 194.3
 * 208-211.4
+85-89 small activity  one channel only
+123-126 med activity one channel only
+169-171 med activity one channel only
+228-230 med activity one channel only
 242.3-245 high activity
+there are strange not-like-tremor events in one channel only that have strong correlate in MEG tremor, EMG tremor _band_ and MEG tremor band are correlated
 
 
 S04 off hold,  [right hand]  
@@ -81,7 +101,10 @@ spectral EMG characteristics of two tremor episodes are different
 
 
 S04_off_move [ some LFP channels don't have spectral data. Need to redo]
-62-74 LFPL23 (not main) artifact
+62-74 LFPL12, LFPL01, LFPL23 artifact
+255.7-256   LFPL12, LFPL01, artifact
+261.5,266.5   LFPL12, LFPL01, artifact
+275.8,278   LFPL12, LFPL01, artifact
 * 83-95  tremor
 * 107-150 tremor
 * 154-169 tremor
@@ -89,12 +112,13 @@ S04_off_move [ some LFP channels don't have spectral data. Need to redo]
 185-255 -- med & small activity in EMG
 293-end small activity in EMG
 17-56 small activity in EMG
+65-81 small activity in EMG
 
 apparently during tremor (at least some time after start) there are less beta in LFP, more beta during small EMG activity outside explicit tremor
 between tremor episodes there is some small-med activity in EMG
 
 S04_on_hold
-0-91.8 -- med activity
+* 0-91.8 -- tremor
 142.2-143.2 -- large short burst
 156.5-end large EMG activity
 228-240.3 -- LFPL23, LFPL12 artifact
@@ -108,6 +132,7 @@ S04_on_move
 * 193.8-201 tremor?
 * 207-216.5 tremor
 216.5-261 some small activity in EMG 61
+LFPL12, LFPL01 are weak first 2/3 of the recording
 
 -----------------
 -----------------
@@ -132,14 +157,14 @@ S05_off_move
 *180-190
 *232-242
 *247.5-267.7
-*271-276 small tremor
+271-274.6 med activity
 there is a lot of beta after the tremor stop
 
 S05_on_hold
 0-84 rather high activity
 84-127.6 med-low activity
-237.6 - rest -- low activity
-1-82.6 -- lots of LFP artifacts (all channels)
+<<< rly?? >>. 237.6 - rest -- low activity
+1-82.6 -- lots of LFP artifacts (all channels)  artifact_LFPL01, artifact_LFPL12, artifact_LFPL23
 
 S05_on_move
 15-17 LFP aftifact (all LFP chans)
@@ -152,6 +177,9 @@ S05_on_move
 95-99.5 short burst of EMG
 218.3-220
 
+S06_off_hold [some MEG missing]
+[put into json]
+
 S06_off_move
 13-22  small activity
 34-45  aver activity
@@ -162,7 +190,8 @@ S06_off_move
 261-268 small activity
 
 S06_on_move
-?
+276-280 MEG aftifact?
+238-244 MEG aftifact??
 
 S07_off_hold
 *0-8 (or maybe till 7.7 if I want to see high beta after the end)
@@ -194,6 +223,7 @@ S07_on_move
 *0-44.8 tremor
 *53-120.8
 *126.3-142.3 tremor [ there's beta increase around 127 that may be related to prev tremor episode, then I'd shift the start of the current one to 130 or so ]
+*280-
 
 S10_off_move [all MEG are bad]
 0-20 strange EMG bursts, perhaps not tremor

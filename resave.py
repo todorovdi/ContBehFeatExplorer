@@ -21,8 +21,8 @@ do_removeMEG = 0
 do_resample = 1
 overwrite_res = 1
 
-do_SSS = 1
-read_resampled = 1
+do_SSS = 0
+read_resampled = 0
     
 
 freqResample = 256
@@ -34,6 +34,7 @@ tasks = ['hold' , 'move', 'rest']
 
 subjinds = [3,8,9,10]
 subjinds = [2,3,4]
+subjinds = [6]
 tasks = ['hold' , 'move', 'rest']
 medstates = ['on','off']
 
