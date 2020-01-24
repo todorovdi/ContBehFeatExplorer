@@ -1482,9 +1482,9 @@ def plotSpectralData(plt,time_start = 0,time_end = 400, chanTypes_toshow = None,
 
                 #special_intervals = tremIntervalMerged[k][side_body]
                 for intervalType in plot_intervalColors:
-                    if intervalType not in special_intervals:
-                        continue
-                    #clrfb = plot_intervalColors[intervalType]
+                    #if intervalType not in special_intervals:
+                    #    continue
+                    clrfb = plot_intervalColors[intervalType]
                     #for pa in special_intervals[intervalType]:
                     #    ax.fill_between( list(pa) , ymin, ymax, facecolor=clrfb, alpha=plot_intFillAlpha)
 
@@ -1935,6 +1935,8 @@ def makeBarPlot( ax, rawname, chname, legloc = None, printLog = False, xoffset =
     intervals = timeIntervalPerRaw_processed[rawname]
     intervalStats = gv.glob_stats_perint[rawname]
 
+    if len(intervalStats) == 0:
+        raise ValueError( 'intervalStats for {} is emptry, perhaps json was misread'.format(rawname) )
 
     ivalis = {}  # dict of indices of interval
     for itype in intTypes:
@@ -2191,7 +2193,9 @@ def plotBarplotTable(modalities):
     ww = 23
     hh = 10
 
-    nc = max( len(raws), 2) + 1
+    maxrawcols = 10
+
+    nc = min(   max( len(raws), 2) + 1   , maxrawcols + 1 )  # matplotlib doesn't allow too large images
     nr = max( len(modalities) , 2)
     fig,axs = plt.subplots(nrows = nr, ncols = nc, figsize = (nc*ww, nr*hh) )
 
@@ -2207,7 +2211,6 @@ def plotBarplotTable(modalities):
     for modi, modality in enumerate(modalities ):
         chperraw = {}
         for rawi, k in enumerate(raws ):
-            ax = axs[modi, hshift + rawi]
 
             sind_str,medcond, task  = getParamsFromRawname(k)
 
@@ -2221,9 +2224,11 @@ def plotBarplotTable(modalities):
             
             chperraw[ k ] = chnames
 
-            makeMutliBarPlot(ax, k, chnames, spaceBetween )
-            ax.legend( loc = (1.01,0) )
-            ax.set_title('{}: {} barplot '.format(k,modality) )
+            if rawi < maxrawcols: 
+                ax = axs[modi, hshift + rawi]
+                makeMutliBarPlot(ax, k, chnames, spaceBetween )
+                ax.legend( loc = (1.01,0) )
+                ax.set_title('{}: {} barplot '.format(k,modality) )
 
         chansPerModPerRaw[modality] = chperraw
 
@@ -2242,7 +2247,7 @@ def plotBarplotTable(modalities):
 
         makeMutliBarPlot(ax, list(raws.keys() ), chansPerModPerRaw[modality], spaceBetween )
         ax.legend( loc = (1.01,0) )
-        ax.set_title('Averge  {} barplot '.format(modality) )
+        ax.set_title('Averge  {} barplot total {} raws'.format(modality, len(raws) ) )
 
 
     ##############################
@@ -2303,16 +2308,21 @@ def makeMutliBarPlot(ax, rawname, chnames, spaceBetween=14, binwidth=1, spaceBet
         ret = None
         itypes = None
         
-        sublist = []
-        for chni, chname in enumerate(chperraw[rawn] ):
+        sublist = []   # for channel there are things there
+    
+        chnames_flt = chperraw[rawn]
+        if chnames_flt[0].find('LFP') >= 0 and plot_barplotOnlyFavLFP:
+            chnames_flt = utils.filterFavChnames( chperraw[rawn], sind_str ) 
+
+        for chni, chname in enumerate(chnames_flt ):
             if chni == 0 and rawni == 0:
                 legloc_ = None
             else:
                 legloc_ = -1
 
-            if chname.find('LFP') >= 0 and plot_barplotOnlyFavLFP:
-                if not gv.gen_subj_info[sind_str]['lfpchan_used_in_paper'] == chname:
-                    continue
+            #if chname.find('LFP') >= 0 and plot_barplotOnlyFavLFP:
+            #    if not gv.gen_subj_info[sind_str]['lfpchan_used_in_paper'] == chname:
+            #        continue
                     
             #print('shift is ',shift)
             ret = makeBarPlot(ax, rawn, chname, xoffset=shift, legloc = legloc_, axtop=ax2,
@@ -2348,7 +2358,11 @@ def makeMutliBarPlot(ax, rawname, chnames, spaceBetween=14, binwidth=1, spaceBet
         valsPerItype = {}
         labels = []
         labelset = False
+
+        indsToExclude = {}
         for intType in rawsAvailPeriType:
+            indsToExclude[intType] = []
+
             ra = rawsAvailPeriType[intType]
 
             ll = len(list(chperraw.values() )[0] )
@@ -2356,6 +2370,7 @@ def makeMutliBarPlot(ax, rawname, chnames, spaceBetween=14, binwidth=1, spaceBet
             means = np.zeros( numStats * ll) 
             errs  = np.zeros( numStats * ll)
             xs = np.zeros( numStats * ll)
+
             for rawni,rawn in enumerate(ra):
                 sublist = bardata[rawn]
                 for ii,sdcn in enumerate(sublist):
@@ -2364,15 +2379,27 @@ def makeMutliBarPlot(ax, rawname, chnames, spaceBetween=14, binwidth=1, spaceBet
                     chname, totbarwidth, binvalsDict, binnamesDict, binerrssDict, bincoordsDict = sdcn
                     #print('sublist',binvalsDict[intType] ) 
                     #print(vpi[rawni,ii * numStats + np.arange( numStats) ])
-                    vpi[rawni,ii * numStats + np.arange( numStats) ] = binvalsDict[intType]
 
-                    xs[ii * numStats + np.arange( numStats)] = bincoordsDict[intType]
+                    bincoords = bincoordsDict[intType] 
+                    if len(bincoords) > 0:
+                        vpi[rawni,ii * numStats + np.arange( numStats) ] = binvalsDict[intType]
+                        xs[ii * numStats + np.arange( numStats)] = bincoords
+                    else:
+                        indsToExclude[intType] += [rawni]
                     
                     #print(ii,chname)
                 #vals = binvalsDict[intType]
                 #vpi = np.vstack( (vpi, vals) )
 
                 #labels = list( binnamesDict[intType] )[0]
+
+            if np.max(xs) < 1e-5:
+                raise ValueError('xs left anassigned :(')
+
+            # we need to exclude some inds that corresponds to interval types that were not found in certain raws
+            goodrawinds = set(range(vpi.shape[0] ) ) - set(indsToExclude[intType] )
+            goodrawinds = list(goodrawinds)
+            vpi = vpi[goodrawinds,: ]
 
             valsPerItype[intType] = vpi
             #print(vpi.shape)
@@ -2463,7 +2490,7 @@ if __name__ == '__main__':
     #tasks = ['rest', 'move', 'hold']
     #medconds = ['off', 'on']
 
-    plot_barplotOnlyFavLFP = 0
+    plot_barplotOnlyFavLFP = 1
 
     timeIntervalsFromTremor = True
     rawnameList_fromCMDarg = False
@@ -2701,7 +2728,8 @@ if __name__ == '__main__':
     gv.gparams['tremDet_timeStart'] = 0
     gv.gparams['tremDet_timeEnd'] = nonTaskTimeEnd
 
-    gv.gparams['plot_LFP_onlyFavoriteChannels'] = 0
+    gv.gparams['plot_LFP_onlyFavoriteChannels'] = 1
+    #gv.gparams['plot_LFP_onlyJanFavoriteChannels'] = 1
     plot_EMG_spectrogram          = False
     plot_MEGsrc_spectrogram       = True
     plot_onlyMainSide             = True
@@ -2730,6 +2758,7 @@ if __name__ == '__main__':
     #plot_timeIntervalPerRaw = { 'S01_off_hold':obsbetalims, 'S01_on_hold':obsbetalims, 
     #        'S01_off_move':obsbetalims, 'S01_on_move': obsbetalims}
 
+    useTauFavChannels = False
     favoriteLFPch_perSubj = {'S01': ['LFPR23', 'LFPL01' ], 
             'S02': ['LFPR23', 'LFPL12'], 'S03': ['LFPR12', 'LFPL12'], 'S09':['LFPL78', 'LFPR67'], 
             'S08':['LFPR12' , 'LFPL56' ], 'S04':['LFPL01', 'LFPR01'] } 
@@ -3156,14 +3185,21 @@ if __name__ == '__main__':
     for subj in gv.gen_subj_info:
         if subj in tremorDetect_customThr:
             gv.gen_subj_info[subj]['tremorDetect_customThr'] = tremorDetect_customThr[subj]
-        if subj in favoriteLFPch_perSubj:
-            gv.gen_subj_info[subj]['favoriteLFPch'] = favoriteLFPch_perSubj[subj]
+
+        if useTauFavChannels:
+            if subj in favoriteLFPch_perSubj:
+                gv.gen_subj_info[subj]['favoriteLFPch'] = favoriteLFPch_perSubj[subj]
+        else:
+            gv.gen_subj_info[subj]['favoriteLFPch'] = [ gv.gen_subj_info[subj]['lfpchan_used_in_paper'] ]
+
 
         #bc = gv.gen_subj_info[subj]['bad_channels']
         #for medcond in bc:
         #    bc2 = bc[medcond] 
         #    for task in bc2:
         #        #for tremor 
+
+    #import pdb; pdb.set_trace()
 
     # if we want to save the updated information back to the file
     if updateJSON:
@@ -3176,7 +3212,7 @@ if __name__ == '__main__':
 
 
     stats_basefname = 'stats'
-    stats_fname = os.path.join( data_dir, 'last_data.npz')
+    #stats_fname = os.path.join( data_dir, 'last_data.npz')
 
     try: 
         gv.specgrams.keys()
@@ -3234,8 +3270,8 @@ if __name__ == '__main__':
         print('{} has tremor at {} side with freq {}'.format(subj,tside,tfreq) )
         tfreqs += [ tfreq]
 
-        if subj not in favoriteLFPch_perSubj and gv.gparams['plot_LFP_onlyFavoriteChannels']:
-            raise ValueError('Want to plot only favorite LFP they are not set for all subjects!' )
+        #if subj not in gv.gen_subj_info[subj]['favoriteLFPch'] and gv.gparams['plot_LFP_onlyFavoriteChannels']:
+        #    raise ValueError('Want to plot only favorite LFP they are not set for all subjects!' )
 
     # define tremor band with some additional margin
     safety_freq_shift = 0.5
@@ -3387,7 +3423,8 @@ if __name__ == '__main__':
                     gs_sm[task] = f['glob_stats'][()]
 
                 print('----- Existing stats loaded!')
-            except FileNotFoundError:
+            except FileNotFoundError as e:
+                print('FileNotFoundError while trying to load stats, recomputing {}'.format(str(e) ) )
                 doStatLoad = 1
                 gv.glob_stats = {}
                 gv.glob_stats_perint = None
@@ -3403,6 +3440,9 @@ if __name__ == '__main__':
         print('----- Using previously computed stats!')
 
     if doStatLoad:
+        if len(gv.specgrams) == 0:
+            raise ValueError('We need to update stats, but not specgrams were loaded!')
+            sys.exit(1)
         print('----- Computing new stats!')
         gv.glob_stats = getStatPerChan(time_start_forstats,
                 time_end_forstats)  # subj,channame, keys [! NO rawname!]

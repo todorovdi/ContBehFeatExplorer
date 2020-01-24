@@ -9,7 +9,11 @@ srsstd = load('~/soft/fieldtrip-20190716/template/sourcemodel/standard_sourcemod
 
 
 data_dir = getenv('DATA_DUSS');
-subjstr = 'S10';
+%subjstr = 'S10';
+
+if ~exist("subjstr")
+  subjstr = 'S08';
+end
 basename_head = sprintf('/headmodel_grid_%s.mat',subjstr);
 fname_head = strcat(data_dir, basename_head );
 hdmf = load(fname_head);   %hdmf.hdm, hdmf.mni_aligned_grid
@@ -136,6 +140,9 @@ end
 coords_Jan_actual = coords_Jan_actual_upd
 save( strcat(subjstr,'_modcoord'),  'coords_Jan_actual', 'labels' )
 
+if skipPlot
+  return;
+end
 
 cfg = [];
 cfg.atlas = atlas;

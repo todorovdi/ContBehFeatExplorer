@@ -17,16 +17,22 @@ raws4=(S07_off_hold S07_off_move S07_on_hold S07_on_move S08_on_rest S08_off_res
 
 raws=(${raws1[@]} ${raws2[@]} ${raws3[@]} ${raws35[@]} ${raws4[@]})
 
+raws=(S08_off_rest)
+raws=(S10_off_rest)
 
 interactive=""
 #interactive="-i"
 updates="--update_stats --update_spec"
-updates="--update_stats"
+#updates="--update_stats"
+#updates=""
+
+skipPlot=""
+skipPlot="--skipPlot"
 
 echo $raws
 for t in ${raws[@]}; do
 #    python3 $interactive udus_dataproc.py --rawname $t --singleraw $updates
-    ipython3 $interactive udus_dataproc.py -- --rawname $t --singleraw $updates
+    ipython3 $interactive udus_dataproc.py -- --rawname $t --singleraw $updates $skipPlot
 done
 
 #python3 udus_dataproc.py -i $subjind -m $ -t -s

@@ -77,7 +77,7 @@ function output = srcrec(subjstr,datall,hdmf,roi,bads,S,srs,mask)
       end
 
 
-      srcpos = coords_Jan_actual
+      srcpos = coords_Jan_actual;
     else
       srcpos_ = hdmf.mni_aligned_grid.pos(mask,:);
       srcpos = zeros(size(srcpos_));

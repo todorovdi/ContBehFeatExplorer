@@ -4,7 +4,12 @@ tasks="hold,move,rest"
 
 meds="off"
 tasks="hold"
-subj_str="1,2,3,4"
+
+meds="off,on"
+tasks="hold,move,rest"
+subj_str="1,2,3,4,5,6,7,8,9,10"
+#subj_str="8"
+#subj_str="1,2"
 
 interactive=""
 interactive="-i"

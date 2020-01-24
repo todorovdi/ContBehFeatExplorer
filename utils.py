@@ -254,6 +254,7 @@ def MEGsrcChind2data(rawname,chi):
 
 def filterFavChnames(chnames,subj):
     '''
+    ! so far works only for LFP chnames
     input list of strings
     subj 'S??'
     '''
