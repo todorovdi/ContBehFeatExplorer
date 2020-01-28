@@ -295,6 +295,12 @@ S04_on_move
 LFPR23 seem to have something to do with tremor existence (not intencity). Or maybe more with heartbeat?
 LFPR12 shows funnier things (but not creepy)
 
+S06   LFPL01 less poisoned
+
+S08_off_rest
+LFPL67 has more artifacts, [237,252.8] or maybe it is not an artifact?
+LFPL12 has less artifacts
+
 S05_on_hold 
 some smaller MEG artifacts in the second half of the 300 sec part, I did not label them
 

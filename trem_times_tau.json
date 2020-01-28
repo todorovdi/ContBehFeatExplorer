@@ -127,6 +127,10 @@
             },
             "move": {
                 "artifact_LFPR23": [ [ 246,248.3 ] ],
+                "artifact_MEG":
+                [
+                  [234,238 ]
+                ],
                 "unk_activity":
                 [
                   [220,238]

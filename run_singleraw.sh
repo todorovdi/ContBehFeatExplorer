@@ -16,16 +16,12 @@ raws4=(S07_off_hold S07_off_move S07_on_hold S07_on_move S08_on_rest S08_off_res
 
 raws=(${raws1[@]} ${raws2[@]} ${raws3[@]} ${raws35[@]} ${raws4[@]})
 
-#raws=(S08_off_rest)
-#raws=(S10_off_rest)
-#raws=(S04_off_hold)
-#raws=(S02_on_hold S02_on_move)
-raws=(S05_off_hold S05_off_move S05_on_hold S05_on_move)
-raws=(S05_off_move S05_on_hold)
-raws=(S05_on_hold)
+#raws=(S02_off_move)
+#raws=(S06_off_move S06_on_hold S06_on_move)
+#raws=(S06_off_hold)
 
 interactive=""
-interactive="-i"
+#interactive="-i"
 debug=""
 #debug="--debug"
 

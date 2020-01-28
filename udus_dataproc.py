@@ -1191,6 +1191,8 @@ def plotSpectralData(plt,time_start = 0,time_end = 400, chanTypes_toshow = None,
     else:
         nc = len(raw_int_pairs)
 
+    import pdb; pdb.set_trace()
+
     nr = nplots_per_side
     if not plot_onlyMainSide:
         nr *= len(pair_inds) 
@@ -2688,7 +2690,7 @@ if __name__ == '__main__':
     gv.gparams['tremDet_timeStart'] = 0
     gv.gparams['tremDet_timeEnd'] = nonTaskTimeEnd
 
-    gv.gparams['plot_LFP_onlyFavoriteChannels'] = 0
+    gv.gparams['plot_LFP_onlyFavoriteChannels'] = 1
     gv.gparams['plot_LFP_favRandomNonMainSide'] = 1
 
     plot_EMG_spectrogram          = False
@@ -2724,8 +2726,10 @@ if __name__ == '__main__':
             'S02': ['LFPR23', 'LFPL12'], 'S03': ['LFPR12', 'LFPL12'], 'S09':['LFPL78', 'LFPR67'], 
             'S08':['LFPR12' , 'LFPL56' ], 'S04':['LFPL01', 'LFPR01'] } 
 
+    #favoriteLFPch_perSubj_nms = {'S01': ['LFPL01', 'HirschPt2011_1', 'HirschPt2011_3' ], 
     favoriteLFPch_perSubj_nms = {'S01': ['LFPL01' ], 
-            'S02': [ 'LFPL23'], 'S03': [ 'LFPL12' ], 'S04':[ 'LFPR12' ], 'S05':[ 'LFPR23']  } 
+            'S02': [ 'LFPL23'], 'S03': [ 'LFPL12' ], 'S04':[ 'LFPR12' ], 'S05':[ 'LFPR23'],
+            'S06': ['LFPL01'], 'S07':['LFPR01'], 'S08':['LFPL12'], 'S09':['LFPL56'], 'S10':['LFPR12' ] } 
 
     plot_minFreqInSpec = 2.5  # to get rid of heart rate
     plot_minFreqInBandpow = 2.5  # to get rid of heart rate
