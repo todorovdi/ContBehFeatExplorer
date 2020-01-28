@@ -10,7 +10,7 @@
 #subjstrs='["S08","S09"]'
 #subjstrs='["S01"]'
 subjstrs='["S06"]'
-subjstrs='["S06", "S07","S08","S09","S10"]'
+subjstrs='["S05", "S06", "S07","S08","S09","S10"]'
 vardefstr="subjstrs=$subjstrs"
 #vardefstr=""
 echo "$vardefstr"

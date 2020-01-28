@@ -17,6 +17,7 @@ specgrams                           = None
 freqBands                           = None
 raws                                = None 
 glob_stats_perint                   = None
+glob_stats_perint_nms               = None
 glob_stats                          = None
 chanTypes_toshow                    = None
 timeIntervalPerRaw_processed        = None

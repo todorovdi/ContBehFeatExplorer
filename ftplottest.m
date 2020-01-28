@@ -18,6 +18,8 @@ basename_head = sprintf('/headmodel_grid_%s.mat',subjstr);
 fname_head = strcat(data_dir, basename_head );
 hdmf = load(fname_head);   %hdmf.hdm, hdmf.mni_aligned_grid
 
+%figVis = 'off'
+figVis = 'on'
 
 scalemat = containers.Map;
 % x -- between ears, z -- vert
@@ -140,7 +142,7 @@ end
 coords_Jan_actual = coords_Jan_actual_upd
 save( strcat(subjstr,'_modcoord'),  'coords_Jan_actual', 'labels' )
 
-if skipPlot
+if exist("skipPlot") & skipPlot
   return;
 end
 
@@ -169,9 +171,11 @@ tmpsubj = hdmf.mni_aligned_grid.inside;  % this one will be used for source reco
 close all
 viewarrs = [ [0 -90 0]; [0 0 90] ];
 nr = 4
-for i = 1:2 
-  figure(i);
-  viewarr = viewarrs(i,:);
+
+figure('visible',figVis);
+for viewarrind = 1:2 
+  %figure(i,'visible','off');
+  viewarr = viewarrs(viewarrind,:);
 %viewarr = [0 0 90];
 
   srsstd.sourcemodel.inside    = tmpstd; % define inside locations according to the atlas based mask 
@@ -281,12 +285,23 @@ for i = 1:2
   for i=1:size(Q,1);
     Q2(i,:) = S *  transpose( Q(i,:)  );
   end
+
+  Q2(1,1) = 2 * Q2(1,1)
+
   ft_plot_mesh( Q2 ); % plot only locations inside the volume
   title(sprintf('%s %s, actual coords, scaled %3f,%3f,%3f',subjstr,roistr,sx,sy,sz))
   hold off
 
   view (viewarr)
+
+  %figname = sprintf('source_pics_%s_%i.fig',subjstr, viewarrind);
+  %savefig(figname)
+
+  figname = sprintf('source_pics_%s_%i.png',subjstr,viewarrind);
+  saveas(gcf,figname)
 end
+
+
 %%%ft_plot_sens(dataica.grad,'style','*r'); % plot the sensor array
 
 %%%%%

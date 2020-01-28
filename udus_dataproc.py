@@ -72,29 +72,6 @@ def prepareSpec(pp):
 
     return rawname,chn,i,freqs,bins,Sxx,SxxC
 
-#def getAllSpecgrams(chdata,sampleFreq,NFFT,specgramoverlap):
-#
-#    '''
-#    get spectrograms of the given chdata
-#    '''
-#    #tetmp = min(te+NFFT,int(maxtime*sampleFreq) )
-#    pars = [(None,None,i,chdata[i,:],sampleFreq,NFFT,int(NFFT*specgramoverlap)) for i in range(chdata.shape[0])]
-#
-#    p = mpr.Pool( min(chdata.shape[0], mpr.cpu_count() ) )
-#    r = p.map(prepareSpec, pars)
-#    p.close()
-#    p.join()
-#
-#    specgramsComputed = [0]*len(r)
-#    autocorrelComputed = [0]*len(r)
-#    for pp in r:
-#        rawname,chn,i,freqs,bins,Sxx,SxxC = pp
-#        specgramsComputed[i] = (freqs,bins,Sxx)
-#        autocorrelComputed[i] = freqs,SxxC
-#        
-#    return specgramsComputed,autocorrelComputed
-
-
 def precomputeSpecgrams(raws,ks=None,NFFT=256, specgramoverlap=0.75,forceRecalc=True, 
        modalities = None ):
     '''
@@ -170,12 +147,6 @@ def precomputeSpecgrams(raws,ks=None,NFFT=256, specgramoverlap=0.75,forceRecalc=
     print('Spectrograms computation finished')
     return specgrams
 
-#def getStatPerChan_singleThread(argdict):
-#    return getStatPerChan(**argdict)
-#
-#def getStatPerChan_singleRaw(argdict):
-#    return getStatPerChan(**argdict)
-
 ########  Gen stats across conditions
 def getStatPerChan(time_start,time_end, glob_stats = None, singleRaw = None, mergeTasks = False, modalities=None, datPrep = None):
     '''
@@ -233,6 +204,8 @@ def getStatPerChan(time_start,time_end, glob_stats = None, singleRaw = None, mer
                     #chnames2 = chnames_tuples[side_ind]['LFP'] + chnames_tuples[side_ind]['EMG']
 
                     if datPrep is not None:
+                        if side not in datPrep:
+                            continue
                         chnames2, chdata = datPrep[singleRaw][side]
                     else:
                         chnames2 = []
@@ -392,7 +365,6 @@ def getStatPerChan(time_start,time_end, glob_stats = None, singleRaw = None, mer
         print('Glob stats computation finished')
     return res
 
-
 def plotSpecMeanCorr(ax, k, chname, time_start, time_end, normType='uniform'):
     freqs, bins, Sxx = gv.specgrams[k][chname]
     minfreq = 0
@@ -406,7 +378,9 @@ def plotSpecMeanCorr(ax, k, chname, time_start, time_end, normType='uniform'):
     #mx = stats['max_spec']; mn = stats['min_spec']; 
 
     #mx_mc = stats['max_spec_mc_plot']; mn_mc = stats['min_spec_mc_plot']; 
-    me = stats['mean_spec_nout']                
+    me = stats.get('mean_spec_nout', None)                
+    if me is None:
+        return None
     mx_mc = stats['max_spec_mc_nout']; 
     mn_mc = stats['min_spec_mc_nout']; 
 
@@ -478,13 +452,6 @@ def plotSpecMeanCorr(ax, k, chname, time_start, time_end, normType='uniform'):
     ax.set_ylabel('Freq, [Hz] '+normType)
     #ax.set_xlim(mintime,maxtime)
     ax.set_xlim(time_start,time_end)
-#                     if chname.find('LFP') >= 0:
-#                         ax.set_ylim(plot_minFreqInSpec,plot_maxFreqInSpec)
-#                     else:
-#                         ax.set_ylim(0,plot_maxFreqInSpec)
-
-
-#def stat_raw_proxy( arg):
 
 def stat_ch_proxy( arg ):
 
@@ -506,13 +473,6 @@ def stat_ch(rawname, f,b,spdata, chdat, chn, stat_leaflevel,
     nout_thr_spec = 1e-2  # several dozen bins for 256 Hz discr freq and 300 sec 
     nout_thr_bandpow = 1e-3  # several dozen bins for 256 Hz discr freq and 300 sec 
 
-    tremDetTimeEnd = nonTaskTimeEnd
-    #if k.find('rest'):
-    bb,be = gv.freqBands['tremor']
-    ft,bt,spdatat = utils.getSubspec(f,b,spdata,bb, be, 
-            time_start, time_end)
-    assert spdatat.shape[0] > 0
-
     bandpows = {}
     fbnames = ['slow', 'tremor','beta', 'gamma_motor']
     for fbname in fbnames:
@@ -527,6 +487,11 @@ def stat_ch(rawname, f,b,spdata, chdat, chn, stat_leaflevel,
     # 3-48, 60-80
     st = {}
     if chn.find('EMG') >= 0 and useEMG_cluster: 
+        bb,be = gv.freqBands['tremor']
+        ft,bt,spdatat = utils.getSubspec(f,b,spdata,bb, be, 
+                time_start, time_end)
+        assert spdatat.shape[0] > 0
+
         if tremrDet_clusterMultiFreq:
             cnt = utils.getDataClusters( spdatat ) 
             st['tremorfreq_clusters'] = cnt
@@ -790,17 +755,16 @@ def stat_ch(rawname, f,b,spdata, chdat, chn, stat_leaflevel,
                 st[s1max_distr_pct  ] = st[s1max_distr] / glob_stats[s1max_distr] 
             st[s1max_pct  ]      = st[s1max] / glob_stats[s1max]
             st[s1max_nout_pct  ] = st[s1max_nout] / glob_stats[s1max_nout]
-        #st[s1mean] += np.mean(spdatat) / len(raws_from_subj)
 
     return st
 
 def stat_proxy( arg ):
 
-    t1,t2,rawname, gs,intind, itype, datPrep = arg
+    t1,t2,rawname, gs,intind, itype, datPrep, intside = arg
 
     print('{}: starting {} No {} stats computation'.format(rawname, itype, intind) )
     st = getStatPerChan(t1,t2,singleRaw = rawname, mergeTasks=False, glob_stats=gs, datPrep = datPrep )
-    return  rawname, intind, st
+    return  rawname, intside, intind, st
  
 def getStatsFromTremIntervals(intervalDict):
     '''
@@ -812,50 +776,56 @@ def getStatsFromTremIntervals(intervalDict):
 
     # 'incPre', 'incPost',  'entire'
     #intervalTypes =   [ 'pre', 'post', 'middle_full', 'no_tremor' ]  # ,'pre', 'post'
-    stats = {}
+    statsMainSide = {}
+    statsOtherSide = {}
 
     args = []
     for rawname in intervalDict:
         if rawname not in raws:
             continue
-        intervals = intervalDict[rawname]
-        statlist = [0]*len(intervals)
-        for intind,interval in enumerate(intervals):
-            t1,t2,itype = interval
-            if itype not in intervalTypes:
-                continue
 
-            isect =  getIntervalIntersection(t1,t2,time_start_forstats,time_end_forstats)
-            if len(isect) == 0 or isect[1] - isect[0] < 1:
-                continue
+        sind_str,medcond, task = getParamsFromRawname(rawname)
+        for intside in ['left', 'right']:
+            intervals = intervalDict[rawname][intside]
+            statlist = [0]*len(intervals)
+            for intind,interval in enumerate(intervals):
+                t1,t2,itype = interval
+                if itype not in intervalTypes:
+                    continue
 
-            t1eff,t2eff = isect
+                isect =  utils.getIntervalIntersection(t1,t2,time_start_forstats,time_end_forstats)
+                if len(isect) == 0 or isect[1] - isect[0] < 1:
+                    continue
 
-            sind_str,medcond, task = getParamsFromRawname(rawname)
+                t1eff,t2eff = isect
 
-            # extract data to put it to subprocess
-            modalities = ['LFP', 'EMG', 'EOG', 'MEGsrc']
-            dtcr = {}
-            cht = gv.gen_subj_info[ sind_str ]['chantuples']
+                # extract data to put it to subprocess
+                modalities = ['LFP', 'EMG', 'EOG', 'MEGsrc']
+                dtcr = {}
+                cht = gv.gen_subj_info[ sind_str ]['chantuples']
 
-            #orderEMG, chinds_tuples, chnames_tuples = getTuples(sind_str)
-            #chnames2 = []
-            for side in cht:
-                chnames2 = []
-                for modality in modalities:
-                    chnames2 += cht[side]['nametuples'][modality]
-                chdata, chtimes = utils.getData(rawname, chnames2 )
+                #orderEMG, chinds_tuples, chnames_tuples = getTuples(sind_str)
+                #chnames2 = []
+                #for side in cht:
+                for side in [intside]:
+                    chnames2 = []
+                    for modality in modalities:
+                        chnames2 += cht[side]['nametuples'][modality]
+                    chdata, chtimes = utils.getData(rawname, chnames2 )
 
-                dtcr[side] = chnames2, chdata 
+                    dtcr[side] = chnames2, chdata 
 
-            datPrep = {}
-            datPrep[rawname] = dtcr
+                datPrep = {}
+                datPrep[rawname] = dtcr
 
-            args += [ (t1eff,t2eff,rawname, gv.glob_stats, intind, itype, datPrep) ]
+                args += [ (t1eff,t2eff,rawname, gv.glob_stats, intind, itype, datPrep, intside) ]
 
-            #st = getStatPerChan(t1,t2,singleRaw = rawname, mergeTasks=False, glob_stats=gv.glob_stats )
-            #statlist[intind] = st[sind_str][ medcond][ task]
-        stats[rawname] = statlist
+                #st = getStatPerChan(t1,t2,singleRaw = rawname, mergeTasks=False, glob_stats=gv.glob_stats )
+                #statlist[intind] = st[sind_str][ medcond][ task]
+            if intside == gv.gen_subj_info[sind_str]['tremor_side']:
+                statsMainSide[rawname]  = statlist
+            else:
+                statsOtherSide[rawname] = statlist
 
     if len(args) > 1 and (not statsInterval_forceOneCore):
         ncores = mpr.cpu_count()
@@ -864,18 +834,22 @@ def getStatsFromTremIntervals(intervalDict):
         p.close()
         p.join()
 
-        for k,intind,st in pr:
-            stats[k][intind] = st
+        for k,intside, intind,st in pr:
+            if intside == gv.gen_subj_info[sind_str]['tremor_side']:
+                statsMainSide[k][intind] = st 
+            else:
+                statsOtherSide[k][intind] = st 
+            #stats[k][intind] = st
     else:
         for arg in args:
-            k,intind,st = stat_proxy(arg)
-            stats[k][intind] = st 
+            k,intside,intind,st = stat_proxy(arg)
+            sind_str,medcond, task = getParamsFromRawname(rawname)
+            if intside == gv.gen_subj_info[sind_str]['tremor_side']:
+                statsMainSide[k][intind] = st 
+            else:
+                statsOtherSide[k][intind] = st 
 
-    return stats
-
-#def getBandpowWavelet(chdata):
-                    
-# merge across two EMG channels
+    return statsMainSide, statsOtherSide
 
 ## Define left / right corresdpondance (left LFP to right EMG)
 def genChanTuples(rawname, chnames ):
@@ -915,6 +889,9 @@ def genChanTuples(rawname, chnames ):
     MEGsrc_names = { 'left':[], 'right':[] } 
     MEGsrc_names_unfilt = { 'left':[], 'right':[] } 
 
+    # positive X coord (first coord) implies right side of the brain (as seen from the back)
+    # look at coords at source data file
+    # here we collect indices of channels only
     indshift = 0
     for roistr in sorted(MEGsrc_roi):  # very important to use sorted!
         sind_str,medcond,task = getParamsFromRawname(rawname)
@@ -983,11 +960,8 @@ def genChanTuples(rawname, chnames ):
     #return order_by_EMGside, chinds_tuples, chnames_tuples, LFPnames, EMGnames, MEGsrc_names
     return r
 
-
-
-
 def plotChannelBand(ax,k,chn,fbname,time_start,time_end,logscale=False, bandPow=True,
-        color = None, skipPlot = False, normalization = ('whole','channel_distr'),
+        color = None, skipPlot = False, normalization = ('whole','channel_nout'),
         mean_corr=False):
     '''
     bandPow -- if True, plot band power, if False, plot band passed freq
@@ -1011,11 +985,30 @@ def plotChannelBand(ax,k,chn,fbname,time_start,time_end,logscale=False, bandPow=
 
             s0 = '{}_bandpow_'.format(fbname)
             if mean_corr:
-                s1max_some = '{}{}'.    format(s0, 'mc_max_nout')
-                s1min_some = '{}{}'.    format(s0, 'mc_min_nout')
+                raise ValueError('Not implemented')
             else:
                 s1max_some = '{}{}'.    format(s0, 'max_distr')
                 s1min_some = '{}{}'.    format(s0, 'min_distr')
+
+            if s1min_some not in r:
+                print( "WARNING plotChannelBand: {} not in glob stats".format(s1max_some) )
+                bandpower /= np.max(bandpower) 
+            else:
+                mn = r[s1min_some]
+                mx = r[s1max_some]
+                span = mx-mn
+                bandpower = (bandpower - mn) / span
+        elif normtype == 'channel_nout' and normrange == 'whole':
+            sind_str,medcond,task = utils.getParamsFromRawname(k)
+            r = gv.glob_stats[sind_str][medcond][task][chn] 
+
+            s0 = '{}_bandpow_'.format(fbname)
+            if mean_corr:
+                s1max_some = '{}{}'.    format(s0, 'mc_max_nout')
+                s1min_some = '{}{}'.    format(s0, 'mc_min_nout')
+            else:
+                s1max_some = '{}{}'.    format(s0, 'max_nout')
+                s1min_some = '{}{}'.    format(s0, 'min_nout')
 
             if s1min_some not in r:
                 print( "WARNING plotChannelBand: {} not in glob stats".format(s1max_some) )
@@ -1177,12 +1170,26 @@ def plotSpectralData(plt,time_start = 0,time_end = 400, chanTypes_toshow = None,
 
     raw_int_pairs = []
     for ki,k in enumerate(ks):
+        #import pdb; pdb.set_trace()
+        l = {}
         if plot_colPerInterval:
-            l = len( plot_timeIntervalPerRaw.get( k, [0]  ) ) 
+            if k not in plot_timeIntervalPerRaw:
+                for side in ['left','right']:
+                    l[side] = 1
+            else:
+                for side in ['left','right']:
+                    l[side] = len( plot_timeIntervalPerRaw[k].get(side, [0] ) )
         else:
-            l = 1
-        raw_int_pairs +=  zip( [ki] * l, range(l) )
-    nc = len(raw_int_pairs)
+            for side in ['left','right']:
+                l[side] = 1
+
+        for side in ['left','right']:
+            raw_int_pairs +=  zip( [ki] * l[side], np.arange(l[side]), l[side] * [side] )
+
+    if singleRawMode:
+        nc = 1
+    else:
+        nc = len(raw_int_pairs)
 
     nr = nplots_per_side
     if not plot_onlyMainSide:
@@ -1224,19 +1231,22 @@ def plotSpectralData(plt,time_start = 0,time_end = 400, chanTypes_toshow = None,
     colind = 0
     maxBandpowPerRaw = {}
     for colind in range(nc):
-        ki,intind = raw_int_pairs[colind]
+        ki,intind,sideint = raw_int_pairs[colind]
         k = ks[ki]
         
         sind_str,medcond,task = getParamsFromRawname(k)
         deftimeint =  [(time_start,time_end,'no_tremor') ]
 
-        allintervals = plot_timeIntervalPerRaw.get( k, deftimeint  )
-        desind = intind
+        if k not in plot_timeIntervalPerRaw:
+            allintervals = deftimeint
+        else:
+            allintervals = plot_timeIntervalPerRaw[k][ gv.gen_subj_info[sind_str]['tremor_side'] ]
+        #allintervals = plot_timeIntervalPerRaw.get( k, deftimeint  )
         #for i,p in enumerate(allintervals):  # find first interval that starts not at zero (thus potentially we can what was before the tremor start)
         #    if p[2] == 'incPre':
         #        desind = i
         #        break
-        time_start, time_end, intervalType =    allintervals [desind]   # 0 means first interval, potentially may have several
+        time_start, time_end, intervalType =    allintervals [intind]   # 0 means first interval, potentially may have several
 
         #chnames = raws[k].info['ch_names']
         orderEMG, chinds_tuples, chnames_tuples = utils.getTuples(sind_str)
@@ -1283,10 +1293,6 @@ def plotSpectralData(plt,time_start = 0,time_end = 400, chanTypes_toshow = None,
             
 
             ts,te = gv.raws[k].time_as_index([time_start, time_end])
-
-            #chs = mne.pick_channels(chnames,include=ch_toplot_timecourse, ordered=True )
-            #chdata, chtimes = raws[k][chs,ts:te]
-            
             chdata, chtimes = utils.getData(k, ch_toplot_timecourse, ts,te )
 
             mintime = min(chtimes)
@@ -1401,7 +1407,7 @@ def plotSpectralData(plt,time_start = 0,time_end = 400, chanTypes_toshow = None,
                     #    continue
                     #for pa in special_intervals[intervalType]:
                     #    ax.fill_between( list(pa) , ymin, ymax, facecolor=clrfb, alpha=plot_intFillAlpha)
-                    for pa in timeIntervalPerRaw_processed[k]:
+                    for pa in timeIntervalPerRaw_processed[k][side_body]:
                         t1,t2,ity = pa
                         if ity != intervalType:
                             continue
@@ -1488,7 +1494,7 @@ def plotSpectralData(plt,time_start = 0,time_end = 400, chanTypes_toshow = None,
                     #for pa in special_intervals[intervalType]:
                     #    ax.fill_between( list(pa) , ymin, ymax, facecolor=clrfb, alpha=plot_intFillAlpha)
 
-                    for pa in timeIntervalPerRaw_processed[k]:
+                    for pa in timeIntervalPerRaw_processed[k][side_body]:
                         t1,t2,ity = pa
                         if ity != intervalType:
                             continue
@@ -1586,7 +1592,7 @@ def plotSpectralData(plt,time_start = 0,time_end = 400, chanTypes_toshow = None,
                             #bandpower = plotChannelBand(ax,k,chn,fbname,time_start,tetmp/sampleFreq,logscale=0,color=color)
                             bandinfo = plotChannelBand(ax,k,chn,fbname,mintime,maxtime,
                                     logscale=0,color=color, 
-                                    normalization = ('whole','channel_distr'),
+                                    normalization = ('whole','channel_nout'),
                                     mean_corr = True)
                             if bandinfo is not None:
                                 bins, bandpower = bandinfo
@@ -1688,7 +1694,7 @@ def plotSpectralData(plt,time_start = 0,time_end = 400, chanTypes_toshow = None,
                             #    continue
                             #for pa in special_intervals[intervalType]:
                             #    ax.fill_between( list(pa) , ymin, ymax, facecolor=clrfb, alpha=plot_intFillAlpha)
-                            for pa in timeIntervalPerRaw_processed[k]:
+                            for pa in timeIntervalPerRaw_processed[k][side_body]:
                                 t1,t2,ity = pa
                                 if ity != intervalType:
                                     continue
@@ -1812,7 +1818,7 @@ def plotSpectralData(plt,time_start = 0,time_end = 400, chanTypes_toshow = None,
                         ax.patch.set_facecolor(mainSideColor)
                     else:
                         ax.patch.set_facecolor(otherSideColor)
-        print('Plotting {} finished'.format(k))
+        print('Plotting {}, col {} / {} finished'.format(k,colind,nc))
 
         if nc == 1:
             for ri in range(nr):
@@ -1875,56 +1881,6 @@ def plotSpectralData(plt,time_start = 0,time_end = 400, chanTypes_toshow = None,
     print('Plotting all finished')
 
 
-def getIntervalIntersection(a1,b1, a2, b2):
-    if b1 < a2:
-        return []
-    if a1 > b2:
-        return []
-    r =  [ max(a1,a2), min(b1,b2) ]
-    if r[1] - r[0] > 1e-2:
-        return r
-    else:
-        return []
-
-def removeBadIntervals(rawname ):
-    '''
-    remove pre and post that intersect tremor
-    '''
-    if len(timeIntervalPerRaw_processed) == 0:
-        return []
-    intervals = timeIntervalPerRaw_processed[rawname]
-
-    ivalis = {}  # dict of indices of interval
-    for itype in intTypes:
-        ivit = []
-        for i,interval in enumerate(intervals):
-            t1,t2,it = interval
-            if it == itype:
-                ivit += [i]
-        if len(ivit) > 0:
-            ivalis[itype] = ivit
-
-    tremIntInds = ivalis.get( 'middle_full', [] )
-    if len(tremIntInds) > 0:
-        for tii in tremIntInds:
-            t1,t2,it = intervals[tii]
-            for itype in ['pre','post']:
-                tiis = ivalis.get(itype, None)
-                if tiis is None:
-                    continue
-
-                indsToRemove = []
-                for tii2 in tiis:
-                    tt1,tt2,tit = intervals[tii2]
-                    isect = getIntervalIntersection(t1,t2,tt1,tt2)
-                    if len(isect) > 0:
-                        indsToRemove += [tii2]
-                        print(indsToRemove, isect, t1,t2,tt1,tt2)
-                        intervals[ tii2] = (tt1,tt2, tit+'_isecTrem' )
-                remainInds = list( set( tiis ) - set(indsToRemove) )
-                ivalis[itype] = remainInds
-
-    return intervals
 
 def makeBarPlot( ax, rawname, chname, legloc = None, printLog = False, xoffset = 0, axtop=None,
         spaceBetweenGroups = 2, skipPlot = False, binwidth = 1):
@@ -1939,7 +1895,7 @@ def makeBarPlot( ax, rawname, chname, legloc = None, printLog = False, xoffset =
         raise ValueError( 'intervalStats for {} is emptry, perhaps json was misread'.format(rawname) )
 
     ivalis = {}  # dict of indices of interval
-    for itype in intTypes:
+    for itype in gv.gparams['intTypes']:
         ivit = []
         for i,interval in enumerate(intervals):
             t1,t2,it = interval
@@ -1969,7 +1925,7 @@ def makeBarPlot( ax, rawname, chname, legloc = None, printLog = False, xoffset =
     sind_str,medcond,task = getParamsFromRawname(rawname)
     #find out how many bars we'll have in each group
     statNum = 0
-    for iti,itype in enumerate(intTypes):
+    for iti,itype in enumerate(gv.gparams['intTypes']):
         if itype not in ivalis:
             continue
         inds = ivalis[itype]  
@@ -2002,7 +1958,7 @@ def makeBarPlot( ax, rawname, chname, legloc = None, printLog = False, xoffset =
     #printLog = 1
 
     iti = 0
-    for itype in intTypes:
+    for itype in gv.gparams['intTypes']:
         if itype not in ivalis:
             continue
         inds = ivalis[itype]  
@@ -2013,7 +1969,7 @@ def makeBarPlot( ax, rawname, chname, legloc = None, printLog = False, xoffset =
         binerrs  = []
         binnames = []
 
-        #nbinsPerStatType = len(intTypes) + 1  # +1 to leave space between
+        #nbinsPerStatType = len(gv.gparams['intTypes']) + 1  # +1 to leave space between
         #nbinsPerFB = nbinsPerStatType * len(statTypes) + 2   # +2 to leave space between 
         xs = []
         xcur = 0
@@ -2056,7 +2012,7 @@ def makeBarPlot( ax, rawname, chname, legloc = None, printLog = False, xoffset =
                     bn += '*{}'.format(coef)
                 binnames += [ bn ]
                 xs += [ xcur  ]
-                xcur +=  len(intTypes)
+                xcur +=  len(gv.gparams['intTypes'])
                 #print(binnames)
 
         binvalsDict[itype]  = binvals
@@ -2090,7 +2046,7 @@ def makeBarPlot( ax, rawname, chname, legloc = None, printLog = False, xoffset =
         #if ax is not None:
         if not skipPlot:
             ax.bar( xscur, binvalsDict[itype], binwidth, 
-                    yerr=binerrssDict[itype], label = lbl, color = intType2col[itype] )
+                    yerr=binerrssDict[itype], label = lbl, color = gv.gparams['intType2col'][itype] )
 
 
     #ticklab = [0] * len(intTypes) * len(binnames)
@@ -2414,7 +2370,7 @@ def makeMutliBarPlot(ax, rawname, chnames, spaceBetween=14, binwidth=1, spaceBet
             else:
                 lbl = None
             ax.bar( xs, means, binwidth, 
-                    yerr=errs, label = lbl, color = intType2col[intType] )
+                    yerr=errs, label = lbl, color = gv.gparams['intType2col'][intType] )
             #labelset = True
             #print('xs',xs)
 
@@ -2516,8 +2472,8 @@ if __name__ == '__main__':
     stat_computeDistrMax = False
 
     singleRawMode = False
-    intTypes = ['pre', 'post', 'initseg', 'endseg', 'middle_full', 'no_tremor', 'unk_activity_full' ]
-    intType2col =  {'pre':'blue', 'post':'gold', 'middle_full':'red', 'no_tremor':'green',
+    gv.gparams['intTypes'] = ['pre', 'post', 'initseg', 'endseg', 'middle_full', 'no_tremor', 'unk_activity_full' ]
+    gv.gparams['intType2col'] =  {'pre':'blue', 'post':'gold', 'middle_full':'red', 'no_tremor':'green',
             'unk_activity_full': 'cyan', 'initseg': 'teal', 'endseg':'blueviolet' }
 
     import sys, getopt
@@ -2624,6 +2580,10 @@ if __name__ == '__main__':
         # trem_times_byhand[medcond][task]['tremor'] is a list of times that one needs to couple to get begin/end
         # there is also "no_tremor"
 
+    trem_times_nms_fn = 'trem_times_tau_nms.json'
+    with open(trem_times_nms_fn ) as jf:
+        trem_times_nms_byhand = json.load(jf)   
+
     with open(os.path.join('.','coord_labels.json') ) as jf:
         coord_labels = json.load(jf)
         gv.gparams['coord_labels'] = coord_labels
@@ -2728,12 +2688,13 @@ if __name__ == '__main__':
     gv.gparams['tremDet_timeStart'] = 0
     gv.gparams['tremDet_timeEnd'] = nonTaskTimeEnd
 
-    gv.gparams['plot_LFP_onlyFavoriteChannels'] = 1
-    #gv.gparams['plot_LFP_onlyJanFavoriteChannels'] = 1
+    gv.gparams['plot_LFP_onlyFavoriteChannels'] = 0
+    gv.gparams['plot_LFP_favRandomNonMainSide'] = 1
+
     plot_EMG_spectrogram          = False
     plot_MEGsrc_spectrogram       = True
     plot_onlyMainSide             = True
-    #plot_onlyMainSide             = False
+    plot_onlyMainSide             = False
     #show_EMG_band_corr            = True
     show_EMG_band_corr            = False
     show_stats_barplot            = True
@@ -2762,6 +2723,9 @@ if __name__ == '__main__':
     favoriteLFPch_perSubj = {'S01': ['LFPR23', 'LFPL01' ], 
             'S02': ['LFPR23', 'LFPL12'], 'S03': ['LFPR12', 'LFPL12'], 'S09':['LFPL78', 'LFPR67'], 
             'S08':['LFPR12' , 'LFPL56' ], 'S04':['LFPL01', 'LFPR01'] } 
+
+    favoriteLFPch_perSubj_nms = {'S01': ['LFPL01' ], 
+            'S02': [ 'LFPL23'], 'S03': [ 'LFPL12' ], 'S04':[ 'LFPR12' ], 'S05':[ 'LFPR23']  } 
 
     plot_minFreqInSpec = 2.5  # to get rid of heart rate
     plot_minFreqInBandpow = 2.5  # to get rid of heart rate
@@ -3186,11 +3150,32 @@ if __name__ == '__main__':
         if subj in tremorDetect_customThr:
             gv.gen_subj_info[subj]['tremorDetect_customThr'] = tremorDetect_customThr[subj]
 
+        gv.gen_subj_info[subj]['favoriteLFPch'] = []
         if useTauFavChannels:
             if subj in favoriteLFPch_perSubj:
                 gv.gen_subj_info[subj]['favoriteLFPch'] = favoriteLFPch_perSubj[subj]
         else:
-            gv.gen_subj_info[subj]['favoriteLFPch'] = [ gv.gen_subj_info[subj]['lfpchan_used_in_paper'] ]
+            gv.gen_subj_info[subj]['favoriteLFPch'] += [ gv.gen_subj_info[subj]['lfpchan_used_in_paper'] ]
+            
+            if subj in favoriteLFPch_perSubj_nms:
+                gv.gen_subj_info[subj]['favoriteLFPch'] += favoriteLFPch_perSubj_nms[subj] 
+            elif subj in gv.subjs_analyzed and gv.gparams['plot_LFP_favRandomNonMainSide']:
+                import time
+                np.random.seed( int ( time.time() ) )
+
+                tremSideCur = gv.gen_subj_info[sind_str]['tremor_side']
+                orderEMG, chinds_tuples, chnames_tuples = utils.getTuples(subj)
+                tremSideInd = orderEMG.index( tremSideCur )
+                revSideInd = 1- tremSideInd 
+                lfpnames = chnames_tuples[  revSideInd ]['LFP']  
+                nlfps = len(lfpnames)
+                favlfp = np.random.choice( lfpnames)
+                assert isinstance(favlfp, str)
+                gv.gen_subj_info[subj]['favoriteLFPch'] += [favlfp]
+            elif subj in gv.subjs_analyzed:
+                raise ValueError('no fav chan for subj {}'.format(subj) )
+
+                # look 
 
 
         #bc = gv.gen_subj_info[subj]['bad_channels']
@@ -3295,10 +3280,11 @@ if __name__ == '__main__':
     gv.freqBands = {'tremor':(tremorBandStart,tremorBandEnd), 'beta':betaBand,
             'lowgamma':lowGammaBand, 'highgamma':lowGammaBand,
             'gamma_motor':motorGammaBand, 'slow':slowBand }
-    #plot_freqBandNames_perModality = {'EMG': ['tremor' ], 'LFP': ['tremor', 'beta','gamma_motor'], 
-    #        'MEGsrc':['tremor','beta', 'gamma_motor' ], 'EOG':['lowgamma'] }
-    plot_freqBandNames_perModality = {'EMG': ['tremor' ], 'LFP': [ 'beta', 'gamma_motor'], 
+    plot_freqBandNames_perModality = {'EMG': ['tremor' ], 'LFP': ['tremor', 'beta','gamma_motor'], 
             'MEGsrc':['tremor','beta', 'gamma_motor' ], 'EOG':['lowgamma'] }
+    #plot_freqBandNames_perModality = {'EMG': ['tremor' ], 'LFP': [ 'beta', 'gamma_motor'], 
+    #        'MEGsrc':['tremor','beta', 'gamma_motor' ], 'EOG':['lowgamma'] }
+
     #plot_freqBandsLineStyle = {'tremor':'-', 'beta':'--', 'lowgamma':':', 'gamma_motor':':', 'slow':'-'  }
     plot_freqBandsLineStyle = {'tremor':'-', 'beta':'-', 'lowgamma':'-', 'gamma_motor':'-', 'slow':'-'  }
 
@@ -3332,65 +3318,82 @@ if __name__ == '__main__':
     ##############   compute some statisitics, like max, min, mean, cluster in subbands, etc -- can be time consuming
 
     gv.artifact_intervals = {}
-    # unpack tremor intervals sent by Jan
-    tremIntervalJan = {}
-    for subjstr in trem_times_byhand:
-        s = trem_times_byhand[subjstr]
-        for medcond in s:
-            ss = s[medcond]
-            for task in ss:
-                sss = ss[task]
-                rawname = getRawname(subjstr,medcond,task )
-                if rawname not in raws:
-                    continue
-                tremdat = {}
-                for intType in sss: # sss has keys -- interval types
-                    s4 = sss[intType]
-                    #s4p = copy.deepcopy(s4) 
-                    s4p = s4
-                    # or list of lists 
-                    # or list with one el which is list of lists
-                    cond1 = isinstance(s4,list) and len(s4) > 0
-                    condshared = isinstance(s4[0],list) and len(s4[0]) > 0 and isinstance(s4[0][0],list)
-                    cond2 = len(s4) == 1 and condshared
-                    # sometimes we have two lists on the first level but the second is empty
-                    cond3 = len(s4) == 2 and len(s4[1]) == 0 and condshared
-                    # sometimes it is not empty but the second one has indices very large
-                    cond4 = len(s4) == 2 and len(s4[1]) > 0 and condshared
-                    if cond1 and (cond2 or cond3 or cond4):
-                        s4p = s4[0]
-                        if len(s4) > 1:
-                            s4p += s4[1]
-                            
-                    if len( s4p[-1] ) == 0:
-                        del s4p[-1]
-    #                     if cond4:
-    #                         s4p = s4[0] + s4[1]
-    #                         #del s4p[1]
-    #                     else:
-    #                         s4p = s4[0]
-    #                     if cond3:
-    #                         del s4p[1]
+    def unpackTimeIntervals(trem_times_byhand, mainSide = True):
+        # unpack tremor intervals sent by Jan
+        tremIntervalJan = {}
+        for subjstr in trem_times_byhand:
+            s = trem_times_byhand[subjstr]
+            for medcond in s:
+                ss = s[medcond]
+                for task in ss:
+                    sss = ss[task]
+                    rawname = getRawname(subjstr,medcond,task )
+                    if rawname not in raws:
+                        continue
+                    tremdat = {}
+                    for intType in sss: # sss has keys -- interval types
+                        s4 = sss[intType]
+                        #s4p = copy.deepcopy(s4) 
+                        s4p = s4
+                        # or list of lists 
+                        # or list with one el which is list of lists
+                        cond1 = isinstance(s4,list) and len(s4) > 0
+                        if not cond1:
+                            continue
+                        condshared = isinstance(s4[0],list) and len(s4[0]) > 0 and isinstance(s4[0][0],list)
+                        cond2 = len(s4) == 1 and condshared
+                        # sometimes we have two lists on the first level but the second is empty
+                        cond3 = len(s4) == 2 and len(s4[1]) == 0 and condshared
+                        # sometimes it is not empty but the second one has indices very large
+                        cond4 = len(s4) == 2 and len(s4[1]) > 0 and condshared
+                        if cond1 and (cond2 or cond3 or cond4):
+                            s4p = s4[0]
+                            if len(s4) > 1:
+                                s4p += s4[1]
+                                
+                        if len( s4p[-1] ) == 0:
+                            del s4p[-1]
+        #                     if cond4:
+        #                         s4p = s4[0] + s4[1]
+        #                         #del s4p[1]
+        #                     else:
+        #                         s4p = s4[0]
+        #                     if cond3:
+        #                         del s4p[1]
 
-                    if len(s4p) == 1 and len(s4p[0]) == 0: 
-                        del s4p[0]
+                        if len(s4p) == 1 and len(s4p[0]) == 0: 
+                            del s4p[0]
 
-                    if intType.find('artifact') >= 0:
-                        print(rawname,intType, s4p)
-                        r = re.match( "artifact_(.+)", intType ).groups()
-                        chn = r[0]
-                        if rawname in gv.artifact_intervals:
-                            gv.artifact_intervals[rawname][chn] = s4p
-                        else:
-                            gv.artifact_intervals[ rawname] ={ chn: s4p } 
+                        if intType.find('artifact') >= 0:
+                            print(rawname,intType, s4p)
+                            r = re.match( "artifact_(.+)", intType ).groups()
+                            chn = r[0]
+                            if rawname in gv.artifact_intervals:
+                                gv.artifact_intervals[rawname][chn] = s4p
+                            else:
+                                gv.artifact_intervals[ rawname] ={ chn: s4p } 
 
-                    tremdat[intType] = s4p  # array of 2el lists
-                    
-                tremIntervalJan[rawname] = { 'left':[], 'right':[] }
-                maintremside = gv.gen_subj_info[subjstr]['tremor_side']
-                tremIntervalJan[rawname][maintremside] =  tremdat 
-                    #print(subjstr,medcond,task,kt,len(s4), s4)
-                    #print(subjstr,medcond,task,kt,len(s4p), s4p)
+                        tremdat[intType] = s4p  # array of 2el lists
+                        
+                    tremIntervalJan[rawname] = { 'left':[], 'right':[] }
+                    maintremside = gv.gen_subj_info[subjstr]['tremor_side']
+                    if mainSide:
+                        side = maintremside  
+                    else: 
+                        side = utils.getOppositeSideStr(maintremside)
+                    tremIntervalJan[rawname][side] =  tremdat 
+                        #print(subjstr,medcond,task,kt,len(s4), s4)
+                        #print(subjstr,medcond,task,kt,len(s4p), s4p)
+        return tremIntervalJan
+
+    tremIntervalJan = unpackTimeIntervals(trem_times_byhand, mainSide = True)
+    tremIntervalJan_nms = unpackTimeIntervals(trem_times_nms_byhand, mainSide = False)
+    for rawn in tremIntervalJan:
+        sind_str,medcond,task = getParamsFromRawname(rawn)
+        maintremside = gv.gen_subj_info[sind_str]['tremor_side']
+        opside= utils.getOppositeSideStr(maintremside)
+        if rawn in tremIntervalJan_nms:
+            tremIntervalJan[rawn][opside] = tremIntervalJan_nms[rawn][opside] 
 
     print('Found artifacts info: ',gv.artifact_intervals)
     #sys.exit(0)
@@ -3480,8 +3483,8 @@ if __name__ == '__main__':
 
     plotTremNegOffset = 2.
     plotTremPosOffset = 2.
-    maxPlotLen = 6
-    addIntLenStat = 3
+    maxPlotLen = 6   # for those interval that are made for plotting, not touching intervals for stats
+    addIntLenStat = 5
     longToLeft = True
     if timeIntervalsFromTremor:
         mvtTypes = ['tremor', 'no_tremor', 'unk_activity']
@@ -3491,7 +3494,12 @@ if __name__ == '__main__':
     else:
         timeIntervalPerRaw_processed = {}
         for k in raws:
-            timeIntervalPerRaw_processed[k] = [ (plot_time_start, plot_time_end, 'entire') ]
+            ips = {}
+            for side in ['left', 'right' ]:
+                ips[side] = [ (plot_time_start, plot_time_end, 'entire') ]  
+            timeIntervalPerRaw_processed[k] = ips
+ 
+    #print( timeIntervalPerRaw_processed )
     #import pdb; pdb.set_trace()
 
     try:
@@ -3499,31 +3507,37 @@ if __name__ == '__main__':
     except (NameError, AttributeError):
         print('Computing interval stats!')
         for k in raws:
-            ivals = removeBadIntervals(k)
-            timeIntervalPerRaw_processed[ k ] =ivals  # maybe not necessary but just in case
+            for side in ['left', 'right' ]:
+                ivals = timeIntervalPerRaw_processed[k][side]
+                ivals = utils.removeBadIntervals(ivals)
+                timeIntervalPerRaw_processed[ k ][side] =ivals  # maybe not necessary but just in case
 
-        gv.glob_stats_perint = getStatsFromTremIntervals(timeIntervalPerRaw_processed)
+        gv.glob_stats_perint, gv.glob_stats_perint_nms = getStatsFromTremIntervals(timeIntervalPerRaw_processed)
     else:
         print('----- Using previously computed interval stats!')
     # [raw] -- list of 3-tuples
 
     # I want to make a copy where pre and post are not present (for plotting), but gather stats for all intervals
-    plot_timeIntervalPerRaw = {}
+    plot_timeIntervalPerRaw = {}  # dict of dicts of lists of 3-tuples
     if timeIntervalsFromTremor and not singleRawMode:
         itypesExcludeFromPlotting =  ['pre', 'post', 'initseg', 'endseg', 'middle_full', 'entire']
         itypesExcludeFromPlotting =  ['initseg', 'endseg', 'middle_full', 'entire']
         for k in timeIntervalPerRaw_processed:
-            intervals = timeIntervalPerRaw_processed[k]
-            res = []
-            for interval in intervals:
-                t1,t2,intType = interval
-                if intType in itypesExcludeFromPlotting:
-                    continue
-                res += [interval]
-            plot_timeIntervalPerRaw[k] = res
+            plot_timeIntervalPerRaw[k] = {}
+            for side in ['left', 'right']:
+                intervals = timeIntervalPerRaw_processed[k][side]
+                res = []
+                for interval in intervals:
+                    t1,t2,intType = interval
+                    if intType in itypesExcludeFromPlotting:
+                        continue
+                    res += [interval]
+                plot_timeIntervalPerRaw[k][side] = res
     else:
         for k in raws:
-            plot_timeIntervalPerRaw[k] = [ (plot_time_start, plot_time_end, 'entire') ]
+            plot_timeIntervalPerRaw[k] = {}
+            for side in ['left', 'right']:
+                plot_timeIntervalPerRaw[k][side] = [ (plot_time_start, plot_time_end, 'entire') ]
 
     if save_stats:
         for k in gv.glob_stats_perint:

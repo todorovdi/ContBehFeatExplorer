@@ -5,9 +5,63 @@ import re
 import globvars as gv
 import scipy.signal as sig
 
+def getIntervalIntersection(a1,b1, a2, b2):
+    if b1 < a2:
+        return []
+    if a1 > b2:
+        return []
+    r =  [ max(a1,a2), min(b1,b2) ]
+    if r[1] - r[0] > 1e-2:
+        return r
+    else:
+        return []
+
+def removeBadIntervals(intervals ):
+    '''
+    remove pre and post that intersect tremor
+    '''
+    #if len(timeIntervalPerRaw_processed) == 0:
+    #    return []
+    #intervals = timeIntervalPerRaw_processed[rawname]
+    if len(intervals) == 0:
+        return []
+
+    ivalis = {}  # dict of indices of interval
+    for itype in gv.gparams['intTypes']:
+        ivit = []
+        for i,interval in enumerate(intervals):
+            t1,t2,it = interval
+            if it == itype:
+                ivit += [i]
+        if len(ivit) > 0:
+            ivalis[itype] = ivit
+
+    tremIntInds = ivalis.get( 'middle_full', [] )
+    if len(tremIntInds) > 0:
+        for tii in tremIntInds:
+            t1,t2,it = intervals[tii]
+            for itype in ['pre','post']:
+                tiis = ivalis.get(itype, None)
+                if tiis is None:
+                    continue
+
+                indsToRemove = []
+                for tii2 in tiis:
+                    tt1,tt2,tit = intervals[tii2]
+                    isect = getIntervalIntersection(t1,t2,tt1,tt2)
+                    if len(isect) > 0:
+                        indsToRemove += [tii2]
+                        print(indsToRemove, isect, t1,t2,tt1,tt2)
+                        intervals[ tii2] = (tt1,tt2, tit+'_isecTrem' )
+                remainInds = list( set( tiis ) - set(indsToRemove) )
+                ivalis[itype] = remainInds
+
+    return intervals
+
 def processJanIntervals( intervalData, intvlen, intvlenStats, loffset, roffset, time_end, mvtTypes = ['tremor'], leftoffset = 0.2  ):
     '''
-     intervalData -- dict of dicts, each subdict has 'tremor' and 'nontremor' -- list of 2-el lists
+     intervalData -- dict of dicts, each subdict has 'left' and 'right keys,
+      each containing lists of triples (a,b,intervalType)
     '''
 
       # in sec. Don't want the interval to start with recording (there are artifacts)
@@ -78,12 +132,21 @@ def processJanIntervals( intervalData, intvlen, intvlenStats, loffset, roffset, 
     tipr = {}  # to plot all intervals, tipr[rawname] is a list of 2-el list with interval ends
     for k in intervalData:
         ti = intervalData[k]
-        for side in ti:
+        for side in ['left','right']:
+            if side not in ti:
+                tipr[k][side] = []
+                continue
+            
             tis = ti[side]
             if not isinstance(tis,dict):
                 continue
+            if k not in tipr:
+                tipr[k] = {}
+            tipr[k][side] = {}
+
+            #import pdb; pdb.set_trace()
             
-            tipr[k] = [] 
+            tipr[k][side] =  [] 
             for mvtType in mvtTypes:
                 if mvtType not in tis:
                     continue
@@ -131,10 +194,10 @@ def processJanIntervals( intervalData, intvlen, intvlenStats, loffset, roffset, 
                     #if k == 'S05_off_move':
                     #    import pdb; pdb.set_trace()
 
-                    tipr[k]  += intsToAdd
-            if len(tipr[k]) == 0:
+                    tipr[k][side]  += intsToAdd
+            if len(tipr[k][side] ) == 0:
                 #tipr[k]  = [ (0,time_end,'unk') ] 
-                tipr[k]  = [ (0,time_end,'entire') ] 
+                tipr[k][side]  = [ (0,time_end,'entire') ] 
 
             #if k == 'S05_off_move':
             #    print('fdsfsd ',tipr[k])
@@ -148,8 +211,8 @@ def getMEGsrc_chname_nice(chn):
         num = int( r[0] )
         nlabel = num // 2
         nside =  num % 2
-        # even indices -- left
-        side = ['left','right'] [nside]
+        # even indices -- left [no! even correspond to right]
+        side = ['right', 'left'] [nside]
         label = gv.gparams['coord_labels'][nlabel]
 
         name = '{}_{}'.format( label,side)
@@ -416,6 +479,16 @@ def getTuples(sind_str):
 
     #chns = chnames_tuples[pair_ind]['EMG']
     return sides, indtuples, nametuples
+
+def getOppositeSideStr(side ): 
+    assert side in ['left', 'right' ]
+    if side == 'left':
+        return 'right'
+    else:
+        return 'left'
+    #orderEMG, chinds_tuples, chnames_tuples = getTuples(sind_str)
+    #pair_ind = orderEMG.index( 1 - side ) 
+    #return orderEMG[pair_ind]
 
 def getBindsInside(bins, b1, b2, retBool = True):
     binsbool  = np.logical_and(bins >= b1 , bins <= b2)
@@ -843,7 +916,10 @@ def getBandpow(k,chn,fbname,time_start,time_end, mean_corr = False):
             #goodinds = np.where( goodinds )[0]
             #me = np.mean(Sxx_b[:,goodinds] , axis=1) 
             sind_str, medcond, task = getParamsFromRawname(k)
-            me = gv.glob_stats[sind_str][medcond][task][chn][ 'mean_spec_nout_full' ]
+            st = gv.glob_stats[sind_str][medcond][task][chn]
+            me = st.get( 'mean_spec_nout_full' , None )
+            if me is None:
+                return None
             me = me[ np.logical_and( freqs >= fbs, freqs <= fbe ) ]
             Sxx_b =  ( Sxx_b -  me[:,None] ) / me[:,None]    # divide by mean
 

@@ -260,3 +260,43 @@ S10_off_move [all MEG are bad]
 
 S10_off_rest
 there is really strong activity during tremor
+Ask Jan: 63-66 is an artifact or not?
+
+
+--------------
+---------------   non main side
+
+  S01 tak LFPL01
+S01_off_hold
+any LFP will do
+
+S01_on_hold
+LFPL23 had more strange peaks other two are similar
+
+S01_on_move
+LFPL12 and 01 have more peaks, but not so strange
+LFPL23 artifact 267.9-268.7
+
+  s02 mabye LFPL23
+[not all S02]
+S02_on_move
+119-120.3, 121.8-122.7, 124,124.7, 128-129.5, 140-143.8    artifact all lfps
+162.85-163.3  -LFPR01
+246-248 LFPR23
+
+S02_off_hold
+LFPL12 more active in tremor than others
+LFPL23 makes strange tremor upward after tremor ends
+292-292.7 LFPL * artifact
+296-end  LFPL * artifact
+ 
+   S04  LFPR12
+S04_on_move
+LFPR23 seem to have something to do with tremor existence (not intencity). Or maybe more with heartbeat?
+LFPR12 shows funnier things (but not creepy)
+
+S05_on_hold 
+some smaller MEG artifacts in the second half of the 300 sec part, I did not label them
+
+S05_on_move
+EMG activity almost all time, not quite like tremor
