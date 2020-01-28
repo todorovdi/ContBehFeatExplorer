@@ -34,6 +34,7 @@ There is short pause in tremor around 50 and something happens in
 LFP tremor and beta, also in MEG gamma
 LFP tremor looks weird
 in the begininng of second tremor there is LFP tremor and beta increase
+     during tremor tremor band in LFP goes really high in LFP and it ruins the scale of the bandplot
 
 S02_off_hold
 * 0-4 tremor

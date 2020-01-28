@@ -148,7 +148,7 @@ def precomputeSpecgrams(raws,ks=None,NFFT=256, specgramoverlap=0.75,forceRecalc=
     return specgrams
 
 ########  Gen stats across conditions
-def getStatPerChan(time_start,time_end, glob_stats = None, singleRaw = None, mergeTasks = False, modalities=None, datPrep = None):
+def getStatPerChan(time_start,time_end, glob_stats = None, singleRaw = None, mergeTasks = False, modalities=None, datPrep = None, specgramPrep = None):
     '''
     returns task independent
     stats = glob_stats[sind_str][medcond][chname]
@@ -190,9 +190,12 @@ def getStatPerChan(time_start,time_end, glob_stats = None, singleRaw = None, mer
                 if not mergeTasks:
                     stat_leaflevel = {}
 
-                sp = gv.specgrams[k]  # spectrogram from a given raw file
+                if specgramPrep is None:
+                    sp = gv.specgrams[k]  # spectrogram from a given raw file
+                else:
+                    sp = specgramPrep
 
-                raw = raws[k]
+                #raw = raws[k]
                 #chnames = list( sp.keys() )
                 #chnames = raw.info['ch_names'] 
 
@@ -204,7 +207,12 @@ def getStatPerChan(time_start,time_end, glob_stats = None, singleRaw = None, mer
                     #chnames2 = chnames_tuples[side_ind]['LFP'] + chnames_tuples[side_ind]['EMG']
 
                     if datPrep is not None:
-                        if side not in datPrep:
+                        #if glob_stats is not None:
+                        #    import ipdb; ipdb.set_trace()
+
+                        if singleRaw not in datPrep:
+                            raise ValueError("wrong datPrep")
+                        if side not in datPrep[singleRaw]:
                             continue
                         chnames2, chdata = datPrep[singleRaw][side]
                     else:
@@ -228,6 +236,7 @@ def getStatPerChan(time_start,time_end, glob_stats = None, singleRaw = None, mer
                     else:
                         n_splits = 15
 
+                    
                     #args_outer += [ (k, f,b,spdata, chdat, chn, stat_leaflevel, time_start,time_end,
                     #        len(raws_from_subj), n_splits, gsarg ) ]
 
@@ -249,7 +258,7 @@ def getStatPerChan(time_start,time_end, glob_stats = None, singleRaw = None, mer
 
                         gsarg = None
                         if glob_stats is not None:
-                            gsarg = glob_stats[subj][medcond][task][chn]
+                            gsarg = glob_stats[chn]
 
                         args += [ (k, f,b,spdata, chdat, chn, stat_leaflevel, time_start,time_end,
                                 len(raws_from_subj), n_splits, gsarg ) ]
@@ -760,10 +769,11 @@ def stat_ch(rawname, f,b,spdata, chdat, chn, stat_leaflevel,
 
 def stat_proxy( arg ):
 
-    t1,t2,rawname, gs,intind, itype, datPrep, intside = arg
+    t1,t2,rawname, gs,intind, itype, datPrep, intside, specgramPrep = arg
 
     print('{}: starting {} No {} stats computation'.format(rawname, itype, intind) )
-    st = getStatPerChan(t1,t2,singleRaw = rawname, mergeTasks=False, glob_stats=gs, datPrep = datPrep )
+    st = getStatPerChan(t1,t2,singleRaw = rawname, mergeTasks=False, glob_stats=gs, datPrep = datPrep,
+            specgramPrep = specgramPrep)
     return  rawname, intside, intind, st
  
 def getStatsFromTremIntervals(intervalDict):
@@ -817,8 +827,15 @@ def getStatsFromTremIntervals(intervalDict):
 
                 datPrep = {}
                 datPrep[rawname] = dtcr
+                #import ipdb; ipdb.set_trace()
 
-                args += [ (t1eff,t2eff,rawname, gv.glob_stats, intind, itype, datPrep, intside) ]
+                specgramPrep = gv.specgrams[rawname]
+
+                gs = gv.glob_stats[sind_str][medcond][task]
+                # for interval stats computation
+                args += [ (t1eff,t2eff,rawname, gs, intind, itype, datPrep, intside, specgramPrep) ]
+
+                #print('len args ',len(args) )
 
                 #st = getStatPerChan(t1,t2,singleRaw = rawname, mergeTasks=False, glob_stats=gv.glob_stats )
                 #statlist[intind] = st[sind_str][ medcond][ task]
@@ -826,6 +843,10 @@ def getStatsFromTremIntervals(intervalDict):
                 statsMainSide[rawname]  = statlist
             else:
                 statsOtherSide[rawname] = statlist
+
+    #from IPython import embed; embed()
+
+    print("Will compute stats for {} intervals".format(len(args) ) )
 
     if len(args) > 1 and (not statsInterval_forceOneCore):
         ncores = mpr.cpu_count()
@@ -842,6 +863,9 @@ def getStatsFromTremIntervals(intervalDict):
             #stats[k][intind] = st
     else:
         for arg in args:
+            #import pdb; pdb.set_trace()
+
+            #import ipdb; ipdb.set_trace()
             k,intside,intind,st = stat_proxy(arg)
             sind_str,medcond, task = getParamsFromRawname(rawname)
             if intside == gv.gen_subj_info[sind_str]['tremor_side']:
@@ -1190,8 +1214,6 @@ def plotSpectralData(plt,time_start = 0,time_end = 400, chanTypes_toshow = None,
         nc = 1
     else:
         nc = len(raw_int_pairs)
-
-    import pdb; pdb.set_trace()
 
     nr = nplots_per_side
     if not plot_onlyMainSide:
@@ -1887,11 +1909,15 @@ def plotSpectralData(plt,time_start = 0,time_end = 400, chanTypes_toshow = None,
 def makeBarPlot( ax, rawname, chname, legloc = None, printLog = False, xoffset = 0, axtop=None,
         spaceBetweenGroups = 2, skipPlot = False, binwidth = 1):
     #statTypes = ['max_nout_pct', 'L1', 'L2', 'L05' ]
-    statTypes = ['max_nout_pct', 'meanDiv_L1', 'meanDiv_L2', 'meanDiv_L05' ]
-    incCoef = {'max_nout_pct': 200 }  # to look normal on the plot
+    statTypes = ['mc_max_nout', 'meanDiv_L1', 'meanDiv_L2', 'meanDiv_L05' ]
+    incCoef = {'mc_max_nout': 200 }  # to look normal on the plot
 
-    intervals = timeIntervalPerRaw_processed[rawname]
+    sind_str,medcond,task = getParamsFromRawname(rawname)
+    tremSideCur = gv.gen_subj_info[sind_str]['tremor_side']
+
+    intervals = timeIntervalPerRaw_processed[rawname] [ tremSideCur ]
     intervalStats = gv.glob_stats_perint[rawname]
+    #intervalStats_nms = gv.glob_stats_perint_nms[rawname]
 
     if len(intervalStats) == 0:
         raise ValueError( 'intervalStats for {} is emptry, perhaps json was misread'.format(rawname) )
@@ -1924,7 +1950,6 @@ def makeBarPlot( ax, rawname, chname, legloc = None, printLog = False, xoffset =
 
     #import pdb; pdb.set_trace()
 
-    sind_str,medcond,task = getParamsFromRawname(rawname)
     #find out how many bars we'll have in each group
     statNum = 0
     for iti,itype in enumerate(gv.gparams['intTypes']):
@@ -2144,7 +2169,7 @@ def makeBarPlot( ax, rawname, chname, legloc = None, printLog = False, xoffset =
     # better do in in jupyter
     # merge EMG channels somehow
 
-def plotBarplotTable(modalities):
+def plotBarplotTable(modalities, onlyMainSide = 1):
     '''
     plot for several raws, outer function
     '''
@@ -2173,7 +2198,7 @@ def plotBarplotTable(modalities):
             sind_str,medcond, task  = getParamsFromRawname(k)
 
             orderEMG, chinds_tuples, chnames_tuples = utils.getTuples(sind_str)
-            if plot_onlyMainSide:
+            if onlyMainSide:
                 pair_inds = [orderEMG.index( gv.gen_subj_info[sind_str]['tremor_side'] ) ]
 
             chnames = []
@@ -2203,7 +2228,8 @@ def plotBarplotTable(modalities):
         #for pi in pair_inds:
         #    chnames += chnames_tuples[pi][modality]
 
-        makeMutliBarPlot(ax, list(raws.keys() ), chansPerModPerRaw[modality], spaceBetween )
+        makeMutliBarPlot(ax, list(raws.keys() ), chansPerModPerRaw[modality], spaceBetween, 
+                onlyMainSide=onlyMainSide )
         ax.legend( loc = (1.01,0) )
         ax.set_title('Averge  {} barplot total {} raws'.format(modality, len(raws) ) )
 
@@ -2240,7 +2266,8 @@ def plotBarplotTable(modalities):
     else:
         print('Skipping saving fig')
 
-def makeMutliBarPlot(ax, rawname, chnames, spaceBetween=14, binwidth=1, spaceBetweenGroups = 2):
+def makeMutliBarPlot(ax, rawname, chnames, spaceBetween=14, binwidth=1, spaceBetweenGroups = 2,
+        onlyMainSide=1):
     '''
     plot several chnames on one horizontal plot
     '''
@@ -2360,7 +2387,7 @@ def makeMutliBarPlot(ax, rawname, chnames, spaceBetween=14, binwidth=1, spaceBet
             vpi = vpi[goodrawinds,: ]
 
             valsPerItype[intType] = vpi
-            #print(vpi.shape)
+            print('intType {} , average among {}'.format( intType, vpi.shape[0] ) )
 
             means = np.mean( vpi, axis=0)
             errs = np.std( vpi, axis=0)
@@ -2464,6 +2491,7 @@ if __name__ == '__main__':
     plot_onlyMultiBarplot = False
     plot_time_start = 0
     plot_time_end = 300
+    plot_onlyMainSide             = True
 
     time_start_forstats, time_end_forstats = 0,300
     forceOneCore_globStats     = 0
@@ -2489,7 +2517,7 @@ if __name__ == '__main__':
                 ["subjinds=","tasks=","medconds=","MEG_ROI=","singleraw","rawname=",
                     "update_spec", "update_stats", "barplot", "no_specload", "skipPlot" ,
                     "plot_time_start=", "plot_time_end=", "time_end_forstats=", 
-                    "spec_time_end=", "debug"]) 
+                    "spec_time_end=", "debug", "plot_other_side"]) 
         print(sys.argv, opts, args)
 
         for opt, arg in opts:
@@ -2526,6 +2554,8 @@ if __name__ == '__main__':
                 #    loadSpecgrams = True
                 #    saveSpecgrams = True
                 #    saveSpecgrams_skipExist = True
+            elif opt == '--plot_other_side':
+                plot_onlyMainSide = False
 
             elif opt == '--update_stats':
                 #flag = int(arg)
@@ -2695,8 +2725,6 @@ if __name__ == '__main__':
 
     plot_EMG_spectrogram          = False
     plot_MEGsrc_spectrogram       = True
-    plot_onlyMainSide             = True
-    plot_onlyMainSide             = False
     #show_EMG_band_corr            = True
     show_EMG_band_corr            = False
     show_stats_barplot            = True
@@ -3410,6 +3438,7 @@ if __name__ == '__main__':
         if load_stats:
             try:
                 gv.glob_stats_perint = {}
+                gv.glob_stats_perint_nms = {}
                 gv.glob_stats = {}
                 timeIntervalPerRaw_processed = {}
                 for k in raws:
@@ -3420,6 +3449,7 @@ if __name__ == '__main__':
 
                     assert f['rawname'] == k
                     gv.glob_stats_perint[k] = f['glob_stats_perint'][()]
+                    gv.glob_stats_perint_nms[k] = f['glob_stats_perint_nms'][()]
                     timeIntervalPerRaw_processed[k] = f['timeIntervalPerRaw_processed'][()]
                     if sind_str not in gv.glob_stats:
                         gv.glob_stats[sind_str] = {}
@@ -3435,6 +3465,7 @@ if __name__ == '__main__':
                 doStatLoad = 1
                 gv.glob_stats = {}
                 gv.glob_stats_perint = None
+                gv.glob_stats_perint_nms = None
                 del timeIntervalPerRaw_processed
 
             #f = np.load(stats_fname, allow_pickle=1)
@@ -3551,9 +3582,10 @@ if __name__ == '__main__':
             if not save_stats_onlyIfNotExists or  (not os.path.exists(fn) ):
                 gs = gv.glob_stats[sind_str][medcond][task]
                 gspi = gv.glob_stats_perint[k]
+                gspi_nms = gv.glob_stats_perint_nms[k]
                 tirp = timeIntervalPerRaw_processed[k]
 
-                np.savez(fn , glob_stats_perint=gspi, 
+                np.savez(fn , glob_stats_perint=gspi, glob_stats_perint_nms=gspi_nms,
                     glob_stats=gs, timeIntervalPerRaw_processed=tirp, rawname=k)
 
             #np.savez(stats_fname , glob_stats_perint=glob_stats_perint, 
@@ -3621,6 +3653,6 @@ if __name__ == '__main__':
         else:
             plot_multibar_modalities = ['LFP', 'MEGsrc' ]
             #cleanIntervals( )
-            plotBarplotTable(plot_multibar_modalities)
+            plotBarplotTable(plot_multibar_modalities, onlyMainSide = plot_onlyMainSide)
 
 
