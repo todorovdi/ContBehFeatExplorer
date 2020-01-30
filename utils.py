@@ -158,6 +158,9 @@ def processJanIntervals( intervalData, intvlen, intvlenStats, loffset, roffset, 
                 #i = 0
                 for p in ti2:  # list of interval ends 
                     intType = ''
+                    if len(p) != 2:
+                        raise ValueError('{}, {}, {}: {} error in the interval specification'.
+                                format(k,side,mvtType,p) )
                     a,b = p 
                     if a >= time_end:
                         continue
@@ -497,7 +500,7 @@ def getOppositeSideStr(side ):
     #pair_ind = orderEMG.index( 1 - side ) 
     #return orderEMG[pair_ind]
 
-def getBindsInside(bins, b1, b2, retBool = True):
+def getBinsInside(bins, b1, b2, retBool = True):
     binsbool  = np.logical_and(bins >= b1 , bins <= b2)
 
     if retBool:
@@ -877,12 +880,15 @@ def mergeTremorIntervals(intervals, mode='intersect'):
     return newintervals
 
 ############################# Spec helper funcions
-def getBandpow(k,chn,fbname,time_start,time_end, mean_corr = False):
+def getBandpow(k,chn,fbname,time_start,time_end, mean_corr = False, spdat=None):
     '''
     can return not all bins, because filters artifacts!
     '''
-    specgramsComputed = gv.specgrams[k]
-    freqs, bins, Sxx = specgramsComputed[chn]
+    if spdat is None:
+        specgramsComputed  = gv.specgrams[k]
+        freqs, bins, Sxx = specgramsComputed[chn]
+    else:
+        freqs, bins, Sxx = spdat
     fbs,fbe = gv.freqBands[fbname]
     r = getSubspec(freqs,bins,Sxx, fbs,fbe, 
             time_start,time_end)
@@ -911,7 +917,7 @@ def getBandpow(k,chn,fbname,time_start,time_end, mean_corr = False):
 
         spec_thrBadScaleo = 0.8
         nonTaskTimeEnd = 300
-        validbins_bool0 = getBindsInside(bins_b, max(time_start,spec_thrBadScaleo), 
+        validbins_bool0 = getBinsInside(bins_b, max(time_start,spec_thrBadScaleo), 
                 min(nonTaskTimeEnd-spec_thrBadScaleo, time_end), retBool = True) 
 
         validbins_bool1 = filterArtifacts(k,chn,bins_b)

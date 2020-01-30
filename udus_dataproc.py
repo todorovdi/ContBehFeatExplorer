@@ -398,7 +398,7 @@ def stat_ch(rawname, f,b,spdata, chdat, chn, stat_leaflevel,
     bandpows = {}
     fbnames = ['slow', 'tremor','beta', 'gamma_motor']
     for fbname in fbnames:
-        r = utils.getBandpow(k,chn,fbname, time_start, time_end) 
+        r = utils.getBandpow(k,chn,fbname, time_start, time_end, spdat=(f,b,spdata) ) 
         if r is not None:
             bins_b, bandpower = r
             if bandpower.size == 0:
@@ -460,7 +460,7 @@ def stat_ch(rawname, f,b,spdata, chdat, chn, stat_leaflevel,
     mifNeeded('sum', 'mean',  np.mean(chdat) / nraws_from_subj         )
 
 
-    validbins_bool = utils.getBindsInside(b, max(time_start,spec_thrBadScaleo), 
+    validbins_bool = utils.getBinsInside(b, max(time_start,spec_thrBadScaleo), 
             min(nonTaskTimeEnd-spec_thrBadScaleo, time_end), retBool = True) 
     if np.sum(validbins_bool ) == 0:
         print ( 'WARNING stat_ch: No valid bins! {}:{} {}-{}'.format(rawname,chn, time_start,time_end ))
@@ -1163,10 +1163,10 @@ def plotSpectralData(plt,time_start = 0,time_end = 400, chanTypes_toshow = None,
     if nc == 1:
         ncformal = 2   # don'a make sinlge row because it would ruin adressing
         gridspec_kw={'width_ratios': [1, 0.001]}
-        wweff *= 10
+        wweff *= 15
         wweff *= (plot_time_end / 300)
         wspace = 0.01
-        leftspace = 0.015
+        leftspace = 0.005
 
     fig, axs = plt.subplots(ncols = ncformal, nrows=nr, figsize= (wweff*nc,hh*nr), sharey='none',
             gridspec_kw= gridspec_kw)
@@ -1936,6 +1936,7 @@ def makeBarPlot( ax, rawname, chname, legloc = None, printLog = False, xoffset =
         intervalStats = gv.glob_stats_perint_nms[rawname]
 
     intervals = timeIntervalPerRaw_processed[rawname] [ side ]
+    assert len(intervals) <= len(intervalStats), "{} There are more intervals than stats, perhaps need to recalc stats".format( rawname, chname)
 
     if len(intervalStats) == 0:
         raise ValueError( 'intervalStats for {} is emptry, perhaps json was misread'.format(rawname) )
@@ -1985,8 +1986,9 @@ def makeBarPlot( ax, rawname, chname, legloc = None, printLog = False, xoffset =
                     intst = intervalStats[ii ]
                     if isinstance(intst,int):
                         continue
-
-                    pp = intervalStats[ii ] [sind_str][medcond][task]  [chname]
+                    
+                    st = intervalStats[ii ] [sind_str][medcond][task]
+                    pp =  st [chname]
                     if s0 not in pp:
                         if printLog:
                             print('{} is not in {}{}{}'.format(s0,chname,fbname,itype ) )
@@ -2101,6 +2103,7 @@ def makeBarPlot( ax, rawname, chname, legloc = None, printLog = False, xoffset =
     #ax.set_xticklabels ( ticklab ,rotation=45)
 
     if len(bincoordsDict ) == 0:
+        raise ValueError('bincoordsDict is empty for {}, probably there are no intervals marked. Are you sure it is like that?'.format(rawname) )
         return 0, {}, {}, {}, {}
     xticks = list(bincoordsDict.values() )[0]
     xlabels = binnames
@@ -2195,9 +2198,14 @@ def plotBarplotTable(modalities, onlyMainSide = 1):
     hh = 10
 
     maxrawcols = 10
-
+    ndoublerows = int( np.ceil( len(raws) / maxrawcols ) )
     nc = min(   max( len(raws), 2) + 1   , maxrawcols + 1 )  # matplotlib doesn't allow too large images
     nr = max( len(modalities) , 2)
+
+    if ndoublerows > 1:
+        nc = maxrawcols
+        nr = ndoublerows * 2
+
     fig,axs = plt.subplots(nrows = nr, ncols = nc, figsize = (nc*ww, nr*hh) )
 
     pair_inds = None
@@ -2205,6 +2213,15 @@ def plotBarplotTable(modalities, onlyMainSide = 1):
     spaceBetween = 15
 
     hshift = 1
+
+    def getAxCoord( modi, horind):
+        assert modi <= 1
+        colind = horind % maxrawcols 
+        rowind = 2 * (horind // maxrawcols) + modi  # is number of modalities
+        #if rowind == 0:
+        #    colind += 1 
+         
+        return rowind, colind
 
 
     chansPerModPerRaw = {}
@@ -2238,11 +2255,12 @@ def plotBarplotTable(modalities, onlyMainSide = 1):
                 chperraw_otherside[ k ] = chnames_otherside
             
 
-            if rawi < maxrawcols: 
-                ax = axs[modi, hshift + rawi]
-                makeMutliBarPlot(ax, k, chnames, spaceBetween )
-                ax.legend( loc = (1.01,0) )
-                ax.set_title('{}: {} barplot '.format(k,modality) )
+            #if rawi < maxrawcols: 
+            axcoord = getAxCoord( modi, hshift + rawi)
+            ax = axs[axcoord]
+            makeMutliBarPlot(ax, k, chnames, spaceBetween, mainSide=onlyMainSide )
+            ax.legend( loc = (1.01,0) )
+            ax.set_title('{}: {} barplot '.format(k,modality) )
 
         chansPerModPerRaw[modality] = chperraw
         chansPerModPerRaw_otherside[modality] = chperraw_otherside
@@ -2261,7 +2279,8 @@ def plotBarplotTable(modalities, onlyMainSide = 1):
         #    chnames += chnames_tuples[pi][modality]
 
         makeMutliBarPlot(ax, list(raws.keys() ), chansPerModPerRaw[modality], spaceBetween, 
-                chnamesOtherSide = chansPerModPerRaw_otherside[modality] )
+                chnamesOtherSide = chansPerModPerRaw_otherside[modality],
+                mainSide=onlyMainSide)
         ax.legend( loc = (1.01,0) )
         ax.set_title('Averge  {} barplot total {} raws'.format(modality, len(raws) ) )
 
@@ -2299,7 +2318,7 @@ def plotBarplotTable(modalities, onlyMainSide = 1):
         print('Skipping saving fig')
 
 def makeMutliBarPlot(ax, rawname, chnames, spaceBetween=14, binwidth=1, spaceBetweenGroups = 2,
-        chnamesOtherSide=None):
+        chnamesOtherSide=None, mainSide = 1):
     '''
     plot several chnames on one horizontal plot
     '''
@@ -2354,7 +2373,7 @@ def makeMutliBarPlot(ax, rawname, chnames, spaceBetween=14, binwidth=1, spaceBet
             #print('shift is ',shift)
             ret = makeBarPlot(ax, rawn, chname, xoffset=shift, legloc = legloc_, axtop=ax2,
                     skipPlot = multirawMode , binwidth = binwidth, 
-                    spaceBetweenGroups = spaceBetweenGroups, mainSide = 1) #legloc= (1.1,0)) 
+                    spaceBetweenGroups = spaceBetweenGroups, mainSide = mainSide) #legloc= (1.1,0)) 
 
             totbarwidth, binvalsDict, binnamesDict, binerrssDict, bincoordsDict = ret
             shift += totbarwidth
@@ -2801,7 +2820,7 @@ if __name__ == '__main__':
     #favoriteLFPch_perSubj_nms = {'S01': ['LFPL01', 'HirschPt2011_1', 'HirschPt2011_3' ], 
     favoriteLFPch_perSubj_nms = {'S01': ['LFPL01' ], 
             'S02': [ 'LFPL23'], 'S03': [ 'LFPL12' ], 'S04':[ 'LFPR12' ], 'S05':[ 'LFPR23'],
-            'S06': ['LFPL01'], 'S07':['LFPR01'], 'S08':['LFPL12'], 'S09':['LFPL56'], 'S10':['LFPR12' ] } 
+            'S06': ['LFPL01'], 'S07':['LFPR01'], 'S08':['LFPL12'], 'S09':['LFPR56'], 'S10':['LFPR12' ] } 
 
     plot_minFreqInSpec = 2.5  # to get rid of heart rate
     plot_minFreqInBandpow = 2.5  # to get rid of heart rate
@@ -3492,7 +3511,25 @@ if __name__ == '__main__':
 
     #import ipdb; ipdb.set_trace()
 
+    def checkIntStatUpdateNeeded(rawname):
+        sind_str,medcond,task = getParamsFromRawname(rawname)
+        tremSideCur = gv.gen_subj_info[sind_str]['tremor_side']
+        for ms in [-1,1]:
+            if ms == 1:
+                side = tremSideCur
+                intervalStats = gv.glob_stats_perint[rawname]
+            else:
+                side = utils.getOppositeSideStr(tremSideCur)
+                intervalStats = gv.glob_stats_perint_nms[rawname]
+
+            intervals = timeIntervalPerRaw_processed[rawname] [ side ]
+            if len(intervals) != len(intervalStats):
+                return True
+
+        return False
+
     doStatRecalc = 0   #var for technical use
+    rawsNeedStatUpd = []
     try:
         gv.glob_stats.keys()
     except (NameError, AttributeError):
@@ -3519,6 +3556,10 @@ if __name__ == '__main__':
                         gs_s[medcond] = {}
                     gs_sm = gs_s[medcond]
                     gs_sm[task] = f['glob_stats'][()]
+
+                    if checkIntStatUpdateNeeded(k):
+                        rawsNeedStatUpd += [k]
+                        doStatRecalc = 1
 
                 print('----- Existing stats loaded!')
             except FileNotFoundError as e:

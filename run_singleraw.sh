@@ -11,6 +11,9 @@ raws3=(S05_off_hold S05_off_move S05_on_hold S05_on_move S06_off_hold S06_off_mo
 raws4=(S07_off_hold S07_off_move S07_on_hold S07_on_move S08_on_rest S08_off_rest S09_off_rest S10_off_move S10_off_rest)  
 
 raws=(${raws1[@]} ${raws2[@]} ${raws3[@]} ${raws4[@]})
+raws=(S05_on_hold)
+
+#raws3=(S06_off_hold S06_off_move S06_on_hold)
 
 #raws=($raws1)
 
