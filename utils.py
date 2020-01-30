@@ -218,6 +218,13 @@ def getMEGsrc_chname_nice(chn):
         name = '{}_{}'.format( label,side)
     return name
 
+def getMEGsrc_contralatSide(chn):
+    # return no the brain side
+    nicen = getMEGsrc_chname_nice(chn)
+    for side in ['right', 'left']:
+        if nicen.find(side) >= 0:
+            return getOppositeSideStr(side)
+
 def chname2modality(chn):
     modalities = ['LFP', 'EMG', 'EOG', 'MEGsrc']
     for modality in modalities:
@@ -502,7 +509,8 @@ def filterArtifacts(k, chn, bins, retBool = True):
     validbins_bool = np.ones( len(bins) )
     if gv.artifact_intervals is not None and (k in gv.artifact_intervals):
         if chn.find('MEGsrc') >= 0:
-            chneff = 'MEG'
+            side = getMEGsrc_contralatSide(chn)
+            chneff = 'MEG' + side
         else:
             chneff = chn
         cond = ( chneff in gv.artifact_intervals[k])
@@ -510,7 +518,12 @@ def filterArtifacts(k, chn, bins, retBool = True):
         if cond:
             artifact_intervals = gv.artifact_intervals[k][chneff]
             for a,b in artifact_intervals:
+                #if chneff.find('MEG') >= 0:
+                #    print(' chn {} artifact {} : {},{}'.format(chn, chneff, a,b ) )
                 validbins_bool = np.logical_and( validbins_bool , np.logical_or(bins < a, bins > b)  ) 
+
+        #if chneff.find('MEG') >= 0:
+        #    print('filterArtifacts {} ({}), got {} of total {} bins'.format( chn, chneff, np.sum(validbins_bool) , len(bins) ) )
 
     if retBool:
         return validbins_bool
