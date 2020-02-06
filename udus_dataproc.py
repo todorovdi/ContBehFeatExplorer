@@ -147,10 +147,12 @@ def precomputeSpecgrams(raws,ks=None,NFFT=256, specgramoverlap=0.75,forceRecalc=
     print('Spectrograms computation finished')
     return specgrams
 
-########  Gen stats across conditions
+########  Gen stats across conditions or per condition
 def getStatPerChan(time_start,time_end, glob_stats = None, singleRaw = None, mergeTasks = False, modalities=None, datPrep = None, specgramPrep = None):
     '''
     returns task independent
+    when glob_stats is None, assumes that we work on the whole recording (up to time_end_forstats)
+    if it is not None it be of format glob_stats[chname][stat_name]
     stats = glob_stats[sind_str][medcond][chname]
     '''
     if modalities is None:
@@ -183,7 +185,7 @@ def getStatPerChan(time_start,time_end, glob_stats = None, singleRaw = None, mer
             if singleRaw is None:
                 raws_from_subj = gv.subjs_analyzed[subj][medcond]
             else:
-                raws_from_subj = tasks 
+                raws_from_subj = tasks  # it only one task actually in this case
 
             for task in raws_from_subj:   # over raws
                 k = getRawname(subj,medcond,task)
@@ -251,7 +253,7 @@ def getStatPerChan(time_start,time_end, glob_stats = None, singleRaw = None, mer
 
                         bb,be = gv.freqBands['tremor']
                         ft,bt,spdatat = utils.getSubspec(f,b,spdata,bb, be, 
-                                time_start, time_end)
+                                time_start, time_end, rawname=k)
                         if chn.find('EMG') >= 0: 
                             specsTremorEMGcurSide += [ (chn, ft,bt, spdatat)  ]
 
@@ -389,6 +391,9 @@ def stat_ch_proxy( arg ):
 def stat_ch(rawname, f,b,spdata, chdat, chn, stat_leaflevel, 
         time_start,time_end, nraws_from_subj , n_splits,
         glob_stats):
+    '''
+    assumes we only give valid data points, i.e. without artifacts
+    '''
     if isinstance( spdata[0,0] , complex):
         spdata = np.abs(spdata)
 
@@ -411,7 +416,7 @@ def stat_ch(rawname, f,b,spdata, chdat, chn, stat_leaflevel,
     if chn.find('EMG') >= 0 and useEMG_cluster: 
         bb,be = gv.freqBands['tremor']
         ft,bt,spdatat = utils.getSubspec(f,b,spdata,bb, be, 
-                time_start, time_end)
+                time_start, time_end, rawname=rawname)
         assert spdatat.shape[0] > 0
 
         if tremrDet_clusterMultiFreq:
@@ -460,20 +465,20 @@ def stat_ch(rawname, f,b,spdata, chdat, chn, stat_leaflevel,
     mifNeeded('sum', 'mean',  np.mean(chdat) / nraws_from_subj         )
 
 
-    validbins_bool = utils.getBinsInside(b, max(time_start,spec_thrBadScaleo), 
-            min(nonTaskTimeEnd-spec_thrBadScaleo, time_end), retBool = True) 
-    if np.sum(validbins_bool ) == 0:
-        print ( 'WARNING stat_ch: No valid bins! {}:{} {}-{}'.format(rawname,chn, time_start,time_end ))
-        return { 'error':'no_valid_bins' }
+    #validbins_bool = utils.getBinsInside(b, max(time_start,spec_thrBadScaleo), 
+    #        min(spec_time_end-spec_thrBadScaleo, time_end), retBool = True) 
+    #if np.sum(validbins_bool ) == 0:
+    #    print ( 'WARNING stat_ch: No valid bins! {}:{} {}-{}'.format(rawname,chn, time_start,time_end ))
+    #    return { 'error':'no_valid_bins' }
 
-    validbins_bool2 = utils.filterArtifacts(k,chn,b)
-    validbins_bool = np.logical_and( validbins_bool, validbins_bool2)
+    #validbins_bool2 = utils.filterArtifacts(k,chn,b)
+    #validbins_bool = np.logical_and( validbins_bool, validbins_bool2)
 
-    if np.sum(validbins_bool ) == 0:
-        print ( 'WARNING stat_ch: No valid bins! {}:{} {}-{}'.format(rawname,chn, time_start,time_end ))
-        return { 'error':'no_valid_bins' }
+    #if np.sum(validbins_bool ) == 0:
+    #    print ( 'WARNING stat_ch: No valid bins! {}:{} {}-{}'.format(rawname,chn, time_start,time_end ))
+    #    return { 'error':'no_valid_bins' }
 
-    mn_nout, mx_nout, me_nout = utils.calcNoutMMM_specgram(spdata[:,validbins_bool], thr=nout_thr_spec )
+    mn_nout, mx_nout, me_nout = utils.calcNoutMMM_specgram(spdata, thr=nout_thr_spec )
     mifNeeded('sum', 'mean_spec_nout_full',  me_nout  / nraws_from_subj           )
 
     goodfreqs = f > spec_minfreq
@@ -484,13 +489,13 @@ def stat_ch(rawname, f,b,spdata, chdat, chn, stat_leaflevel,
     #goodinds_bool = np.logical_and(validbins_bool, goodinds_bool)
     #spdata_good = spdata[:,goodinds_bool]
     #me_nout = np.mean(spdata_good, axis=1)
-    def gett(gf, vi):
-        spdata_valid = spdata[gf,:] [:, vi]
+    def gett(gf):
+        spdata_valid = spdata[gf,:] 
         mn_nout, mx_nout, me_nout = utils.calcNoutMMM_specgram(spdata_valid, thr=nout_thr_spec )
         spdata_mc =  ( spdata_valid -  me_nout[:,None] ) / me_nout[:,None]    # divide by mean
         return mn_nout, mx_nout, me_nout, spdata_mc
 
-    mn_nout, mx_nout, me_nout, spdata_mc  = gett(goodfreqs, validbins_bool)
+    mn_nout, mx_nout, me_nout, spdata_mc  = gett(goodfreqs)
 
     #spdata_valid = spdata[goodfreqs,:] [:, validbins_bool]
     #mn_nout, mx_nout, me_nout = utils.calcNoutMMM_specgram(spdata_valid, thr=nout_thr_spec )
@@ -680,7 +685,7 @@ def stat_ch(rawname, f,b,spdata, chdat, chn, stat_leaflevel,
 
     return st
 
-def stat_proxy( arg ):
+def stat_proxy_interval( arg ):
 
     t1,t2,rawname, gs,intind, itype, datPrep, intside, specgramPrep = arg
 
@@ -703,11 +708,14 @@ def getStatsFromTremIntervals(intervalDict):
     statsMainSide = {}
     statsOtherSide = {}
 
+    spdats_perRaw = {}
+
     args = []
     for rawname in intervalDict:
         if rawname not in raws:
             continue
 
+        spdat_dict = {}  # list of spectrograms per interval type
         sind_str,medcond, task = getParamsFromRawname(rawname)
         for intside in ['left', 'right']:
             intervals = intervalDict[rawname][intside]
@@ -734,9 +742,10 @@ def getStatsFromTremIntervals(intervalDict):
                 #for side in cht:
                 for side in [intside]:
                     chnames2 = []
+                    ts,te = gv.raws[rawname].time_as_index([t1,t2])
                     for modality in modalities:
                         chnames2 += cht[side]['nametuples'][modality]
-                    chdata, chtimes = utils.getData(rawname, chnames2 )
+                    chdata, chtimes = utils.getData(rawname, chnames2, ts=ts, te=te )
 
                     dtcr[side] = chnames2, chdata 
 
@@ -744,13 +753,62 @@ def getStatsFromTremIntervals(intervalDict):
                 datPrep[rawname] = dtcr
                 #import ipdb; ipdb.set_trace()
 
+                spte = gv.gen_subj_info[sind_str]['miscinfo'][rawname]['recording_time_end']
+
                 specgramPrep = gv.specgrams[rawname]
+                assert len(specgramPrep) > 0, 'No specgram channels aved in {}'.format(rawname)
+
+                f,b,spdata = list(specgramPrep.values() )[0]  # take any channel
+                validbins_bool = utils.getBinsInside(b,t1eff,t2eff, retBool = True, 
+                        rawname = rawname)
+                validbins_bool_epart = utils.getBinsInside(b, 
+                        max(b[0],gv.gparams['spec_thrBadScaleo']), 
+                        min(spte-spec_thrBadScaleo, b[-1]), retBool = True, rawname=rawname) 
+                validbins_bool = np.logical_and(validbins_bool, validbins_bool_epart)
+                if np.sum(validbins_bool ) == 0:
+                    print ( 'WARNING: No valid bins! {}: {}-{}'.format(rawname,t1eff,t2eff ))
+                    toskip +=  [ (rawname, intind) ]
+                    #return { 'error':'no_valid_bins' }
+
+                spdict = {}  # to pass as arg
+                for chn in specgramPrep:
+                    sp = specgramPrep[chn]
+                    f,b,spdata = sp
+                    #binindcur = utils.getBinsInside(b,t1eff,t2eff, retBool = False)
+
+                    validbins_bool_noart = utils.filterArtifacts(rawname,chn,b, rawname = rawname)
+                    validbins_bool_cur = np.logical_and( validbins_bool, validbins_bool_noart)
+                    
+                    bincur = b[validbins_bool_cur]
+
+                    if np.sum(validbins_bool ) == 0:
+                        print ( 'WARNING stat_ch: No valid bins! {}:{} {}-{}'.format(rawname,chn, t1eff,t2eff ))
+                        return { 'error':'no_valid_bins' }
+
+                    spdatacur = spdata[:,validbins_bool_cur]
+                    if itype not in spdat_dict:
+                        spdat_dict[itype] = {'spec':{}, 'bins':{} }
+                    s = spdat_dict[itype]['spec']
+                    if chn not in s:
+                        s[chn] = []
+                    s[chn] += [ spdatacur  ]
+
+                    bn = spdat_dict[itype]['bins']
+                    if chn not in bn:
+                        bn[chn] = []
+                    bn[chn] += [ bincur ]
+
+                    spdict[chn] = f,bincur,spdatacur   # to add to args
 
                 gs = gv.glob_stats[sind_str][medcond][task]
                 # for interval stats computation
-                args += [ (t1eff,t2eff,rawname, gs, intind, itype, datPrep, intside, specgramPrep) ]
+                args += [ (t1eff,t2eff,rawname, gs, intind, itype, datPrep, intside, spdict) ]
 
                 #print('len args ',len(args) )
+
+    #lump together
+    # f,b,spdata = gv.specgrams[k] 
+    # spdat_lumped = np.concatenate( tuple(spdat_list) )
 
                 #st = getStatPerChan(t1,t2,singleRaw = rawname, mergeTasks=False, glob_stats=gv.glob_stats )
                 #statlist[intind] = st[sind_str][ medcond][ task]
@@ -759,14 +817,44 @@ def getStatsFromTremIntervals(intervalDict):
             else:
                 statsOtherSide[rawname] = statlist
 
+        spdats_perRaw[rawname] = spdat_dict
     #from IPython import embed; embed()
+
+    for rawname in spdats_perRaw:
+        spd = spdats_perRaw[rawname]
+        for itype in spd:
+            for chn in spd[itype]['spec'] :
+                sp =  spd[itype]['spec'][chn]
+                b =  spd[itype]['bins'][chn]
+                binlumped = np.concatenate( b   )
+                splumped = np.concatenate( sp  , axis=1 )
+                splumped = np.abs( splumped  )
+
+                spd[itype][chn] = {}
+
+                #spd[itype][chn]['spec_lumped'] = binlumped, splumped  -- takes a lot of space of drive when saved
+                meanspec = np.mean(splumped, axis=1)
+                spd[itype][chn]['meanspec'] = meanspec
+
+                nout_thr_spec = 1e-2
+                mn_nout, mx_nout, me_nout = utils.calcNoutMMM_specgram(splumped, 
+                        nbins= min(len(binlumped) // 20, 200 ),
+                        thr=nout_thr_spec )
+
+                spd[itype][chn]['meanspec_nout'] = mn_nout
+            # to save space
+            del spd[itype]['spec']
+            del spd[itype]['bins']
+
+
+        #if intside == gv.gen_subj_info[sind_str]['tremor_side']:
 
     print("Will compute stats for {} intervals".format(len(args) ) )
 
     if len(args) > 1 and (not statsInterval_forceOneCore):
         ncores = mpr.cpu_count()
         p = mpr.Pool( min(len(args), ncores)  )
-        pr = p.map(stat_proxy, args)
+        pr = p.map(stat_proxy_interval, args)
         p.close()
         p.join()
 
@@ -781,14 +869,14 @@ def getStatsFromTremIntervals(intervalDict):
             #import pdb; pdb.set_trace()
 
             #import ipdb; ipdb.set_trace()
-            k,intside,intind,st = stat_proxy(arg)
+            k,intside,intind,st = stat_proxy_interval(arg)
             sind_str,medcond, task = getParamsFromRawname(rawname)
             if intside == gv.gen_subj_info[sind_str]['tremor_side']:
                 statsMainSide[k][intind] = st 
             else:
                 statsOtherSide[k][intind] = st 
 
-    return statsMainSide, statsOtherSide
+    return statsMainSide, statsOtherSide, spdats_perRaw
 
 ## Define left / right corresdpondance (left LFP to right EMG)
 def genChanTuples(rawname, chnames ):
@@ -1156,15 +1244,17 @@ def plotSpectralData(plt,time_start = 0,time_end = 400, chanTypes_toshow = None,
 
     ncformal = nc
     gridspec_kw = None
-    wweff = ww
+    wweff = gv.gparams['plot_dyn_multiIntColWidth']
     hspace = 0.65
     wspace = 0.2
     leftspace = 0.05
     if nc == 1:
         ncformal = 2   # don'a make sinlge row because it would ruin adressing
         gridspec_kw={'width_ratios': [1, 0.001]}
-        wweff *= 15
-        wweff *= (plot_time_end / 300)
+        wweff = gv.gparams['plot_dyn_singleRawColWidth']
+        if plot_time_end <= 300:
+            wweff *= (plot_time_end / 300)
+
         wspace = 0.01
         leftspace = 0.005
 
@@ -1815,6 +1905,8 @@ def plotSpectralData(plt,time_start = 0,time_end = 400, chanTypes_toshow = None,
         else:
             prename = 'Spec_{}'.format(subjstr  )
 
+        prename = plot_prename + prename
+
         figname = '{}_pairno{}_{} nr{}, nsrc{} _{}_side{}.{}'. \
                     format(prename, channel_pair_ind, data_type, nr, len(srcs), sp, plot_onlyMainSide, ext)
         plt.savefig( os.path.join(plot_output_dir, figname ) )
@@ -1837,7 +1929,7 @@ def plotSpecMeanCorr(ax, k, chname, time_start, time_end, normType='uniform'):
         minfreq = plot_minFreqInSpec
     freqs, bins, Sxx = utils.getSubspec(freqs,bins,Sxx,
                                   minfreq,plot_maxFreqInSpec,
-                                  time_start,time_end)
+                                  time_start,time_end, rawname=k)
     
     stats = gv.glob_stats[sind_str][medcond][task][chname]
     #mx = stats['max_spec']; mn = stats['min_spec']; 
@@ -1917,6 +2009,73 @@ def plotSpecMeanCorr(ax, k, chname, time_start, time_end, normType='uniform'):
     ax.set_ylabel('Freq, [Hz] '+normType)
     #ax.set_xlim(mintime,maxtime)
     ax.set_xlim(time_start,time_end)
+
+def plotMeanSpec(ax, k, chname, msp = None):
+    if msp is None:
+        msp = gv.glob_spec_peritype[k]
+
+    for itype in msp:
+        s = msp[itype][chname]
+        f = spec_MNEwletFreqs
+        sp = s['meanspec_nout']
+        ax.plot(f,sp,label = itype, c = gv.gparams['intType2col'][itype] ) 
+    ax.set_yscale('log')
+    ax.set_title('{}: {} mean spectrum'.format(k, chname))
+    ax.legend()
+
+def plotMeanSpecTable(side = 1):
+    ktest = list( gv.raws.keys() ) [0 ] 
+    s = gv.glob_spec_peritype[ktest]
+    chnames = list( s.values() )[0].keys()  # of any interval type
+    chnames2 = []
+
+
+
+    nc = 1 +  len( gv.raws ) 
+    nr = len(chnames) // 2  # because we have two sides together 
+    ww = 10
+    hh = 4
+    fig,axs = plt.subplots(nrows = nr, ncols=nc, figsize = (nc*ww, nr * hh)  )
+    for i,k in enumerate(raws):
+        sind_str,medcond,task = getParamsFromRawname(k)
+        if side == 1:
+            for chn in chnames:
+                tremSideCur = gv.gen_subj_info[sind_str]['tremor_side'] 
+                if utils.getChannelSide(k,chn) == tremSideCur:
+                    chnames2 += [chn]
+
+        for j,chn in enumerate(chnames2):
+            ax = axs[j,i + 1]
+            plotMeanSpec( ax, k, chn)
+
+
+    ss = []
+    subjstr = ''
+    for k in sorted( gv.raws.keys() ):
+        sind_str,medcond,task = getParamsFromRawname(k)
+        if sind_str in ss:
+            continue
+        ss += [sind_str]
+        subjstr += '{},'.format( sind_str )
+
+    if spec_specgramtype == 'lspopt':
+        sp = 'lspopt{}'.format(c_parameter)
+    elif spec_specgramtype == 'scaleogram':
+        sp = 'pywt'
+    else:
+        sp = spec_specgramtype
+
+    prename = 'meanSpec_{}'.format(subjstr  )
+    prename = plot_prename + prename
+
+    figname = '{}_side{}_{}_side{}.{}'. \
+                format(prename, nr, sp, side, ext)
+    plt.tight_layout()
+    plt.savefig( os.path.join(plot_output_dir, figname ) )
+    print('Figure saved to {}'.format(figname) )
+
+
+        
 
 def makeBarPlot( ax, rawname, chname, legloc = None, printLog = False, xoffset = 0, axtop=None,
         spaceBetweenGroups = 2, skipPlot = False, binwidth = 1, mainSide = 1):
@@ -2308,6 +2467,7 @@ def plotBarplotTable(modalities, onlyMainSide = 1):
             sp = spec_specgramtype
 
         prename = 'barstats_{}'.format(subjstr  )
+        prename = plot_prename + prename
 
         figname = '{}_nr{}, nsrc{}_{}_side{}.{}'. \
                     format(prename, nr, len(srcs), sp, onlyMainSide, ext)
@@ -2542,14 +2702,16 @@ if __name__ == '__main__':
     rawnameList_fromCMDarg = False
 
     loadSpecgrams = True  # if exists
-    saveSpecgrams = True
-    saveSpecgrams_skipExist = True
+    save_specgrams = True
+    save_specgrams_skipExist = True
 
     save_stats = 1
     save_stats_onlyIfNotExists = 1
     load_stats = 1
 
     plot_onlyMultiBarplot = False
+    plot_onlyMultiMeanSpec = False
+
     plot_time_start = 0
     plot_time_end = 300
     plot_onlyMainSide             = 1  # 1 only main,  -1 only opposite,  0 both
@@ -2559,8 +2721,12 @@ if __name__ == '__main__':
     statsInterval_forceOneCore = 0
 
     nonTaskTimeEnd = 300
-    spec_time_end=nonTaskTimeEnd
+
+    spec_time_start=0 
+    spec_time_end=nonTaskTimeEnd  # default that can be changed
     stat_computeDistrMax = False
+
+    plot_prename = ''
 
     singleRawMode = False
     gv.gparams['intTypes'] = ['pre', 'post', 'initseg', 'endseg', 'middle_full', 'no_tremor', 'unk_activity_full' ]
@@ -2578,7 +2744,8 @@ if __name__ == '__main__':
                 ["subjinds=","tasks=","medconds=","MEG_ROI=","singleraw","rawname=",
                     "update_spec", "update_stats", "barplot", "no_specload", "skipPlot" ,
                     "plot_time_start=", "plot_time_end=", "time_end_forstats=", 
-                    "spec_time_end=", "debug", "plot_other_side"]) 
+                    "spec_time_end=", "debug", "plot_other_side", 
+                    "plot_prename=", "meanspec" ]) 
         print(sys.argv, opts, args)
 
         for opt, arg in opts:
@@ -2597,6 +2764,8 @@ if __name__ == '__main__':
             elif opt in ("-s", "--singleraw"):
                 #timeIntervalsFromTremor = False
                 singleRawMode = True
+            elif opt == '--plot_prename':
+                plot_prename  = arg
             elif opt == '--rawname':
                 fnames_noext = arg.split(',') 
                 rawnameList_fromCMDarg = True
@@ -2609,12 +2778,12 @@ if __name__ == '__main__':
                 #flag = int(arg)
                 #if flag:
                 loadSpecgrams = False
-                saveSpecgrams = True
-                saveSpecgrams_skipExist = False
+                save_specgrams = True
+                save_specgrams_skipExist = False
                 #else:
                 #    loadSpecgrams = True
-                #    saveSpecgrams = True
-                #    saveSpecgrams_skipExist = True
+                #    save_specgrams = True
+                #    save_specgrams_skipExist = True
             elif opt == '--plot_other_side':
                 plot_onlyMainSide = -1
             elif opt == '--plot_both_sides':
@@ -2633,6 +2802,9 @@ if __name__ == '__main__':
             elif opt == '--barplot':
                 plot_onlyMultiBarplot = 1
                 print('Barplot only mode!')
+            elif opt == '--meanspec':
+                plot_onlyMultiMeanSpec = 1
+                print('MeanSpec only mode!')
             elif opt == '--no_specload':
                 loadSpecgrams = False
             elif opt == '--skipPlot':
@@ -2656,6 +2828,9 @@ if __name__ == '__main__':
         print('Error in argument parsing, exiting!', helpstr,str(e)) 
         #print('Putting hardcoded vals')
         sys.exit(0)
+
+    if plot_onlyMultiMeanSpec and plot_onlyMultiBarplot:
+        raise ValueError('cannot have only barplot AND only mean spec')
 
 
     #if plot_onlyMultiBarplot:
@@ -2720,6 +2895,7 @@ if __name__ == '__main__':
     #########################  Plot params
     plot_output_dir = 'output'
 
+    spec_thrBadScaleo = 0.8
     specgramoverlap = 0.75
     c_parameter = 20.0  # for the spectrogram calc
     #c_parameter = 3
@@ -2727,9 +2903,13 @@ if __name__ == '__main__':
     NFFT = 256  # for spectrograms
     specgram_scaling = 'spectrum'  # power, not normalized by freq band (i.e. not denisty)
     gv.gparams['specgram_scaling'] = specgram_scaling
+    gv.gparams['nonTaskTimeEnd'] = nonTaskTimeEnd
+    gv.gparams['spec_time_start']  = spec_time_start
+    gv.gparams['time_start_forstats'] = time_start_forstats
+    gv.gparams['plot_time_start'] = plot_time_start
+    gv.gparams['spec_thrBadScaleo'] = spec_thrBadScaleo
  
     # which time range use to compute spectrograms
-    spec_time_start=0 
     spec_wavelet = "cmor1.5-1.5"     # first is width of the Gaussian, second is number of cycles
     spec_wavelet = "cmor1-1.5"    
     spec_wavelet = "cmor1-2"    
@@ -2748,7 +2928,6 @@ if __name__ == '__main__':
     spec_minfreq = 3
     spec_DCoffs = 3
     spec_DCfreq = 50
-    spec_thrBadScaleo = 0.8
 
     maxscale = 14400   # for large scales (>10k) it takes too long
     maxscale = 800  
@@ -2772,7 +2951,7 @@ if __name__ == '__main__':
 
     #tremorThrMult = {'S05': 20. }
     tremorThrMult = { }
-    updateJSON = False
+    updateJSON = True
     useKilEMG = False
     plot_highPassLFP = True
 
@@ -2781,7 +2960,6 @@ if __name__ == '__main__':
     tremrDet_clusterMultiMEG = useEMG_cluster
     gv.gparams['tremDet_useTremorBand'] = False
     gv.gparams['tremDet_timeStart'] = 0
-    gv.gparams['tremDet_timeEnd'] = nonTaskTimeEnd
 
     gv.gparams['plot_LFP_onlyFavoriteChannels'] = 1
     gv.gparams['plot_LFP_favRandomNonMainSide'] = 1
@@ -3012,6 +3190,10 @@ if __name__ == '__main__':
         mpl.use('Agg')
     hh = 3       # individual axis height
     ww = 15      # individual axis width 
+    gv.gparams['plot_dyn_multiIntColWidth']  = ww
+    gv.gparams['plot_dyn_singleRawColWidth']  = ww * 15
+    gv.gparams['plot_dyn_rowHeight'] = hh
+
     legendloc = 'lower right'
     legalpha = 0.3
     mpl.rcParams.update({'font.size': 14})
@@ -3192,13 +3374,17 @@ if __name__ == '__main__':
             cursubj[medcond] = { task: k}
 
         gv.subjs_analyzed[sind_str] =  cursubj
-    print(gv.subjs_analyzed)
+    print('subjs_analyzed = ',gv.subjs_analyzed)
 
 
     #####################   Read subject information, provided by Jan
-    with open(os.path.join(data_dir,'Info.json') ) as info_json:
+    with open(os.path.join('subj_info.json') ) as info_json:
+            #raise TypeError
+
+        #json.dumps({'value': numpy.int64(42)}, default=convert)
         gv.gen_subj_info = json.load(info_json)
             
+
     ####################    generate some supplementary info, save to a multi-level dictionary 
     for k in raws:
         sind_str,medcond,task = getParamsFromRawname(k)
@@ -3241,6 +3427,9 @@ if __name__ == '__main__':
     print( 'MEGsrc_names_toshow = ', MEGsrc_names_toshow )
 
 
+    # add some info
+    min_recTime = 1000000 
+    max_recTime = -1
     for subj in gv.gen_subj_info:
         if subj in tremorDetect_customThr:
             gv.gen_subj_info[subj]['tremorDetect_customThr'] = tremorDetect_customThr[subj]
@@ -3269,9 +3458,37 @@ if __name__ == '__main__':
                 gv.gen_subj_info[subj]['favoriteLFPch'] += [favlfp]
             elif subj in gv.subjs_analyzed:
                 raise ValueError('no fav chan for subj {}'.format(subj) )
+ 
+            # remove repeating if they appeared after adding
+            gv.gen_subj_info[subj]['favoriteLFPch'] = list( set(gv.gen_subj_info[subj]['favoriteLFPch']) )
 
+        
+        if subj not in gv.subjs_analyzed:
+            continue
+        for k in gv.subjs_analyzed[subj]['datasets']:
+            if 'miscinfo' not in gv.gen_subj_info[subj]:
+                gv.gen_subj_info[subj]['miscinfo'] = {}
+            mi = gv.gen_subj_info[subj]['miscinfo']
+            if k not in mi:
+                mi[k] = {}
+            micur = mi[k]
+            rt = raws[k].times[-1] 
+            micur['recording_time_end'] = rt
+            min_recTime = min(min_recTime, rt)
+            max_recTime = max(max_recTime, rt)
                 # look 
 
+
+    if plot_time_end < 0 and singleRawMode:
+        plot_time_end = max_recTime
+    if spec_time_end < 0 and singleRawMode:
+        spec_time_end = max_recTime 
+    if time_end_forstats < 0 and singleRawMode:
+        time_end_forstats = max_recTime
+    gv.gparams['plot_time_end'] = plot_time_end
+    gv.gparams['spec_time_end']    = spec_time_end
+    gv.gparams['time_end_forstats'] = time_end_forstats
+    gv.gparams['tremDet_timeEnd'] = time_end_forstats
 
         #bc = gv.gen_subj_info[subj]['bad_channels']
         #for medcond in bc:
@@ -3283,8 +3500,11 @@ if __name__ == '__main__':
 
     # if we want to save the updated information back to the file
     if updateJSON:
-        with open(os.path.join(data_dir,'Info.json'), 'w' ) as info_json:
-            json.dump(gv.gen_subj_info, info_json)
+        with open(os.path.join('subj_info_upd.json'), 'w' ) as info_json:
+            def convert(o):
+                if isinstance(o, np.int64): return int(o)  
+                elif isinstance(o, np.float64): return float(o)  
+            json.dump(gv.gen_subj_info, info_json, default = convert)
 
     # compute spectrograms for all channels (can be time consuming, so do it only if we don't find them in the memory)
     #loadSpecgrams = False
@@ -3308,18 +3528,19 @@ if __name__ == '__main__':
                 gv.specgrams = np.load(specgramFname, allow_pickle=True)['arr_0'][()]
             else:
                 gv.specgrams = precomputeSpecgrams(raws,NFFT=NFFT,specgramoverlap=spec_FToverlap)
-                if saveSpecgrams:
-                    if not (saveSpecgrams_skipExist and os.path.exists(specgramFname) ):
+                if save_specgrams:
+                    if not (save_specgrams_skipExist and os.path.exists(specgramFname) ):
                         np.savez(specgramFname, gv.specgrams)
         else:
-            no_needforspec = (plot_onlyMultiBarplot and load_stats)
+            no_needforspec = ( (plot_onlyMultiBarplot or plot_onlyMultiMeanSpec) and load_stats)
             gv.specgrams = {}
             for k in raws:
                 sind_str,medcond,task = getParamsFromRawname(k)
                 nsources = len( gv.subjs_analyzed[sind_str] ['MEGsrcnames_perSide'] ) * 2
                 nroi = len(MEGsrc_roi)
-                specgramFname = '{}_nroi{}_nMEGsrcInds{}_spec_{}.npz'.format(k, nroi, 
-                        len(MEGsrc_names_toshow  ), spec_specgramtype  )
+                specgramFname = '{}_nroi{}_nMEGsrcInds{}_spec_{}_{}_{}.npz'.format(k, nroi, 
+                        len(MEGsrc_names_toshow  ), spec_specgramtype , int(spec_time_start), 
+                        int(spec_time_end) )
                 #specgramFname = 'specgrams_1,2,3.npz'
                 specgramFname = os.path.join(data_dir, specgramFname)
                 if loadSpecgrams and (not no_needforspec) and os.path.exists(specgramFname) :
@@ -3330,13 +3551,14 @@ if __name__ == '__main__':
                     tmp = { k: raws[k] }
                     specur  = precomputeSpecgrams(tmp,NFFT=NFFT,specgramoverlap=spec_FToverlap)
                     gv.specgrams.update( specur   )
-                    if saveSpecgrams:
-                        if not (saveSpecgrams_skipExist and os.path.exists(specgramFname) ):
+                    if save_specgrams:
+                        if not (save_specgrams_skipExist and os.path.exists(specgramFname) ):
                             print('Saving specgrams to ',specgramFname)
                             np.savez(specgramFname, specur)
     else:
         print('----- Using previously precomuted spectrograms in memory')
 
+    #sys.exit(0)
 
     ############################################################
     #time_start, time_end = 0,1000
@@ -3404,7 +3626,7 @@ if __name__ == '__main__':
     #cmap = 'viridis'
 
     ############# # update in place gen_
-    if len( gv.specgrams ) > 0 and not plot_onlyMultiBarplot:
+    if len( gv.specgrams ) > 0 and not (plot_onlyMultiBarplot or plot_onlyMultiMeanSpec):
         for subj in gv.subjs_analyzed:
             for modality in ['MEGsrc', 'LFP' ]:
                 for fbname in ['tremor']:
@@ -3538,16 +3760,20 @@ if __name__ == '__main__':
                 gv.glob_stats_perint = {}
                 gv.glob_stats_perint_nms = {}
                 gv.glob_stats = {}
+                gv.glob_spec_peritype = {}
+
                 timeIntervalPerRaw_processed = {}
                 for k in raws:
                     sind_str,medcond,task = getParamsFromRawname(k)
-                    fn = stats_basefname + '_{}.npz'.format(k)
+                    fn = stats_basefname + '_{}_{}_{}.npz'.format(k,time_start_forstats,time_end_forstats)
                     fn = os.path.join(data_dir, fn)
                     f = np.load(fn, allow_pickle=1)
 
                     assert f['rawname'] == k
                     gv.glob_stats_perint[k] = f['glob_stats_perint'][()]
                     gv.glob_stats_perint_nms[k] = f['glob_stats_perint_nms'][()]
+
+                    gv.glob_spec_peritype[k] = f['glob_spec_peritype'][()] 
                     timeIntervalPerRaw_processed[k] = f['timeIntervalPerRaw_processed'][()]
                     if sind_str not in gv.glob_stats:
                         gv.glob_stats[sind_str] = {}
@@ -3568,6 +3794,7 @@ if __name__ == '__main__':
                 gv.glob_stats = {}
                 gv.glob_stats_perint = None
                 gv.glob_stats_perint_nms = None
+                gv.glob_spec_peritype = None
                 del timeIntervalPerRaw_processed
 
             #f = np.load(stats_fname, allow_pickle=1)
@@ -3654,9 +3881,11 @@ if __name__ == '__main__':
                     print('{}, {}:  {} interavls were removed!'.format(k,side,lendif) )
                 timeIntervalPerRaw_processed[ k ][side] =ivals  # maybe not necessary but just in case
 
-        gv.glob_stats_perint, gv.glob_stats_perint_nms = getStatsFromTremIntervals(timeIntervalPerRaw_processed)
+        gv.glob_stats_perint, gv.glob_stats_perint_nms, gv.glob_spec_peritype = getStatsFromTremIntervals(timeIntervalPerRaw_processed)
     else:
         print('----- Using previously computed interval stats!')
+
+
     # [raw] -- list of 3-tuples
 
     # I want to make a copy where pre and post are not present (for plotting), but gather stats for all intervals
@@ -3684,16 +3913,18 @@ if __name__ == '__main__':
     if save_stats:
         for k in gv.glob_stats_perint:
             sind_str,medcond,task = getParamsFromRawname(k)
-            fn = stats_basefname + '_{}.npz'.format(k)
+            fn = stats_basefname + '_{}_{}_{}.npz'.format(k,time_start_forstats,time_end_forstats)
             fn = os.path.join(data_dir, fn)
             if not save_stats_onlyIfNotExists or  (not os.path.exists(fn) ):
                 gs = gv.glob_stats[sind_str][medcond][task]
                 gspi = gv.glob_stats_perint[k]
                 gspi_nms = gv.glob_stats_perint_nms[k]
                 tirp = timeIntervalPerRaw_processed[k]
+                gspit = gv.glob_spec_peritype[k]
 
                 np.savez(fn , glob_stats_perint=gspi, glob_stats_perint_nms=gspi_nms,
-                    glob_stats=gs, timeIntervalPerRaw_processed=tirp, rawname=k)
+                    glob_stats=gs, timeIntervalPerRaw_processed=tirp, rawname=k, 
+                    glob_spec_peritype=gspit)
 
             #np.savez(stats_fname , glob_stats_perint=glob_stats_perint, 
             #        glob_stats=glob_stats, timeIntervalPerRaw_processed=timeIntervalPerRaw_processed)
@@ -3754,12 +3985,14 @@ if __name__ == '__main__':
         print('Starting to plot!')
         #plotSpectralData(plt,time_start=0,time_end=10 ) 
         #plotSpectralData(plt,time_start=180,time_end=220 ) 
-        if not plot_onlyMultiBarplot:
-            plotSpectralData(plt,time_start=plot_time_start,time_end=plot_time_end, 
-                    chanTypes_toshow = chanTypes_toshow ) 
-        else:
+        if plot_onlyMultiBarplot:
             plot_multibar_modalities = ['LFP', 'MEGsrc' ]
             #cleanIntervals( )
             plotBarplotTable(plot_multibar_modalities, onlyMainSide = plot_onlyMainSide)
+        elif plot_onlyMultiMeanSpec:
+            plotMeanSpecTable(side = plot_onlyMainSide)
+        else:
+            plotSpectralData(plt,time_start=plot_time_start,time_end=plot_time_end, 
+                    chanTypes_toshow = chanTypes_toshow ) 
 
 

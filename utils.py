@@ -235,15 +235,17 @@ def chname2modality(chn):
             return modality
     raise ValueError('Bad chname, no modality understood')
 
-def getChannelSide(chname):
+def getChannelSide(rawname,chname):
     # MEG meaning of sides
+    sind_str,medcond,task = getParamsFromRawname(rawname)
+    subjinfo = gv.gen_subj_info[sind_str]
     sides = subjinfo['LFPnames_perSide'].keys()
     for side in sides:
         if chname in subjinfo['LFPnames_perSide'][side]:
             return side
         if chname in subjinfo['EMGnames_perSide'][side]:
             return side
-        if chname in subjinfo['MEGsrcnames_perSide'][side]:
+        if chname in subjinfo['MEGsrcnames_perSide_all'][side]:
             return side
     return -1
 
@@ -500,16 +502,29 @@ def getOppositeSideStr(side ):
     #pair_ind = orderEMG.index( 1 - side ) 
     #return orderEMG[pair_ind]
 
-def getBinsInside(bins, b1, b2, retBool = True):
-    binsbool  = np.logical_and(bins >= b1 , bins <= b2)
+def getBinsInside(bins, b1, b2, retBool = True, rawname = None):
+    '''
+    rawname not None should be used only when time_start == 0 and there is no 'holes' in bins array
+    b1,b2 are times, not bin indices
+    '''
+    if rawname is None or bins[0] >= 1/gv.gparams['sampleFreq']:
+        binsbool  = np.logical_and(bins >= b1 , bins <= b2)
+    else:
+        ts,te = gv.raws[rawname].time_as_index([b1,b2])
+        if retBool:
+            binsbool = np.zeros( len(bins) , dtype=bool)
+            binsbool[ ts: te] = 1
+            return binsbool
+        else:
+            return np.arange(ts,te,dtype=int)
 
     if retBool:
         return binsbool
     else:
         return np.where(binsbool)
 
-def filterArtifacts(k, chn, bins, retBool = True):
-    validbins_bool = np.ones( len(bins) )
+def filterArtifacts(k, chn, bins, retBool = True, rawname = None):
+    validbins_bool = np.ones( len(bins) , dtype=bool)
     if gv.artifact_intervals is not None and (k in gv.artifact_intervals):
         if chn.find('MEGsrc') >= 0:
             side = getMEGsrc_contralatSide(chn)
@@ -520,10 +535,18 @@ def filterArtifacts(k, chn, bins, retBool = True):
 
         if cond:
             artifact_intervals = gv.artifact_intervals[k][chneff]
-            for a,b in artifact_intervals:
-                #if chneff.find('MEG') >= 0:
-                #    print(' chn {} artifact {} : {},{}'.format(chn, chneff, a,b ) )
-                validbins_bool = np.logical_and( validbins_bool , np.logical_or(bins < a, bins > b)  ) 
+            if rawname is None:
+                for a,b in artifact_intervals:
+                    #if chneff.find('MEG') >= 0:
+                    #    print(' chn {} artifact {} : {},{}'.format(chn, chneff, a,b ) )
+                    validbins_bool = np.logical_and( validbins_bool , np.logical_or(bins < a, bins > b)  ) 
+            else:
+                indsBad = []
+                for a,b in artifact_intervals:
+                    ts,te = gv.raws[rawname].time_as_index([a,b])
+                    #indsBad += np.arange(ts,te,dtype=int).tolist()
+                    validbins_bool[ts:te] = 0
+
 
         #if chneff.find('MEG') >= 0:
         #    print('filterArtifacts {} ({}), got {} of total {} bins'.format( chn, chneff, np.sum(validbins_bool) , len(bins) ) )
@@ -585,7 +608,7 @@ def filterRareOutliers_specgram(Sxx, nbins=200, thr=0.01, takebin = 20, retBool 
 def calcNoutMMM_specgram(Sxx, nbins=200, thr=0.01, takebin = 20, retBool = False):
     ''' 
     for non-negative data
-    removesOutliers per frequency
+    computes effective max and min per freq
     first dim is freqs 
     '''
     numfreqs = Sxx.shape[0]
@@ -710,7 +733,8 @@ def findTremor(k,thrSpec = None, thrInt=0.13, width=40, percentthr=0.8, inc=1, m
         for chn in chns:
             if gv.gparams['tremDet_useTremorBand']:
                 freq, bins, Sxx = gv.specgrams[k][chn]
-                freq,bins,bandspec = getSubspec(freq,bins,Sxx, tremorBandStart, tremorBandEnd)
+                freq,bins,bandspec = getSubspec(freq,bins,Sxx, tremorBandStart, tremorBandEnd,
+                        rawname=k)
                 #freqinds = np.where( 
                 #    np.logical_and(freq >= tremorBandStart,freq <= tremorBandEnd))
                 #bandspec = Sxx[freqinds,:]
@@ -891,7 +915,7 @@ def getBandpow(k,chn,fbname,time_start,time_end, mean_corr = False, spdat=None):
         freqs, bins, Sxx = spdat
     fbs,fbe = gv.freqBands[fbname]
     r = getSubspec(freqs,bins,Sxx, fbs,fbe, 
-            time_start,time_end)
+            time_start,time_end,rawname=k)
 
 
     if r is not None:
@@ -915,10 +939,11 @@ def getBandpow(k,chn,fbname,time_start,time_end, mean_corr = False, spdat=None):
         #    bins_b = bins_b[validbins_bool]
         #    Sxx_b = Sxx_b[validbininds]
 
-        spec_thrBadScaleo = 0.8
-        nonTaskTimeEnd = 300
-        validbins_bool0 = getBinsInside(bins_b, max(time_start,spec_thrBadScaleo), 
-                min(nonTaskTimeEnd-spec_thrBadScaleo, time_end), retBool = True) 
+        spec_thrBadScaleo = gv.gparams['spec_thrBadScaleo']
+        validbins_bool0 = getBinsInside(bins_b, 
+                max(time_start, gv.gparams['spec_time_start'] + spec_thrBadScaleo), 
+                min(gv.gparams['spec_time_end']- spec_thrBadScaleo, time_end), 
+                retBool = True) 
 
         validbins_bool1 = filterArtifacts(k,chn,bins_b)
         validbins_bool = np.logical_and( validbins_bool0, validbins_bool1)
@@ -956,14 +981,22 @@ def getBandpow(k,chn,fbname,time_start,time_end, mean_corr = False, spdat=None):
         return None
 
 
-def getSubspec(freqs,bins,Sxx,freq_min,freq_max,time_start=None,time_end=None):
+def getSubspec(freqs,bins,Sxx,freq_min,freq_max,time_start=None,time_end=None,rawname=None):
     #bininds = np.where( np.logical_and( bins >= time_start , bins < tetmp/gv.gparams[sampleFreq]) )[0]
+    '''
+    rawname not None should be used only when time_start == 0 and there is no 'holes' in bins array
+    '''
     if time_start is not None or time_end is not None:
         if time_start is None:
             time_start = np.min(bins)
         if time_end is None:
             time_end = np.max(bins)
-        bininds = np.where( np.logical_and( bins >= time_start , bins <= time_end) )[0]
+
+        if rawname is None or bins[0] >= 1/gv.gparams['sampleFreq']:
+            bininds = np.where( np.logical_and( bins >= time_start , bins <= time_end) )[0]
+        else:
+            ts,te = gv.raws[rawname].time_as_index( [time_start,time_end] )
+            bininds = np.arange(ts,te,dtype=int)
         bins = bins[bininds]
         Sxx = Sxx[:,bininds]
 

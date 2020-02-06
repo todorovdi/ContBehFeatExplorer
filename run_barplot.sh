@@ -20,6 +20,11 @@ otherside=""
 
 interactive=""
 interactive="-i"
-ipython3 $interactive udus_dataproc.py -- -i $subj_str -m $meds -t $tasks --barplot $update $otherside
+
+meds="on"
+plot_prename="--plot_prename ($meds)_"
+#plot_prename=""
+
+ipython3 $interactive udus_dataproc.py -- -i $subj_str -m $meds -t $tasks --barplot $update $otherside $plot_prename
 
 #-m pdb -c continue 
