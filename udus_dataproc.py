@@ -2729,9 +2729,6 @@ if __name__ == '__main__':
     plot_prename = ''
 
     singleRawMode = False
-    gv.gparams['intTypes'] = ['pre', 'post', 'initseg', 'endseg', 'middle_full', 'no_tremor', 'unk_activity_full' ]
-    gv.gparams['intType2col'] =  {'pre':'blue', 'post':'gold', 'middle_full':'red', 'no_tremor':'green',
-            'unk_activity_full': 'cyan', 'initseg': 'teal', 'endseg':'blueviolet' }
 
     import sys, getopt
     helpstr = 'Usage example\nudus_dataproc.py -i <comma sep list> -t <comma sep list> -m <comma sep list> -s'
@@ -3634,93 +3631,16 @@ if __name__ == '__main__':
 
     ##############   compute some statisitics, like max, min, mean, cluster in subbands, etc -- can be time consuming
 
-    gv.artifact_intervals = {}
-    def unpackTimeIntervals(trem_times_byhand, mainSide = True):
-        # unpack tremor intervals sent by Jan
-        tremIntervalJan = {}
-        for subjstr in trem_times_byhand:
-            maintremside = gv.gen_subj_info[subjstr]['tremor_side']
-            if mainSide:
-                side = maintremside  
-            else: 
-                side = utils.getOppositeSideStr(maintremside)
+    tremIntervalJan, artif         = utils.unpackTimeIntervals(trem_times_byhand, mainSide = True)
+    tremIntervalJan_nms, artif_nms = utils.unpackTimeIntervals(trem_times_nms_byhand, mainSide = False)
+    for rawn in gv.raws:
+        if rawn in artif_nms and rawn not in artif:
+            artif[rawn] = artif_nms[rawn]
+        else:
+            artif[rawn].update(artif_nms[rawn] )
+        
+    gv.artifact_intervals = artif
 
-            s = trem_times_byhand[subjstr]
-            for medcond in s:
-                ss = s[medcond]
-                for task in ss:
-                    sss = ss[task]
-                    rawname = getRawname(subjstr,medcond,task )
-                    if rawname not in raws:
-                        continue
-                    tremdat = {}
-                    for intType in sss: # sss has keys -- interval types
-                        s4 = sss[intType]
-                        #s4p = copy.deepcopy(s4) 
-                        s4p = s4
-                        # or list of lists 
-                        # or list with one el which is list of lists
-                        cond1 = isinstance(s4,list) and len(s4) > 0
-                        if not cond1:
-                            continue
-                        condshared = isinstance(s4[0],list) and len(s4[0]) > 0 and isinstance(s4[0][0],list)
-                        cond2 = len(s4) == 1 and condshared
-                        # sometimes we have two lists on the first level but the second is empty
-                        cond3 = len(s4) == 2 and len(s4[1]) == 0 and condshared
-                        # sometimes it is not empty but the second one has indices very large
-                        cond4 = len(s4) == 2 and len(s4[1]) > 0 and condshared
-                        if cond1 and (cond2 or cond3 or cond4):
-                            s4p = s4[0]
-                            if len(s4) > 1:
-                                s4p += s4[1]
-                                
-                        if len( s4p[-1] ) == 0:
-                            del s4p[-1]
-        #                     if cond4:
-        #                         s4p = s4[0] + s4[1]
-        #                         #del s4p[1]
-        #                     else:
-        #                         s4p = s4[0]
-        #                     if cond3:
-        #                         del s4p[1]
-
-                        if len(s4p) == 1 and len(s4p[0]) == 0: 
-                            del s4p[0]
-
-                        if intType.find('artifact') >= 0:
-                            print(rawname,intType, s4p)
-                            r = re.match( "artifact_(.+)", intType ).groups()
-                            chn = r[0]
-                            if chn == 'MEG':
-                                chn += side
-                            if rawname in gv.artifact_intervals:
-                                gai = gv.artifact_intervals[rawname]
-                                if chn not in gai:
-                                    gv.artifact_intervals[rawname][chn] = s4p
-                                else: 
-                                    invalids = []
-                                    for a,b in gai[chn]:
-                                        for ii,ival in enumerate(s4p):
-                                            aa,bb = ival
-                                            if abs(a-aa) < 1e-6 and abs(b-bb) < 1e-6:
-                                                invalids += [ii]
-                                    validinds = list( set(range(len(s4p) ) ) - set(invalids) )
-                                    if len(validinds) > 0:
-                                        gv.artifact_intervals[rawname][chn] += [s4p[ii] for ii in validinds]
-                            else:
-                                gv.artifact_intervals[ rawname] ={ chn: s4p } 
-
-                        tremdat[intType] = s4p  # array of 2el lists
-                        
-                    tremIntervalJan[rawname] = { 'left':[], 'right':[] }
-                    tremIntervalJan[rawname][side] =  tremdat 
-                        #print(subjstr,medcond,task,kt,len(s4), s4)
-                        #print(subjstr,medcond,task,kt,len(s4p), s4p)
-        return tremIntervalJan
-
-
-    tremIntervalJan = unpackTimeIntervals(trem_times_byhand, mainSide = True)
-    tremIntervalJan_nms = unpackTimeIntervals(trem_times_nms_byhand, mainSide = False)
     for rawn in tremIntervalJan:
         sind_str,medcond,task = getParamsFromRawname(rawn)
         maintremside = gv.gen_subj_info[sind_str]['tremor_side']

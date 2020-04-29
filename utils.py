@@ -16,6 +16,93 @@ def getIntervalIntersection(a1,b1, a2, b2):
     else:
         return []
 
+def unpackTimeIntervals(trem_times_byhand, mainSide = True, gen_subj_info=None,
+        skipNotLoadedRaws=True):
+    # unpack tremor intervals sent by Jan
+    artif = {}
+    tremIntervalJan = {}
+    if gen_subj_info is None:
+        gen_subj_info = gv.gen_subj_info
+    for subjstr in trem_times_byhand:
+        maintremside = gen_subj_info[subjstr]['tremor_side']
+        if mainSide:
+            side = maintremside
+        else:
+            side = getOppositeSideStr(maintremside)
+
+        s = trem_times_byhand[subjstr]
+        for medcond in s:
+            ss = s[medcond]
+            for task in ss:
+                sss = ss[task]
+                rawname = getRawname(subjstr,medcond,task )
+                if skipNotLoadedRaws and rawname not in gv.raws:
+                    continue
+                tremdat = {}
+                for intType in sss: # sss has keys -- interval types
+                    s4 = sss[intType]
+                    #s4p = copy.deepcopy(s4)
+                    s4p = s4
+                    # or list of lists
+                    # or list with one el which is list of lists
+                    cond1 = isinstance(s4,list) and len(s4) > 0
+                    if not cond1:
+                        continue
+                    condshared = isinstance(s4[0],list) and len(s4[0]) > 0 and isinstance(s4[0][0],list)
+                    cond2 = len(s4) == 1 and condshared
+                    # sometimes we have two lists on the first level but the second is empty
+                    cond3 = len(s4) == 2 and len(s4[1]) == 0 and condshared
+                    # sometimes it is not empty but the second one has indices very large
+                    cond4 = len(s4) == 2 and len(s4[1]) > 0 and condshared
+                    if cond1 and (cond2 or cond3 or cond4):
+                        s4p = s4[0]
+                        if len(s4) > 1:
+                            s4p += s4[1]
+
+                    if len( s4p[-1] ) == 0:
+                        del s4p[-1]
+    #                     if cond4:
+    #                         s4p = s4[0] + s4[1]
+    #                         #del s4p[1]
+    #                     else:
+    #                         s4p = s4[0]
+    #                     if cond3:
+    #                         del s4p[1]
+
+                    if len(s4p) == 1 and len(s4p[0]) == 0:
+                        del s4p[0]
+
+                    if intType.find('artifact') >= 0:
+                        print(rawname,intType, s4p)
+                        r = re.match( "artifact_(.+)", intType ).groups()
+                        chn = r[0]
+                        if chn == 'MEG':
+                            chn += side
+                        if rawname in artif:
+                            gai = artif[rawname]
+                            if chn not in gai:
+                                artif[rawname][chn] = s4p
+                            else:
+                                invalids = []
+                                for a,b in gai[chn]:
+                                    for ii,ival in enumerate(s4p):
+                                        aa,bb = ival
+                                        if abs(a-aa) < 1e-6 and abs(b-bb) < 1e-6:
+                                            invalids += [ii]
+                                validinds = list( set(range(len(s4p) ) ) - set(invalids) )
+                                if len(validinds) > 0:
+                                    artif[rawname][chn] += [s4p[ii] for ii in validinds]
+                        else:
+                            artif[ rawname] ={ chn: s4p }
+
+                    tremdat[intType] = s4p  # array of 2el lists
+
+                tremIntervalJan[rawname] = { 'left':[], 'right':[] }
+                tremIntervalJan[rawname][side] =  tremdat
+                    #print(subjstr,medcond,task,kt,len(s4), s4)
+                    #print(subjstr,medcond,task,kt,len(s4p), s4p)
+    return tremIntervalJan, artif
+
 def removeBadIntervals(intervals ):
     '''
     remove pre and post that intersect tremor
@@ -68,7 +155,7 @@ def processJanIntervals( intervalData, intvlen, intvlenStats, loffset, roffset, 
     def intervalParse(a,b, itype = 'incPre' ):
         #if a <= loffset / 2:   # if a is close to the recoding beginning
         #    intType = 'incPost'
-        #else: 
+        #else:
         #    if itype = 'incPre':
         #        intType = 'incPre'
         #    else:
@@ -120,7 +207,7 @@ def processJanIntervals( intervalData, intvlen, intvlenStats, loffset, roffset, 
             a1 = max(leftoffset, b1 - intvlenStats )
             intType = 'endseg'
         else:
-            raise valueerror('bad itype!')
+            raise ValueError('bad itype!')
 
         if a1 <= a and b1 >= b: #if old interval is inside the new one
             intType = 'incBoth'
@@ -136,7 +223,7 @@ def processJanIntervals( intervalData, intvlen, intvlenStats, loffset, roffset, 
             if side not in ti:
                 tipr[k][side] = []
                 continue
-            
+
             tis = ti[side]
             if not isinstance(tis,dict):
                 continue
@@ -145,8 +232,8 @@ def processJanIntervals( intervalData, intvlen, intvlenStats, loffset, roffset, 
             tipr[k][side] = {}
 
             #import pdb; pdb.set_trace()
-            
-            tipr[k][side] =  [] 
+
+            tipr[k][side] =  []
             for mvtType in mvtTypes:
                 if mvtType not in tis:
                     continue
@@ -156,12 +243,12 @@ def processJanIntervals( intervalData, intvlen, intvlenStats, loffset, roffset, 
                     continue
 
                 #i = 0
-                for p in ti2:  # list of interval ends 
+                for p in ti2:  # list of interval ends
                     intType = ''
                     if len(p) != 2:
                         raise ValueError('{}, {}, {}: {} error in the interval specification'.
                                 format(k,side,mvtType,p) )
-                    a,b = p 
+                    a,b = p
                     if a >= time_end:
                         continue
 
@@ -192,15 +279,15 @@ def processJanIntervals( intervalData, intvlen, intvlenStats, loffset, roffset, 
                         assert b > a
                         #b = min(b, a+ intvlen)
                         intType = 'no_tremor'
-                        intsToAdd = [ (a,b,intType) ] 
+                        intsToAdd = [ (a,b,intType) ]
 
                     #if k == 'S05_off_move':
                     #    import pdb; pdb.set_trace()
 
                     tipr[k][side]  += intsToAdd
             if len(tipr[k][side] ) == 0:
-                #tipr[k]  = [ (0,time_end,'unk') ] 
-                tipr[k][side]  = [ (0,time_end,'entire') ] 
+                #tipr[k]  = [ (0,time_end,'unk') ]
+                tipr[k][side]  = [ (0,time_end,'entire') ]
 
             #if k == 'S05_off_move':
             #    print('fdsfsd ',tipr[k])
@@ -265,7 +352,7 @@ def MEGsrcChname2data(rawname,chns,ts=None,te=None,rettimes=False):
     f = None
     srcvals = []
     times = None
-    for i,chn in enumerate(chns):  
+    for i,chn in enumerate(chns):
         #m = re.match('MEGsrc_(.+)_(.+)', chn)
         #roistr = m.groups()[0]
         #srci = int(m.groups()[1])
@@ -276,10 +363,10 @@ def MEGsrcChname2data(rawname,chns,ts=None,te=None,rettimes=False):
         f = gv.srcs[srcname]
         times = f['source_data']['time'][ts:te,0]
 
-        src = f['source_data'] 
+        src = f['source_data']
         ref = src['avg']['mom'] [0,srci]
-        # maybe I can make more efficient data extraction of multiple channels at once 
-        # later if needed, if I bundle all channels from the same source file 
+        # maybe I can make more efficient data extraction of multiple channels at once
+        # later if needed, if I bundle all channels from the same source file
         if f[ref].size > 10:
             srcval = f[ref ][ts:te,0]   # 1D array with reconstructed source activity
         else:
@@ -301,7 +388,7 @@ def isMEGsrcchanBad(rawname, chn):
     if srcname not in gv.srcs:
         return -1
     f = gv.srcs[srcname]
-    src = f['source_data'] 
+    src = f['source_data']
     ref = src['avg']['mom'] [0,srci]
     if  (f[ref].size < 10):
         return 1
@@ -314,11 +401,11 @@ def MEGsrcChind2data(rawname,chi):
         sind_str,medcond,task = getParamsFromRawname(rawname)
         srcname = 'srcd_{}_{}_{}_{}'.format(sind_str,medcond,task,roistr)
         f = gv.srcs[srcname]
-        src = f['source_data'] 
+        src = f['source_data']
         nsrc = src['avg']['mom'].shape[1]
         if chi < indshift + nsrc:
             srci = chi - indshift
-            src = f['source_data'] 
+            src = f['source_data']
             ref = src['avg']['mom']
             srcval = f[ref[0,srci] ][:,0]   # 1D array with reconstructed source activity
             return srcval
@@ -371,7 +458,7 @@ def getRawname(subj,medcond,task):
     #fn = 'S{:02d}_{}_{}'.format(subjstr,medcond,task)
     if isinstance(subj,str):
         fn = '{}_{}_{}'.format(subj,medcond,task)
-    elif isinstance(subj,int): 
+    elif isinstance(subj,int):
         fn = 'S{:02d}_{}_{}'.format(subj,medcond,task)
     else:
         raise ValueError('Wrong subj type')
@@ -381,7 +468,7 @@ def getSrcname(subj,medcond,task,roi):
     #fn = 'S{:02d}_{}_{}'.format(subjstr,medcond,task)
     if isinstance(subj,str):
         fn = 'srcd_{}_{}_{}_{}'.format(subj,medcond,task,roi)
-    elif isinstance(subj,int): 
+    elif isinstance(subj,int):
         fn = 'srcd_S{:02d}_{}_{}_{}'.format(subj,medcond,task,roi)
     else:
         raise ValueError('Wrong subj type')
@@ -422,8 +509,8 @@ def sortChans(subj, modality, fbname, replace=False, numKeep = 3):
     fbs,fbe = gv.freqBands[fbname]
 
     subj_info = gv.subjs_analyzed[subj]
-    medconds = subj_info['medconds']  
-    tasks = subj_info['tasks']  
+    medconds = subj_info['medconds']
+    tasks = subj_info['tasks']
 
     for side in cht:
         chtcur = cht[side]['nametuples']
@@ -435,7 +522,7 @@ def sortChans(subj, modality, fbname, replace=False, numKeep = 3):
             bandpow_total = 0  # across conditions
             wasBadChan = 0
             for medcond in medconds:
-                bandpow_cur = 0 
+                bandpow_cur = 0
                 for task in tasks:
                     rawname = '{}_{}_{}'.format(subj,medcond,task)
                     if rawname not in gv.raws:
@@ -454,7 +541,7 @@ def sortChans(subj, modality, fbname, replace=False, numKeep = 3):
                         #print('Found bad channel ',chn)
                     else:
                         freq, bins, Sxx = gv.specgrams[rawname][chn]
-                        sspec = getSubspec(freq,bins,Sxx, fbs,fbe) 
+                        sspec = getSubspec(freq,bins,Sxx, fbs,fbe)
                         if sspec is None:
                             continue
                         else:
@@ -467,12 +554,12 @@ def sortChans(subj, modality, fbname, replace=False, numKeep = 3):
                 bandpow_total = 0
             bpt[chi] = bandpow_total
         #sortinds = np.argsort(bpt)
-        #srt = chtcur[modality][sortinds][::-1]   # first the largest one 
+        #srt = chtcur[modality][sortinds][::-1]   # first the largest one
         ss = '{}_{}_sorted'.format(modality,fbname )
 
         from operator import itemgetter
         srt_ = sorted( zip(bpt,chnames), key = itemgetter(0) )[::-1]
-        srt = [ chn for bp,chn in srt_ ] 
+        srt = [ chn for bp,chn in srt_ ]
 
         chtcur[ ss  ] = srt
         if replace:
@@ -492,15 +579,23 @@ def getTuples(sind_str):
     #chns = chnames_tuples[pair_ind]['EMG']
     return sides, indtuples, nametuples
 
-def getOppositeSideStr(side ): 
-    assert side in ['left', 'right' ]
-    if side == 'left':
-        return 'right'
+def getOppositeSideStr(side ):
+    sides_full = ['left', 'right' ]
+    sides_onelet = ['L', 'R' ]
+    sides_ind = [0, 1 ]
+
+    sds = [sides_full, sides_onelet, sides_ind ]
+
+    if side in sides_full:
+        arr = sides_full
+    elif side in sides_onelet:
+        arr = sides_onelet
+    elif side in sides_ind:
+        arr = sides_ind
     else:
-        return 'left'
-    #orderEMG, chinds_tuples, chnames_tuples = getTuples(sind_str)
-    #pair_ind = orderEMG.index( 1 - side ) 
-    #return orderEMG[pair_ind]
+        raise ValueError('wrong side',side)
+
+    return arr[ 1 - arr.index(side)]
 
 def getBinsInside(bins, b1, b2, retBool = True, rawname = None):
     '''
@@ -539,7 +634,7 @@ def filterArtifacts(k, chn, bins, retBool = True, rawname = None):
                 for a,b in artifact_intervals:
                     #if chneff.find('MEG') >= 0:
                     #    print(' chn {} artifact {} : {},{}'.format(chn, chneff, a,b ) )
-                    validbins_bool = np.logical_and( validbins_bool , np.logical_or(bins < a, bins > b)  ) 
+                    validbins_bool = np.logical_and( validbins_bool , np.logical_or(bins < a, bins > b)  )
             else:
                 indsBad = []
                 for a,b in artifact_intervals:
@@ -556,7 +651,7 @@ def filterArtifacts(k, chn, bins, retBool = True, rawname = None):
     else:
         return np.where( validbins_bool )[0]
 
-def filterRareOutliers(dat, nbins=200, thr=0.01, takebin = 20, retBool = False): 
+def filterRareOutliers(dat, nbins=200, thr=0.01, takebin = 20, retBool = False):
     '''
     for non-negative data, 1D only [so flatten explicitly before]
     thr is amount of probability [=proportion of time] we throw away
@@ -564,7 +659,7 @@ def filterRareOutliers(dat, nbins=200, thr=0.01, takebin = 20, retBool = False):
     '''
     assert dat.ndim == 1
     mn,mx = getSpecEffMax(dat, nbins, thr, takebin)
-    binBool = dat <= mx 
+    binBool = dat <= mx
     if retBool:
         return binBool
     else:
@@ -575,16 +670,16 @@ def filterRareOutliers(dat, nbins=200, thr=0.01, takebin = 20, retBool = False):
 #minNbins * sampleFreq
 
 def filterRareOutliers_specgram(Sxx, nbins=200, thr=0.01, takebin = 20, retBool = False):
-    ''' 
+    '''
     for non-negative data
     removesOutliers per frequency
-    first dim is freqs 
+    first dim is freqs
     '''
     numfreqs = Sxx.shape[0]
     binBool = [0] * numfreqs
-    ntimebins =  Sxx.shape[1] 
+    ntimebins =  Sxx.shape[1]
     for freqi in range(numfreqs):
-        r = filterRareOutliers( Sxx[freqi], nbins, thr, takebin, retBool = True ) 
+        r = filterRareOutliers( Sxx[freqi], nbins, thr, takebin, retBool = True )
         binBool[freqi] = r
 
     binBoolRes = np.ones(ntimebins )
@@ -592,12 +687,12 @@ def filterRareOutliers_specgram(Sxx, nbins=200, thr=0.01, takebin = 20, retBool 
         r = binBool[freqi]
         binBoolRes = np.logical_and(r  , binBoolRes )
         #ratio = np.sum(r) / ntimebins
-        #ratio2 = np.sum(binBoolRes) / ntimebins 
+        #ratio2 = np.sum(binBoolRes) / ntimebins
         #print(ratio, ratio2)
 
     indsRes = np.where(binBoolRes)[0]
     ratio = np.sum(binBoolRes) / ntimebins
-    assert ratio  > 0.95, str(ratio)  # check that after intersecting we still have a lot of data 
+    assert ratio  > 0.95, str(ratio)  # check that after intersecting we still have a lot of data
 
     if retBool:
         return binBoolRes
@@ -606,23 +701,23 @@ def filterRareOutliers_specgram(Sxx, nbins=200, thr=0.01, takebin = 20, retBool 
 
 
 def calcNoutMMM_specgram(Sxx, nbins=200, thr=0.01, takebin = 20, retBool = False):
-    ''' 
+    '''
     for non-negative data
     computes effective max and min per freq
-    first dim is freqs 
+    first dim is freqs
     '''
     numfreqs = Sxx.shape[0]
     binBool = [0] * numfreqs
-    ntimebins =  Sxx.shape[1] 
+    ntimebins =  Sxx.shape[1]
     mn = np.zeros(numfreqs)
     mx = np.zeros(numfreqs)
     me = np.zeros(numfreqs)
     for freqi in range(numfreqs):
         dat = Sxx[freqi,:]
-        ret = getSpecEffMax(dat, nbins, thr, takebin) 
+        ret = getSpecEffMax(dat, nbins, thr, takebin)
         if ret is not None:
             mn_,mx_ = ret
-            #r = filterRareOutliers( Sxx[freqi, :], nbins, thr, takebin, retBool = True ) 
+            #r = filterRareOutliers( Sxx[freqi, :], nbins, thr, takebin, retBool = True )
             r =  dat <= mx_
             mn[freqi] = mn_
             mx[freqi] = mx_
@@ -632,19 +727,21 @@ def calcNoutMMM_specgram(Sxx, nbins=200, thr=0.01, takebin = 20, retBool = False
 
 ############################# Tremor-related
 
-def getIntervals(bininds,width=100,thr=0.1, percentthr=0.8,inc=5, minlen=50, 
-        extFactorL = 0.25, extFactorR  = 0.25, endbin = None, cvl=None):
+def getIntervals(bininds,width=100,thr=0.1, percentthr=0.8,inc=5, minlen=50,
+        extFactorL = 0.25, extFactorR  = 0.25, endbin = None, cvl=None,
+                 percent_check_window_width=256, min_dist_between = 100):
     '''
     width -- number of bins for the averaging filter
     tremini -- indices of timebins, where tremor was detected
     thr -- thershold for convolution to be larger then, for L\infty-normalized data
     output -- convolution, intervals (pairs of timebin indices)
     inc -- how much we extend the interval each time (larger means larger intervals, but worse boundaries)
-    minlen -- minimum number of bins required to make the interval be included 
+    minlen -- minimum number of bins required to make the interval be included
     percentthr -- min ratio of thr crossings within the window to continue extending the interval
     extFactor -- we'll extend found intervals by width * extFactor
     endbin -- max timebin
     '''
+    assert cvl.ndim == 1
 
     if cvl is None:
         if endbin is None:
@@ -659,14 +756,17 @@ def getIntervals(bininds,width=100,thr=0.1, percentthr=0.8,inc=5, minlen=50,
         #avflt = sig.gaussian(width, width/4)
         avflt /= np.sum(avflt)   # normalize
         cvl = np.convolve(raster,avflt,mode='same')
-    
+
     #cvlskip = cvl[::skip]
     cvlskip = cvl
     thrcross = np.where( cvlskip > thr )[0]
     belowthr = np.where( cvlskip <= thr )[0]
     shiftL = int(width * extFactorL )
     shiftR = int(width * extFactorR )
-    
+
+    #print('cross len ',len(thrcross), thrcross )
+    #print('below len ',len(belowthr), belowthr )
+
     pairs = []
     gi = 0
     rightEnd = 0  #right end
@@ -679,9 +779,15 @@ def getIntervals(bininds,width=100,thr=0.1, percentthr=0.8,inc=5, minlen=50,
         else:
             di = searchres[0]
             rightEnd = belowthr[di]
+
+        #print(searchres, rightEnd)
         subcvl = cvlskip[leftEnd:rightEnd]
         while rightEnd < len(cvlskip) + inc + 1: # try to enlarge until possible
-            val = np.sum(subcvl > thr) / len(subcvl)
+            if len(subcvl) <= percent_check_window_width:
+                tmp = subcvl
+            else:
+                tmp = subcvl[-percent_check_window_width:]
+            val = np.sum(tmp > thr) / len(tmp)
             if (rightEnd + inc) >= len(cvlskip) and (val > percentthr):
                 rightEnd = len(cvlskip)
                 subcvl = cvlskip[leftEnd:rightEnd]
@@ -692,23 +798,30 @@ def getIntervals(bininds,width=100,thr=0.1, percentthr=0.8,inc=5, minlen=50,
                 subcvl = cvlskip[leftEnd:rightEnd]
             else:
                 break
-            
-        if rightEnd-leftEnd >= minlen:  
-            newp = (  max(0, leftEnd-shiftL), max(0, rightEnd-shiftR) ) # extend the interval on both sides 
-            pairs += [newp ]
 
-        assert leftEnd < rightEnd
-                
+        if rightEnd-leftEnd >= minlen:
+            newp = (  max(0, leftEnd-shiftL), max(0, rightEnd-shiftR) ) # extend the interval on both sides
+            if len(pairs):  #maybe we'd prefer to glue together two pairs
+                prev_st,prev_end = pairs[-1]
+                if newp[0] - prev_end > min_dist_between:
+                    pairs += [newp ]
+                else:
+                    pairs[-1] = ( prev_st, newp[1] )
+            else:
+                pairs += [newp ]
+
+        assert leftEnd <= rightEnd,  (leftEnd,rightEnd)
+
         searchres = np.where(thrcross > rightEnd)[0]  # _ind_ of next ind of thr crossing after end of current interval
         if len(searchres) == 0:
             break
         else:
             gi = searchres[0]
         leftEnd = thrcross[gi]  # ind of thr crossing after end of current interval
-    
+
     return cvlskip,pairs
 
-def findTremor(k,thrSpec = None, thrInt=0.13, width=40, percentthr=0.8, inc=1, minlen=50, 
+def findTremor(k,thrSpec = None, thrInt=0.13, width=40, percentthr=0.8, inc=1, minlen=50,
         extFactorL=0.25, extFactorR=0.25):
     '''
     k is raw name
@@ -719,11 +832,11 @@ def findTremor(k,thrSpec = None, thrInt=0.13, width=40, percentthr=0.8, inc=1, m
 
     #gen_subj_info[sind_str]['tremor_side']
     #gen_subj_info[sind_str]['tremfreq']
-    
-    chnames = gv.raws[k].info['ch_names'] 
+
+    chnames = gv.raws[k].info['ch_names']
     orderEMG, chinds_tuples, chnames_tuples = getTuples(sind_str)
 
-    
+
     tremorIntervals = {}
     cvlPerChan = {}
     for pair_ind in range(len(orderEMG)):
@@ -735,7 +848,7 @@ def findTremor(k,thrSpec = None, thrInt=0.13, width=40, percentthr=0.8, inc=1, m
                 freq, bins, Sxx = gv.specgrams[k][chn]
                 freq,bins,bandspec = getSubspec(freq,bins,Sxx, tremorBandStart, tremorBandEnd,
                         rawname=k)
-                #freqinds = np.where( 
+                #freqinds = np.where(
                 #    np.logical_and(freq >= tremorBandStart,freq <= tremorBandEnd))
                 #bandspec = Sxx[freqinds,:]
                 if thrSpec is None:
@@ -756,7 +869,7 @@ def findTremor(k,thrSpec = None, thrInt=0.13, width=40, percentthr=0.8, inc=1, m
                         else:
                             thrPerFreq = gv.glob_stats[sind_str][medcond][chn]['thrPerFreq_trem']  # computed using k-means
                             assert len(thrPerFreq) == len(freq), '{}, {}'.format(thrPerFreq, freq)
-                            logcond = bandspec[0,:] > thrPerFreq[0] 
+                            logcond = bandspec[0,:] > thrPerFreq[0]
                             for freqi in range(len(freq)): # indices of indices
                                 logcond = np.logical_or(logcond, bandspec[freqi,:] > thrPerFreq[freqi]  )
                             pp = np.where( logcond )
@@ -766,15 +879,15 @@ def findTremor(k,thrSpec = None, thrInt=0.13, width=40, percentthr=0.8, inc=1, m
                     #me = np.mean(bandspec)
                     #thrSpec = me/2
                     pp = np.where( logcond )
-                
+
                     trembini = pp[2]  # indices of bins, regardless of power of which freq subband became higher
                 pairs = []
                 if len(trembini) > 0:
                     widthBins = int( width * (1-specgramoverlap) / ( bins[1]-bins[0] ) )
                     cvlskip,pairs = getIntervals(trembini, widthBins, thrInt,
                             percentthr, inc,  minlen, extFactorL, extFactorR, endbin=len(bins) )
-                    
-                    pairs2 = [ (bins[a],bins[b]) for a,b in pairs    ] 
+
+                    pairs2 = [ (bins[a],bins[b]) for a,b in pairs    ]
     #                 for pa in pairs:
     #                     a,b = pa
     #                     a = bins[a]
@@ -785,9 +898,9 @@ def findTremor(k,thrSpec = None, thrInt=0.13, width=40, percentthr=0.8, inc=1, m
             else:
                 highpassFltorder = 10
                 highpassFreq =  20.
-                sos = sig.butter(highpassFltorder, highpassFreq, 
+                sos = sig.butter(highpassFltorder, highpassFreq,
                         'highpass', fs=gv.gparams['sampleFreq'], output='sos')
-                ts,te = gv.raws[k].time_as_index([gv.gparams['tremDet_timeStart'], 
+                ts,te = gv.raws[k].time_as_index([gv.gparams['tremDet_timeStart'],
                     gv.gparams['tremDet_timeEnd']])
                 chdata,chtimes = getData(k,[chn],ts,te)
                 chdata = chdata[0]
@@ -807,23 +920,23 @@ def findTremor(k,thrSpec = None, thrInt=0.13, width=40, percentthr=0.8, inc=1, m
                         percentthr, inc,  minlen, extFactorL, extFactorR, endbin=None, cvl=cvl )
                 #from IPython.core.debugger import Tracer; debug_here = Tracer(); debug_here()
 
-                pairs2 = [ (chtimes[a],chtimes[b]) for a,b in pairs    ] 
+                pairs2 = [ (chtimes[a],chtimes[b]) for a,b in pairs    ]
                 cvlPerChan[chn] = cvlskip
 
             #else:
             #    print pp
-            
+
             sideinfo[chn] = pairs2
-            
+
         tremorIntervals[orderEMG[pair_ind]] = sideinfo
-            
+
     return tremorIntervals, cvlPerChan
             #print(Sxx.shape, freqinds)
             #return yy
     #assert chdata.ndim == 1
-    
 
-def findAllTremor(thrSpec = None, thr=0.13, width=40, percentthr=0.8, inc=1, minlen=50, 
+
+def findAllTremor(thrSpec = None, thr=0.13, width=40, percentthr=0.8, inc=1, minlen=50,
         extFactorL=0.25, extFactorR=0.25):
     tremPerRaw = {}
     cvls = {}
@@ -832,12 +945,12 @@ def findAllTremor(thrSpec = None, thr=0.13, width=40, percentthr=0.8, inc=1, min
         tremPerRaw[k] = tremIntervals
 
         cvls[k] = cvlPerChan
-        
+
     return tremPerRaw, cvls
 
 def mergeTremorIntervals(intervals, mode='intersect'):
     '''
-    mode -- 'intersect' or 'union' -- how to deal with intervals coming from differnt muscles 
+    mode -- 'intersect' or 'union' -- how to deal with intervals coming from differnt muscles
     '''
     newintervals = {}
     for k in intervals:
@@ -852,7 +965,7 @@ def mergeTremorIntervals(intervals, mode='intersect'):
             pairs2 = intcur[chns[1] ]
 
             mask2 = np.ones(len(pairs2) )
-            
+
             # currently tremor that appear only in one MEG, gets ignored (otherwise I'd have to add non-merged to the list as well)
             resp = []
             #for i1, (a1,b1) in enumerate(pairs):
@@ -883,7 +996,7 @@ def mergeTremorIntervals(intervals, mode='intersect'):
 
             if mode == 'union':
                 # now merging intersecting things that could have arised from joining
-                pairs = resp 
+                pairs = resp
                 mask = np.ones(len(pairs) )
                 resp2 = []
                 for i1, (a1,b1) in enumerate(pairs):
@@ -914,7 +1027,7 @@ def getBandpow(k,chn,fbname,time_start,time_end, mean_corr = False, spdat=None):
     else:
         freqs, bins, Sxx = spdat
     fbs,fbe = gv.freqBands[fbname]
-    r = getSubspec(freqs,bins,Sxx, fbs,fbe, 
+    r = getSubspec(freqs,bins,Sxx, fbs,fbe,
             time_start,time_end,rawname=k)
 
 
@@ -932,7 +1045,7 @@ def getBandpow(k,chn,fbname,time_start,time_end, mean_corr = False, spdat=None):
         #    artifact_intervals = gv.artifact_intervals[k][chn]
         #    validbins_bool_ = [True] * len(bins_b)
         #    for a,b in artifact_intervals:
-        #        validbins_bool_ = np.logical_and( validbins , np.logical_or(bins_b < a, bins_b > b)  ) 
+        #        validbins_bool_ = np.logical_and( validbins , np.logical_or(bins_b < a, bins_b > b)  )
 
         #    validbins_bool = validbins_bool_
         #    validbininds = np.where( validbins_bool )[0]
@@ -940,10 +1053,10 @@ def getBandpow(k,chn,fbname,time_start,time_end, mean_corr = False, spdat=None):
         #    Sxx_b = Sxx_b[validbininds]
 
         spec_thrBadScaleo = gv.gparams['spec_thrBadScaleo']
-        validbins_bool0 = getBinsInside(bins_b, 
-                max(time_start, gv.gparams['spec_time_start'] + spec_thrBadScaleo), 
-                min(gv.gparams['spec_time_end']- spec_thrBadScaleo, time_end), 
-                retBool = True) 
+        validbins_bool0 = getBinsInside(bins_b,
+                max(time_start, gv.gparams['spec_time_start'] + spec_thrBadScaleo),
+                min(gv.gparams['spec_time_end']- spec_thrBadScaleo, time_end),
+                retBool = True)
 
         validbins_bool1 = filterArtifacts(k,chn,bins_b)
         validbins_bool = np.logical_and( validbins_bool0, validbins_bool1)
@@ -953,12 +1066,12 @@ def getBandpow(k,chn,fbname,time_start,time_end, mean_corr = False, spdat=None):
         Sxx_b = Sxx_b[:,validbins_bool]
 
         if mean_corr:
-            #time_start_mecomp = max(time_start, b[0] + thrBadScaleo) 
+            #time_start_mecomp = max(time_start, b[0] + thrBadScaleo)
             #time_end_mecomp = min(time_end, b[-1] - thrBadScaleo)
 
             #goodinds = filterRareOutliers_specgram(Sxx_b)
             #goodinds = np.where( goodinds )[0]
-            #me = np.mean(Sxx_b[:,goodinds] , axis=1) 
+            #me = np.mean(Sxx_b[:,goodinds] , axis=1)
             sind_str, medcond, task = getParamsFromRawname(k)
             st = gv.glob_stats[sind_str][medcond][task][chn]
             me = st.get( 'mean_spec_nout_full' , None )
@@ -1008,7 +1121,7 @@ def getSubspec(freqs,bins,Sxx,freq_min,freq_max,time_start=None,time_end=None,ra
 
     freqmini = freqinds[0]
     freqmaxi = freqinds[-1]
-        
+
 #     norm = None
 #     if chname.find('LFP') >= 0:
 #         freqinds = np.where( np.logical_and(freqs >= plot_minFreqInSpec,freqs < plot_maxFreqInSpec) )[0]
@@ -1024,7 +1137,7 @@ def getSubspec(freqs,bins,Sxx,freq_min,freq_max,time_start=None,time_end=None,ra
     #    Sxx = Sxx[freqmini:freqmaxi,:]
     freqs = freqs[freqinds]
     Sxx = Sxx[freqinds,:]
-    
+
     return freqs,bins,Sxx
 
 ##############################  general data sci
@@ -1033,7 +1146,7 @@ def getSpecEffMax(dat, nbins=200, thr=0.01, takebin = 20):
     '''for non-negative data'''
 
     short = False
-    dat = dat.flatten() 
+    dat = dat.flatten()
     if len(dat) / 10 < nbins:
         short = True
         nbins = int(len(dat) / 10)
@@ -1048,11 +1161,11 @@ def getSpecEffMax(dat, nbins=200, thr=0.01, takebin = 20):
     while checkval > 1 - thr and (short or nbins <= len(dat) / 10):
         #print('nbins = ',nbins)
         if bins is not None:
-            inds = np.where( dat < bins[takebin] )[0]  
+            inds = np.where( dat < bins[takebin] )[0]
             dat = dat[inds]
-            
+
         r, bins = np.histogram(dat, bins = nbins, density=False)
-        cs = np.cumsum(r) 
+        cs = np.cumsum(r)
         cs = cs / cs[-1]
         checkval = cs[0] # prob accumulated in 1st bin
         nbins *= 2
@@ -1091,8 +1204,8 @@ def getDataClusters(chdata, n_clusters=2,n_jobs=-1):
         assert cnt.shape[0] == 2 and cnt.shape[1] == chdata.shape[0]
     return cnt
 
-def getDataClusters_fromDistr(data, n_clusters=2, n_splits = 25, percentOffset = 30, 
-                              clusterType = 'outmostPeaks', 
+def getDataClusters_fromDistr(data, n_clusters=2, n_splits = 25, percentOffset = 30,
+                              clusterType = 'outmostPeaks',
                               debugPlot = False, limOffestPercent = 10, lbl = None):
     '''
     percentOffset -- how much percent of the span (distance between peaks) we offset to right
@@ -1129,12 +1242,12 @@ def getDataClusters_fromDistr(data, n_clusters=2, n_splits = 25, percentOffset =
                 locMaxInds += [bini]
                 locMaxVals += [n]
 
-                
+
     if clusterType == 'highestPeaks':
         sortinds = np.argsort( locMaxVals )  # zero el or sortinds -- index of lowest el in locMaxVals (same as ind in locMaxInds)
         m = min(len(sortinds), n_clusters)
         res = bins[  np.array(locMaxInds) [  sortinds[-m:]  ] ]
-        
+
         if len(res) == 2 and percentOffset > 0:
             #res = res[::-1]
             span = res[1] - res[0]
@@ -1157,7 +1270,7 @@ def getDataClusters_fromDistr(data, n_clusters=2, n_splits = 25, percentOffset =
             assert span > 0
             shift = span * percentOffset / 100
             shiftLim = span * limOffestPercent / 100
-            
+
             res[0] = max( mn + shiftLim,  res[0] - shift  )
             res[1] = min( mx - shiftLim,  res[1] + shift  )
         else:
@@ -1197,6 +1310,187 @@ def calcSpecThr(chdata):
     thr = np.mean(cnt)
     return thr
 
+def H_difactmob(dat,dt, windowsz = None):
+    import pandas as pd
+    # last axis is time axis
+    dif = np.diff(dat,axis=-1, prepend=dat[:,0][:,None] ) / dt
+    if windowsz is None:
+        activity = np.var(dat, axis=-1)
+        vardif = np.var(dif, axis=-1)
+    else:
+        #raise ValueError('not implemented yet')
+        if dat.ndim > 1:
+            activity = []
+            vardif = []
+            for dim in range(dat.shape[0]):
+                act = pd.Series(dat[dim]).rolling(windowsz).var()
+                var   = pd.Series(dif[dim]).rolling(windowsz).var()  # there is one-bin shift here, better to remove..
+                activity += [act]
+                vardif += [var]
+            activity = np.vstack(activity)
+            vardif = np.vstack(vardif)
+        else:
+            raise ValueError('wrong!')
+
+    mobility = np.sqrt( vardif / activity )
+
+    return dif,activity, mobility
+
+def Hjorth(dat, dt, windowsz = None):
+#     if windowsz is not None:
+#         raise ValueError('not implemented yet')
+#     activity = np.var(dat, axis=-1)
+#     dif = np.diff(dat,axis=-1) / dt
+#     vardif = np.var(dif)
+#     mobility = np.sqrt( vardif / activity )
+    dif, activity, mobility = H_difactmob(dat,dt, windowsz=windowsz)
+    #dif2 = np.diff(dif) / dt
+
+    dif2, act2, mob2 = H_difactmob(dif,dt, windowsz=windowsz)
+    complexity = mob2 / mobility
+
+    return activity, mobility, complexity
+
+
+def tfr2csd(dat, sfreq, returnOrder = False):
+    ''' csd has dimensions Nchan x nfreax x nbins
+    returns n x (n+1) / 2  x nbins array
+    '''
+    assert dat.ndim == 3
+    n_channels = dat.shape[0]
+    csds = []
+
+    order  = []
+    for chi in range(n_channels):
+        #r = dat[[chi]] * np.conj ( dat[chi:] )    # upper diagonal elements only, same freq cross-channels
+        r = np.conj ( dat[[chi]] ) *  ( dat[chi:] )    # upper diagonal elements only, same freq cross-channels
+
+        secarg   = np.arange(chi,n_channels)
+        firstarg = np.ones(len(secarg), dtype=int ) * chi
+        curindPairs = np.vstack( [firstarg,secarg] )
+        order += [curindPairs]
+
+        #print(r.shape)
+        csds += [r  ]
+
+    order = np.hstack(order)
+
+    csd = np.vstack( csds )
+    csd /= sfreq
+
+    ret = csd
+    if returnOrder:
+        ret = csd, order
+    return ret
+
+def getCsdVals(csd,i,j, n_channels, updiag = 0):
+    #swap
+    assert i < n_channels
+    assert j < n_channels
+
+    if j < i:
+        tmp = i
+        i = j
+        j = tmp
+
+    idx = 0
+    for ii in range(i):
+        idx += (n_channels - ii - updiag)
+
+    dist_to_diag = j - i - updiag
+    idx += dist_to_diag
+    #print(idx)
+    return  csd[idx]
+#i,j ->
+
+def getFullCSDMat(csd, freq_index, time_index, n_channels, updiag=0):
+    from collections.abc import Iterable
+    # TODO: if time_index is iterable
+    M = np.zeros( (n_channels, n_channels), dtype = csd.dtype)
+    for i in range(n_channels):
+        for j in range(n_channels):
+            r = getCsdVals(csd,i,j, n_channels, updiag =updiag)[freq_index,time_index]
+            if isinstance(r, Iterable):
+                r = np.mean(r)
+            M[i,j] = r
+
+    return M
+
+#########################
+
+def removeAnnsByDescr(anns, anns_descr_to_remove):
+    ''' decide by using find (so can be both sides of just one)'''
+    #anns_descr_to_remove = ['endseg', 'initseg', 'middle', 'incPost' ]
+    assert isinstance(anns_descr_to_remove,list)
+    anns_upd = anns.copy()
+
+    #anns_descr_fine = []
+    #anns_onset_fine = []
+    #anns_dur_fine = []
+    Nbads = 0
+    for ind in range(len(anns.description))[::-1]:
+        wasbad = 0
+        cd = anns.description[ind]
+        for ann_descr_bad in anns_descr_to_remove:
+            if cd.find(ann_descr_bad) >= 0:
+                wasbad = 1
+        if wasbad:
+            print('Removing ',cd)
+            anns_upd.delete(ind)
+            Nbads += 1
+#         if not wasbad:
+#             anns_descr_fine += [cd]
+#             anns_onset_fine += [anns.onset[ind]]
+#             anns_dur_fine += [anns.duration[ind]]
+
+#     onsets_upd = anns_onset_fine
+#     duration_upd = anns_dur_fine
+#     descrs_upd = anns_descr_fine
+
+#     anns_upd = mne.Annotations( onset=onsets_aupd,
+#                            duration = duration_upd,
+#                            description=descrs_upd,
+#                            orig_time=None)
+    print('Overall removed {} annotations'.format(Nbads) )
+
+    return anns_upd
+
+def renameAnnDescr(anns,n2n):
+    import mne
+    assert isinstance(n2n,dict)
+
+    anns_upd = mne.Annotations([],[],[])
+
+    Nbads = 0
+    for ind in range(len(anns.description))[::-1]:
+        wasbad = 0
+        cd = anns.description[ind]
+        newcd = cd
+        was = 0
+        for str0 in n2n:
+            if cd.find(str0) >= 0:
+                was += 1
+            newcd = newcd.replace(str0, n2n[str0])
+            #if cd.find(ann_descr_bad) >= 0:
+            #    wasbad = 1
+        if was:
+            print('{} --> {}'.format(cd,newcd) )
+        dur = anns.duration[ind]
+        onset = anns.onset[ind]
+
+        anns_upd.append(onset,dur,newcd)
+    return anns_upd
+
+def ann2ivalDict(anns):
+    ivalis = {}
+    for i,an in enumerate(anns ):
+        descr = an['description']
+        if descr not in ivalis:
+            ivalis[descr] = []
+        tpl = an['onset'], an['onset']+ an['duration'], descr
+        ivalis[descr] += [ tpl  ]#bandnames = ['tremor', 'beta', 'gamma', 'allf']
+
+    return ivalis
 
 #############################
 
@@ -1215,7 +1509,7 @@ def plotTimecourse(plt):
     #chanTypes_toshow = ['EMG']
 
     nc = 4
-    nr = len(ks)        
+    nr = len(ks)
 
     time_start,time_end = 0,1000
     #time_start,time_end = 0,300  # to get only rest part
@@ -1231,7 +1525,7 @@ def plotTimecourse(plt):
 
         chnames = gv.raws[k].info['ch_names']
         orderEMG, chinds_tuples, chnames_tuples = getTuples(sind_str)
-        
+
         for channel_pair_ind in [0,1]:
             inds = []
             for cti in range(len(chanTypes_toshow_timecourse) ):
@@ -1248,13 +1542,13 @@ def plotTimecourse(plt):
                 mintime = min(chtimes)
                 maxtime = max(chtimes)
 
-                
+
                 if nc == 1:
                     ax = axs[axind]
                 else:
                     colind = channel_pair_ind * 2 + cti
                     ax = axs[axind,colind]
-                
+
                 for i in range(chdata.shape[0] ):
                     ax.plot(chtimes,chdata[i,:], label = '{}'.format(chnames[chs[i] ] ), alpha=0.7 )
                     ax.set_ylim(-ymaxEMG/2,ymaxs[ct])
@@ -1285,5 +1579,5 @@ def plotTimecourse(plt):
         plt.close()
     else:
         plt.show()
-        
+
     print('Plotting all finished')

@@ -11,6 +11,11 @@ end
 medconds = ["off", "on"];
 tasks = ["rest", "move", "hold"];
 
+%subjstrs = ["S01" ] 
+medconds = ["off"];
+tasks = [ "move"];
+
+
 % Brodmann 4 -- M1,   Brodmann 6 -- PMC
 roi = {"Brodmann area 4","Brodmann area 6"};
 %roi = {"Brodmann area 4"};
@@ -20,9 +25,8 @@ roi = {"HirschPt2011"};
 save_srcrec          = 1;
 remove_bad_channels = 1;
 
-
-
-
+use_DICS = 0;
+use_data_afterICA = 1;
 
 
 if 1 ~= exist("Info")
@@ -60,7 +64,12 @@ for subji = 1:length(subjstrs)
     for taski = 1:length(tasks)
       typestr = tasks(taski);
 
-      basename = sprintf('/%s_%s_%s_resample_raw.fif',subjstr,medstr,typestr);
+      if use_data_afterICA
+        basename = sprintf('/%s_%s_%s_resample_afterICA_raw.fif',subjstr,medstr,typestr);
+      else
+        basename = sprintf('/%s_%s_%s_resample_raw.fif',subjstr,medstr,typestr);
+      end
+      fprintf(" Using basename=%s\n",basename)
       %basename = sprintf('/%s_%s_%s_resample_maxwell_raw.fif',subjstr,medstr,typestr);
       fname = strcat(data_dir, basename );
       if isfile(fname)
@@ -77,7 +86,7 @@ for subji = 1:length(subjstrs)
           if remove_bad_channels && length(bads) > 0
             chanselarr = {'meg'};
             for chani = 1:length(bads)
-              chanselarr{chani + 1} = sprintf('-%s',bads{chani});
+              chanselarr{chani + 1} = sprintf('-%s',bads{chani});   % marks channel for removal from seelction
             end
             selchan = ft_channelselection(chanselarr, datall_.label);
             bads = {};
@@ -98,8 +107,11 @@ for subji = 1:length(subjstrs)
           roicur = roi{roii};
 
           S = scalemat(subjstr);
-          source_data = srcrec(subjstr,datall,hdmf,{roicur},bads,S,srs,mask);
-          source_data.roi = {roicur};
+          source_data = srcrec(subjstr,datall,hdmf,{roicur},bads,S,srs,mask,use_DICS);
+
+          for fbi = 1:length(source_data) 
+            source_data{fbi}.source_data.roi = {roicur};
+          end
 
           if save_srcrec
             basename_srcd = sprintf("/srcd_%s_%s_%s_%s.mat",subjstr,medstr,typestr,roicur);

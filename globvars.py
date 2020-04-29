@@ -28,3 +28,7 @@ srcs                                = None
 artifact_intervals                  = None
 
 gparams                              = {}
+
+gparams['intTypes'] = ['pre', 'post', 'initseg', 'endseg', 'middle_full', 'no_tremor', 'unk_activity_full' ]
+gparams['intType2col'] =  {'pre':'blue', 'post':'gold', 'middle_full':'red', 'no_tremor':'green',
+            'unk_activity_full': 'cyan', 'initseg': 'teal', 'endseg':'blueviolet' }

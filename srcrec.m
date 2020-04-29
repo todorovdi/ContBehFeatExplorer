@@ -1,4 +1,4 @@
-function output = srcrec(subjstr,datall,hdmf,roi,bads,S,srs,mask)
+function output = srcrec(subjstr,datall,hdmf,roi,bads,S,srs,mask,use_DICS)
   %cd 
 
   do_load_only_ifnew   = 1;
@@ -8,6 +8,9 @@ function output = srcrec(subjstr,datall,hdmf,roi,bads,S,srs,mask)
   %tstart = 300;
   %tend = 400;
 
+
+
+  %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 
   %save(fname_resampled,'datall')
@@ -36,6 +39,8 @@ function output = srcrec(subjstr,datall,hdmf,roi,bads,S,srs,mask)
         load(fn);
       else
         sprintf('CoordFile %s does not exist',fn)
+        exit(0)
+
         load('coordsJan.mat')
 
         % compute transformation matrix
@@ -78,6 +83,7 @@ function output = srcrec(subjstr,datall,hdmf,roi,bads,S,srs,mask)
 
 
       srcpos = coords_Jan_actual;
+      srcpos = surroundPts;
     else
       srcpos_ = hdmf.mni_aligned_grid.pos(mask,:);
       srcpos = zeros(size(srcpos_));
@@ -97,30 +103,145 @@ function output = srcrec(subjstr,datall,hdmf,roi,bads,S,srs,mask)
   %cfg.grid = sourcemodel;
   %[grid] = ft_prepare_leadfield(cfg);
 
+  res = {};
 
-  cfg_srcrec=[];
-  cfg_srcrec.method='lcmv';
-  cfg_srcrec.lcmv.lambda='5%';
-  cfg_srcrec.headmodel=hdmf.hdm;
-  %cfg_srcrec.grid=mni_aligned_grid;
-  cfg_srcrec.sourcemodel = [];
-  cfg_srcrec.sourcemodel.pos = srcpos;
-  %cfg_srcrec.grid = [];
-  %cfg_srcrec.grid.pos = srcpos;
+  %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+  fbands = [ [2 10];   [10.5 30];    [30.5 100]  ];
+  fbands = [ [4 10];   [10 30];    [30 -1];  [-1 -1]  ];
+  %fbands = [ [2 10];  ];
+  %fbands = [ [10.5 30];  ];
+    
+  [nfreqBands, zz] = size(fbands);
+  if use_DICS
+    endtime = datall.time{1}(end);
+    step_sec = 0.5;
+    windowsz_sec = 1.;
 
-  cfg_srcrec.supchan = bads;
+    cfg = [];
+    %cfg.method    = 'mtmfft';
+    cfg.method    = 'mtmconvol';
+    cfg.output    = 'powandcsd';
+    cfg.tapsmofrq = 2;
+    %cfg.foilim    = [2 100];
+    %cfg.channelcmb = {'all' 'all'}
+    cfg.foi = 2:1:100;
+    cfg.t_ftimwin = ones(length(cfg.foi), 1) .* windowsz_sec;
+    cfg.toi = step_sec:step_sec:(endtime-step_sec - 1e-8);
+    cfg.pad = 'nextpow2';
 
-  cfg_srcrec.lcmv.projectmom='yes';
-  cfg_srcrec.lcmv.reducerank=2;
+    if do_srcrec
+      load_prev_freqdata = 1;
 
-  if do_srcrec
-    source_data = ft_sourceanalysis(cfg_srcrec,datall);  % 100 sec, 6 channels takes 37 sec on desktop
-    %%source_data = ft_sourceanalysis(cfg_srcrec,output_of_ft_timelockanalysis);
-    %
+      data_dir = getenv("DATA_DUSS");
+      fn = strcat(data_dir, '/tmp_freq_data.mat' ); 
+      fprintf(fn);
+
+      if load_prev_freqdata
+        f = load(fn);
+        freqdata = f.freqdata
+        fprintf("Freq analysis loaded")
+      else
+        freqdata = ft_freqanalysis(cfg, datall);
+        save(fn,"freqdata","-v7.3");
+        fprintf("!! Freq analysis finished and saved")
+      end
+
+
+      %cfg                 = [];
+      %cfg.grad            = freqPost.grad;
+      %cfg.headmodel       = hdmf.hdm;
+      %cfg.reducerank      = 2;
+      %cfg.channel         = {'MEG','-MLP31', '-MLO12'};
+      %cfg.resolution = 1;   % use a 3-D grid with a 1 cm resolution
+      %cfg.sourcemodel.unit       = 'cm';
+      %grid = ft_prepare_leadfield(cfg);
+
+
+      for fbi =1:nfreqBands
+        fband_cur = fbands(fbi,:); 
+
+        cfg_srcrec              = [];
+        cfg_srcrec.method       = 'dics';
+        cfg_srcrec.frequency    = fband_cur;
+        %cf_srcrecg.sourcemodel  = grid;
+        cfg_srcrec.sourcemodel = [];
+        cfg_srcrec.sourcemodel.pos = srcpos;
+        cfg_srcrec.headmodel    = hdmf.hdm;
+        cfg_srcrec.dics.projectnoise = 'yes';
+        cfg_srcrec.dics.lambda       = 0;
+        cfg_srcrec.keepfilter = 'yes'
+
+        source_data_cur = ft_sourceanalysis(cfg_srcrec,freqdata);
+
+
+        resEntry = [];
+        resEntry.source_data = source_data_cur;
+        resEntry.bpfreq = fband_cur;
+        res = {res; resEntry};
+
+        %if length(source_data)
+        %  cfg_append = []
+        %  cfg_append.parameter = 'freq'
+        %  source_data = ft_appendsource(cfg_append, source_data, source_data_cur)
+        %else
+        %  source_data = source_data_cur
+        %end
+      end
+    end
+  else
+    %sourcePost_nocon = ft_sourceanalysis(cfg, freqPre);
+
+    for fbi =1:nfreqBands
+      fband_cur = fbands(fbi,:); 
+
+      if fband_cur(1) > 0
+        cfg_bp = [];
+        if fband_cur(2) > 0
+          cfg_bp.bpfilter = 'yes';
+          cfg_bp.bpfreq = fband_cur;
+          %cfg_bp.bpfiltord
+        else
+          cfg_bp.hpfilter = 'yes';
+          cfg_bp.hpfreq = fband_cur(1);
+          %cfg_bp.hpfiltord
+        end
+        datall_cur = ft_preprocessing(cfg_bp, datall);
+      else
+        datall_cur = datall
+      end
+
+
+      cfg_srcrec=[];
+      cfg_srcrec.method='lcmv';
+      cfg_srcrec.lcmv.lambda='5%';
+      cfg_srcrec.headmodel=hdmf.hdm;
+      %cfg_srcrec.grid=mni_aligned_grid;
+      cfg_srcrec.sourcemodel = [];
+      cfg_srcrec.sourcemodel.pos = srcpos;
+      %cfg_srcrec.grid = [];
+      %cfg_srcrec.grid.pos = srcpos;
+
+      cfg_srcrec.supchan = bads;
+
+      cfg_srcrec.lcmv.projectmom='yes';
+      cfg_srcrec.lcmv.reducerank=2;  % always like that for MEG
+
+      if do_srcrec
+        source_data_cur = ft_sourceanalysis(cfg_srcrec,datall_cur);  % 100 sec, 6 channels takes 37 sec on desktop
+        resEntry = [];
+        resEntry.source_data = source_data_cur;
+        resEntry.bpfreq = fband_cur;
+        res{fbi} = resEntry;
+        %%source_data = ft_sourceanalysis(cfg_srcrec,output_of_ft_timelockanalysis);
+        %
+      end
   end
 
+  %%% DICS -- 
+  %% ft_freqanalysis   mtmfft, output powandcsd (or fourier)  ,, maybe hanning
+  %% foilim -- only if have low point power, better foi,  0.5 Hz
 
-  output = source_data;
+  output = res;
   %source_data.inside -- 3D array of  0 or 1
   %source_data.avg.pow -- 3D array of  floats (or NaN s for outside)
   %source_data.avg.mom -- 3D array of  floats (or NaN s for outside)

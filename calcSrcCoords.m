@@ -12,17 +12,17 @@ data_dir = getenv('DATA_DUSS');
 %subjstr = 'S10';
 
 if ~exist("subjstr")
-  subjstr = 'S08';
+  subjstr = 'S02';
 end
 basename_head = sprintf('/headmodel_grid_%s.mat',subjstr);
 fname_head = strcat(data_dir, basename_head );
 hdmf = load(fname_head);   %hdmf.hdm, hdmf.mni_aligned_grid
 
-%figVis = 'off'
-figVis = 'on'
+figVis = 'off'
+%figVis = 'on'
 
 scalemat = containers.Map;
-% x -- between ears, z -- vert
+% x -- between ears (positive means right hemisphere), z -- vert
 sx = 1; sy=1; sz=1.09;
 S = [ [sx 0 0]; [0 sy 0]; [0 0 sz] ]  ;
 scalemat('S02') = S;
@@ -88,59 +88,36 @@ Y1 = transpose(Y0);
 X = [X1; [1 1 1 1] ];
 Y = [Y1; [1 1 1 1] ];
 
-d = det(Y)
+d = det(Y);
 if abs(d) < 1e-10
   printf("Bad selection of vectors")
   return
 end
 
-M = Y * inv(X)
+M = Y * inv(X);
 %M = Y \ X
 tryinds = [7 13 567];
 ii = 2;
 dev = M * transpose( [ preX(tryinds(ii), :) 1] ) - transpose( [preY(tryinds(ii),:) 1] );
-devv = dev(1:3)
+devv = dev(1:3);
+fprintf('dev = %d\n',devv)
 
 %dev = M * transpose( preX(tryinds(ii), :) ) - transpose( preY(tryinds(ii),:) )
 
 %return
 
-load('coordsJan.mat')
+load('coordsJan.mat')    % contains labels besides other things
 %coords_Jan_MNI =  transpose( [ [33 -22 57] ; [-33 -22 57] ] ) / 10. ;
 coords_Jan_MNI = transpose( coords );
 coords_Jan_MNI_t = [ coords_Jan_MNI; ones( 1, size(coords_Jan_MNI,2) ) ];
 yy = M * coords_Jan_MNI_t ;
 coords_Jan_actual = transpose( yy(1:3,:)  );
 
-coords_Jan_actual
-coords_Jan_actual_upd = coords_Jan_actual;
+%coords_Jan_actual
+%coords_Jan_actual_upd = coords_Jan_actual;
+coords_Jan_actual_upd = projectPtOnBrainSurf(hdmf.hdm, coords_Jan_actual, 1);
 
-orig = [0 0 0];
-
-tris = hdmf.hdm.bnd.tri;
-for i = 1:length(coords_Jan_actual)
-  dir = coords_Jan_actual(i,:);
-  for j = 1:length(tris)
-    tri_inds = tris(j,:);
-    vecs = hdmf.hdm.bnd.pos(tri_inds,:);
-    v1 = vecs(1,:); v2=vecs(2,:); v3=vecs(3,:);
-    [isec, t,u,v,xcoor] = TriangleRayIntersection(orig, dir, v1,v2,v3, ... 
-      'lineType','segment','fullReturn',1);
-    if isec & t > 0.8 
-      sprintf('0_coordInd %d, numTri %d, %d, dist %f',i,j,isec,t)
-      dir = dir * t * 0.95;
-      coords_Jan_actual_upd(i,:) = dir;
-      [isec, t,u,v,xcoor] = TriangleRayIntersection(orig, dir, v1,v2,v3, ... 
-        'lineType','segment','fullReturn',1);
-      if isec
-        sprintf('coordInd %d, numTri %d, %d, dist %f',i,j,isec,t)
-      end
-    end
-  end
-end
-
-coords_Jan_actual = coords_Jan_actual_upd
-save( strcat(subjstr,'_modcoord'),  'coords_Jan_actual', 'labels' )
+coords_Jan_actual = coords_Jan_actual_upd;
 
 if exist("skipPlot") & skipPlot
   return;
@@ -148,8 +125,9 @@ end
 
 cfg = [];
 cfg.atlas = atlas;
-cfg.roi = {'Brodmann area 4'};
+%cfg.roi = {'Brodmann area 4'};
 cfg.roi = {'Brodmann area 6'};
+cfg.roi = {'Brodmann area 6' 'Brodmann area 4'};
 %cfg.roi = atlas.tissuelabel;
 cfg.inputcoord = 'mni';  % coord of the source
 %cfg.inputcoord = 'tal';
@@ -157,20 +135,83 @@ mask = ft_volumelookup(cfg,srsstd.sourcemodel);  % selecting only a subset
 
 roistr = cfg.roi{1};
 
-tmp                  = repmat(srsstd.sourcemodel.inside,1,1);
-tmp(tmp==1)          = 0;
-tmp(mask)            = 1;
+mask_roi                  = repmat(srsstd.sourcemodel.inside,1,1);
+mask_roi(mask_roi==1)          = 0;
+mask_roi(mask)            = 1;
 
 tmpstd = srsstd.sourcemodel.inside;
 tmpsubj = hdmf.mni_aligned_grid.inside;  % this one will be used for source reconstruction
 
+
+surround_radius = 0.8;
+radius_inc = 0.1;
+min_number_of_pts = 80
+
+roipts0 = hdmf.mni_aligned_grid.pos(mask_roi,:);
+% I could take all grid points but than I will need to make sure 
+% that I don't have too many points after I project to the 
+% surface. I.e. projection of ball from 3D grid onto 2D surface will make non-uniform grid 
+% I could do it assining to each triangle minimum ditance of the intersection and then only taking 
+% the point with minimum distance
+%roipts0 = hdmf.mni_aligned_grid.pos(hdmf.mni_aligned_grid.inside,:);  
+
+do_project_all_roipts = 0;  %just a little bit more accurate but a lot slower
+if do_project_all_roipts
+  roipts =  projectPtOnBrainSurf(hdmf.hdm, roipts0, 1); 
+  if length(roipts) ~= sum(mask_roi)
+    fprintf('Non-unique projection happend (some rays intersect more than one triangle)\n')
+    exit(0)
+  end
+else
+  roipts = roipts0;
+end
+
+nsurrPts = 0;
+while nsurrPts < min_number_of_pts
+  surroundPts = [];
+  point_ind_corresp  = [];  % in final array which points corresp to which Jan point
+  nrms = [];
+  for i=1:length(coords_Jan_actual)
+    ptJan_cur = coords_Jan_actual(i,:);
+    nclose = 0;
+    for j=1:length(roipts)
+      roi_pt = roipts(j,:);
+
+      nrm = norm(roi_pt-ptJan_cur);
+      nrms = [nrms nrm];
+      if nrm < surround_radius
+        surroundPts = [surroundPts; roi_pt];
+        point_ind_corresp = [point_ind_corresp i];
+        nclose = nclose + 1;
+      end
+    end
+    % if we did not find any from the area, add the point itself
+    if nclose == 0
+      fprintf('Warning! Failed to find roi pts close to point number %d = ',i)
+      fprintf('%d',ptJan_cur)
+      fprintf('\n')
+      surroundPts = [surroundPts; ptJan_cur];
+      point_ind_corresp = [point_ind_corresp i];
+    end
+
+  end
+  nsurrPts = length(surroundPts);
+  surround_radius = surround_radius + radius_inc;
+  fprintf('Radius increased to %d\n',surround_radius);
+end
+surroundPts =  projectPtOnBrainSurf(hdmf.hdm, surroundPts, 0); 
+fprintf('Num of surroundPts = %d, radius was %d\n',length(point_ind_corresp), surround_radius )
+
+save( strcat(subjstr,'_modcoord'),  'coords_Jan_actual', 'labels', 'surroundPts', 'point_ind_corresp', 'surround_radius' );
 %%%%%%%%---------------
+
+%[sorted_pts,sort_inds] = sortrows(surroundPts,1)
  
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%% Plot
 close all
 viewarrs = [ [0 -90 0]; [0 0 90] ];
-nr = 4
+nr = 4;
 
 figure('visible',figVis);
 for viewarrind = 1:2 
@@ -203,15 +244,15 @@ for viewarrind = 1:2
 
 
   %%%%%%%%%%% set masks
-  %srsstd.sourcemodel.inside    = tmp; % define inside locations according to the atlas based mask 
-  %hdmf.mni_aligned_grid.inside = tmp;  % this one will be used for source reconstruction
+  %srsstd.sourcemodel.inside    = mask_roi; % define inside locations according to the atlas based mask 
+  %hdmf.mni_aligned_grid.inside = mask_roi;  % this one will be used for source reconstruction
 
   %%% Plot standard stuff
   subplot(nr,2,3)
   hold on     % plot all objects in one figure
   hdmstdf = load('~/soft/fieldtrip-20190716/template/headmodel/standard_singleshell.mat');  % just for plotting
   ft_plot_headmodel(hdmstdf.vol,  'facecolor', 'cortex', 'edgecolor', 'none');alpha 0.5; camlight;
-  Q = srsstd.sourcemodel.pos(tmp,:);
+  Q = srsstd.sourcemodel.pos(mask_roi,:);
   ft_plot_mesh(Q); % plot only locations inside the volume
   title(sprintf('standard head %s',roistr))
   hold off
@@ -222,7 +263,7 @@ for viewarrind = 1:2
   subplot(nr,2,4)
   hold on     % plot all objects in one figure
   ft_plot_headmodel(hdmf.hdm,  'facecolor', 'cortex', 'edgecolor', 'none');alpha 0.5; camlight;
-  ft_plot_mesh(hdmf.mni_aligned_grid.pos(tmp,:)); % plot only locations inside the volume
+  ft_plot_mesh(hdmf.mni_aligned_grid.pos(mask_roi,:)); % plot only locations inside the volume
   title(sprintf('%s %s, mask of mni_aligned_grid',subjstr,roistr))
   hold off
 
@@ -235,6 +276,8 @@ for viewarrind = 1:2
   hold on     % plot all objects in one figure
   ft_plot_headmodel(hdmf.hdm,  'facecolor', 'cortex', 'edgecolor', 'none');alpha 0.5; camlight;
   Q = hdmf.mni_aligned_grid.pos(hdmf.mni_aligned_grid.inside,:);
+
+  Q = surroundPts;
   Q2 = zeros(size(Q));
   for i=1:length(Q)
     Q2(i,:) = S * transpose( Q(i,:) );
@@ -249,7 +292,7 @@ for viewarrind = 1:2
   subplot(nr,2,6)
   hold on     % plot all objects in one figure
   ft_plot_headmodel(hdmf.hdm,  'facecolor', 'cortex', 'edgecolor', 'none');alpha 0.5; camlight;
-  Q = hdmf.mni_aligned_grid.pos(tmp,:);
+  Q = hdmf.mni_aligned_grid.pos(mask_roi,:);
   Q2 = zeros(size(Q))  ;
   for i=1:length(Q);
     Q2(i,:) = S * transpose( Q(i,:) );
@@ -286,7 +329,8 @@ for viewarrind = 1:2
     Q2(i,:) = S *  transpose( Q(i,:)  );
   end
 
-  Q2(1,1) = 2 * Q2(1,1)
+  Q2(1,1) = 2 * Q2(1,1); % just to visually aid distinguishing hemispheres
+  Q2(1,1)
 
   ft_plot_mesh( Q2 ); % plot only locations inside the volume
   title(sprintf('%s %s, actual coords, scaled %3f,%3f,%3f',subjstr,roistr,sx,sy,sz))
@@ -299,6 +343,7 @@ for viewarrind = 1:2
 
   figname = sprintf('source_pics_%s_%i.png',subjstr,viewarrind);
   saveas(gcf,figname)
+  fprintf('Plot saved\n')
 end
 
 
