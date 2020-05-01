@@ -1,6 +1,43 @@
 import mne
 import os
 import numpy as np
+import gc
+
+def getRaw(rawname_naked, rawname = None ):
+    if os.environ.get('DATA_DUSS') is not None:
+        data_dir = os.path.expandvars('$DATA_DUSS')
+    else:
+        data_dir = '/home/demitau/data'
+
+    if rawname is None:
+        rawname = rawname_naked + '_resample_raw.fif'
+    fname_full = os.path.join(data_dir, rawname)
+    # read file -- resampled to 256 Hz,  Electa MEG, EMG, LFP, EOG channels
+    raw = mne.io.read_raw_fif(fname_full, None)
+
+    return raw
+
+def getSubRaw(rawname_naked, picks = ['EMG.*old'], raw=None, rawname = None):
+    if isinstance(picks, str):
+        picks = [picks]
+    assert isinstance(picks,list) and isinstance(picks[0],str)
+
+    if raw is None:
+        raw = getRaw(rawname_naked, rawname)
+
+    subraw = raw.copy()
+    subraw.load_data()
+    chis = []
+    for pick in picks:
+        chis_cur = mne.pick_channels_regexp(subraw.ch_names, pick )
+        chis += chis_cur
+    restr_names = np.array(subraw.ch_names)[chis]
+    restr_names = restr_names.tolist()
+
+    subraw.pick_channels(restr_names)
+    gc.collect()
+
+    return subraw
 
 def saveRectConv(rawname_naked, raw=None, rawname = None, maxtremfreq=9, skip_if_exist = 0):
     if os.environ.get('DATA_DUSS') is not None:
@@ -12,20 +49,19 @@ def saveRectConv(rawname_naked, raw=None, rawname = None, maxtremfreq=9, skip_if
     if os.path.exists(rectconv_fname_full) and skip_if_exist:
         return None
 
-    if raw is None:
-        if rawname is None:
-            rawname = rawname_naked + '_resample_raw.fif'
-        fname_full = os.path.join(data_dir, rawname)
-        # read file -- resampled to 256 Hz,  Electa MEG, EMG, LFP, EOG channels
-        raw = mne.io.read_raw_fif(fname_full, None)
+    #if raw is None:
+    #    if rawname is None:
+    #        rawname = rawname_naked + '_resample_raw.fif'
+    #    fname_full = os.path.join(data_dir, rawname)
+    #    # read file -- resampled to 256 Hz,  Electa MEG, EMG, LFP, EOG channels
+    #    raw = mne.io.read_raw_fif(fname_full, None)
 
-    emgonly = raw.copy()
-    emgonly.load_data()
-    chis = mne.pick_channels_regexp(emgonly.ch_names, 'EMG.*old')
-
-    restr_names = np.array(emgonly.ch_names)[chis]
-    restr_names = restr_names.tolist()
-    chdata, times = emgonly[emgonly.ch_names]
+    #emgonly = raw.copy()
+    #emgonly.load_data()
+    #chis = mne.pick_channels_regexp(emgonly.ch_names, 'EMG.*old')
+    emgonly = getSubRaw(rawname_naked, picks = ['EMG.*old'], raw=raw,
+                        rawname = rawname)
+    chdata = emgonly.get_data()
 
     y = {}
     for chname in emgonly.ch_names:

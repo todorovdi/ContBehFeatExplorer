@@ -376,13 +376,20 @@ def plotCSD(csd, fbs_list, channel_names, timebins, sfreq=256, intervalMode=1,
                  format( timebins[0]// sfreq, timebins[-1]// sfreq ))
 
 
-def plotMultiMarker(ax,dat1, dat2, c, m, alpha=None, s=None):
-    for curm in list( set( m ) ):
+def plotMultiMarker(ax,dat1, dat2, c, m, alpha=None, s=None, picker=False):
+    '''  returns tuple -- list , list of lists , list of artists '''
+    resinds = []
+    markerset = list( set( m ) )
+    scs = []
+    for curm in markerset:
         inds = np.where(m==curm)[0]
         if len(inds):
             #print(inds)
-            ax.scatter(dat1[inds],dat2[inds],c=c[inds],marker=curm,alpha=alpha,
-                       s=s)
+            sc = ax.scatter(dat1[inds],dat2[inds],c=c[inds],marker=curm,alpha=alpha,
+                       s=s,picker=picker)
+            resinds += [ inds.tolist() ]
+            scs += [sc]
+    return markerset,resinds,scs
 
 
 def getIntervalSurround(start,end, extend, raw=None, times=None, verbose = False):
@@ -447,3 +454,81 @@ def selFeatsRegex(data, names, regexs, unique=1):
         datsel = data[inds]
 
     return datsel, namesel
+
+def computeFeatCorrel(Xfull, Xtimes_full, feature_names_all, skip, windowsz, bandPairs):
+    #e.g  bandPairs = [('tremor','beta'), ('tremor','gamma'), ('beta','gamma') ]
+    # compute Pearson corr coef between different band powers all chan-chan
+    # parhaps I don't need corr between LFP chans
+    #bandPairs = bandPairs[0:1]
+    #bandPairs = bandPairs[1:2]
+    #bandPairs = bandPairs[2:3]
+
+
+    window_starts = np.arange(len(Xtimes_full) )[::skip]
+    #window_starts_tb = raw_lfponly
+    #assert len(window_starts) == len(Xtimes)
+
+    from scipy.stats import pearsonr
+
+    cors = []
+    cor_names = []
+    for bn_from,bn_to in bandPairs:
+        templ_from = r'con_{}.*:\s(.*),\1'.format(bn_from)
+        templ_to = r'con_{}.*:\s(.*),\1'.format(bn_to)
+
+        datsel_from,namesel_from = selFeatsRegex(Xfull.T, feature_names_all, templ_from)
+        datsel_to,namesel_to = selFeatsRegex(Xfull.T, feature_names_all, templ_to)
+
+
+        for fromi in range(len(datsel_from)):
+            for toi in range(len(namesel_to)):
+                nfrom,nto = namesel_from[fromi], namesel_to[toi]
+                if nfrom.find('LFP') >= 0 and nto.find('LFP') >= 0:
+                    continue
+
+                nfrom = nfrom.replace('con_',''); nfrom = nfrom.replace('allf_','');
+                nto = nto.replace('con_',''); nto = nto.replace('allf_','')
+                name = 'corr_{},{}'.format(nfrom,nto)
+
+                corr_window = []
+                for wi in range(len(window_starts)):
+                    ws = window_starts[wi]
+                    sl = slice(ws,ws+windowsz)
+
+                    #r = np.correlate(datsel_from[fromi,sl], datsel_to[toi,sl] )
+                    r,pval = pearsonr(datsel_from[fromi,sl], datsel_to[toi,sl])
+                    corr_window += [r]
+                cors += [np.hstack(corr_window) ]
+                cor_names += [(name)]
+
+    return cors,cor_names
+
+def prepareLegendElements(mrk,mrknames,colors,task, skipExt = False):
+    legend_elements = []
+    if task is not None:
+        if isinstance(task,str):
+            task = [task]
+        else:
+            assert isinstance(task,list)
+
+    for clrtype in colors.keys():
+        if clrtype == 'neut':
+            continue
+        if clrtype in ['move', 'hold'] and clrtype not in task:
+            continue
+
+        for m,mn in zip(mrk,mrknames):
+            if skipExt and len(mn) > 0:  #mn == '' for the "meat" part of the interval
+                continue
+
+            legel_ = mpl.lines.Line2D([0], [0], marker=m, color='w', label=clrtype+mn,
+                                        markerfacecolor=colors[clrtype], markersize=8)
+            #print(clrtype+mn)
+
+
+            legend_elements += [legel_]
+
+    legel_unlab = mpl.lines.Line2D([0], [0], marker='o', color='w', label='unlab'+mn,
+                                markerfacecolor=colors['neut'], markersize=8)
+    legend_elements += [legel_unlab]
+    return legend_elements
