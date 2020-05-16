@@ -4,6 +4,7 @@ import re
 
 import globvars as gv
 import scipy.signal as sig
+import matplotlib.pyplot as plt
 
 def getIntervalIntersection(a1,b1, a2, b2):
     if b1 < a2:
@@ -446,7 +447,7 @@ def getParamsFromRawname(rawname):
     return subjstr,medcond,task
 
 def getParamsFromSrcname(srcname):
-    r = re.match( "srcd_(S\d{2})_(.+)_(.+)_(.+)", rawname ).groups()
+    r = re.match( "srcd_(S\d{2})_(.+)_(.+)_(.+)", srcname ).groups()
     subjstr = r[0]
     medcond = r[1]
     task = r[2]
@@ -724,6 +725,65 @@ def calcNoutMMM_specgram(Sxx, nbins=200, thr=0.01, takebin = 20, retBool = False
             me[freqi] = np.mean( dat[r] )
 
     return mn,mx,me
+
+#10-20, 20-30
+def prepFreqs(min_freq = 3, max_freq = 400, min_freqres=2, gamma_bound = 30, HFO_bound = 90, frmult_scale=1 ):
+    # gamma_bound is just bound when we change freq res to a coarser one
+
+    pi5 = 2*np.pi / 5    # 5 is used in MNE as multiplier of std of gaussian used for Wavelet
+
+    assert max_freq > gamma_bound, 'we want {} > {} '.format(max_freq, gamma_bound)
+    assert min_freq < gamma_bound, 'we want {} < {} '.format(min_freq, gamma_bound)
+    fbands = [ [min_freq,gamma_bound], [gamma_bound,HFO_bound], [HFO_bound,max_freq]  ]
+    freqres = np.array( [ 1, 2, 4  ] ) * min_freqres
+    frmults = frmult_scale * np.array( [pi5, pi5/2, pi5/4] )
+    if max_freq <= HFO_bound:
+        fbands = fbands[:2]
+        freqres = freqres[:2]
+        frmults = frmults[:2]
+
+    freqs = []
+    n_cycles  = []
+    prev_fe = -1
+    for fb,freq_step,fm in zip(fbands,freqres,frmults):
+        if prev_fe < 0:
+            fbstart = fb[0]
+        else:
+            fbstart = prev_fe + freq_step/2
+        freqs_cur = np.arange(fbstart, fb[1], freq_step)
+        freqs += freqs_cur.tolist();
+        n_cycles += (freqs_cur * fm).tolist()
+        prev_fe = fb[1]
+
+    freqs = np.array(freqs)
+    n_cycles = np.array(n_cycles)
+
+    return freqs, n_cycles
+
+def tfr(dat, sfreq, freqs, n_cycles, decim=1, n_jobs = None):
+    import multiprocessing as mpr
+    import mne
+    if n_jobs is None:
+        n_jobs = max(1, mpr.cpu_count() - 2 )
+    elif n_jobs == -1:
+        n_jobs = mpr.cpu_count()
+
+    #dat has shape n_chans x ntimes // decim
+    #returns n_chans x freqs x dat.shape[-1] // decim
+    assert dat.ndim == 2
+    assert len(freqs) == len(n_cycles)
+    if abs(sfreq - int(sfreq) ) > 1e-5:
+        raise ValueError('Integer sfreq is required')
+    sfreq = int(sfreq)
+
+    dat_ = dat[None,:]
+    tfrres = mne.time_frequency.tfr_array_morlet(dat_, sfreq, freqs, n_cycles,
+                                                 n_jobs=n_jobs, decim =decim)
+    tfrres = tfrres[0]
+    return tfrres
+
+
+
 
 ############################# Tremor-related
 
@@ -1300,8 +1360,6 @@ def getDataClusters_fromDistr(data, n_clusters=2, n_splits = 25, percentOffset =
         assert res[-1] > res[0]
     return res
 
-
-
 def calcSpecThr(chdata):
     '''
     calc spectral threshold
@@ -1309,6 +1367,44 @@ def calcSpecThr(chdata):
     cnt = getDataClusters(chdata)
     thr = np.mean(cnt)
     return thr
+
+##############################################
+
+def _flt(data,sfreq,lowcut,highcut,bandpass_order = 5):
+    assert data.ndim == 1
+    nyq = 0.5 * sfreq
+    low = lowcut / nyq
+    high = highcut / nyq
+    b, a = sig.butter(bandpass_order, [low, high], btype='band')
+    y = sig.lfilter(b, a, data)
+    return y
+
+def _hlbt(data,sfreq,l_freq,h_freq, ret_flt = 0):
+    low,high = l_freq,h_freq #fbans[bandname]
+    fltdata = _flt(data,sfreq,low,high)
+    datcur = sig.hilbert(fltdata)
+#     instphase = np.unwrap(np.angle(datcur))
+#     instfreq = (np.diff(instphase) / (2.0*np.pi) * sfreq)
+#     instampl = np.abs(datcur)
+    if ret_flt:
+        return datcur, fltdata
+    else:
+        return datcur
+
+
+def getBandHilbDat(data, sfreq, l_freq,h_freq, ret_flt=0):
+    assert data.ndim == 1
+    hdat, fltdata = _hlbt(data,sfreq, l_freq,h_freq , ret_flt = 1)
+    ang = np.angle(hdat)
+    instphase = np.unwrap(ang)
+    instfreq = (np.diff(instphase) / (2.0*np.pi) * sfreq)
+    instampl = np.abs(hdat)
+
+    if ret_flt:
+        return ang, instfreq, instampl, fltdata
+    else:
+        return ang, instfreq, instampl
+
 
 def H_difactmob(dat,dt, windowsz = None):
     import pandas as pd
@@ -1352,9 +1448,11 @@ def Hjorth(dat, dt, windowsz = None):
     return activity, mobility, complexity
 
 
-def tfr2csd(dat, sfreq, returnOrder = False):
+def tfr2csd(dat, sfreq, returnOrder = False, skip_same = []):
     ''' csd has dimensions Nchan x nfreax x nbins
     returns n x (n+1) / 2  x nbins array
+    skip same = indices of channels for which we won't compute i->j correl (usually LFP->LFP)
+      note that it ruins getCsdVals
     '''
     assert dat.ndim == 3
     n_channels = dat.shape[0]
@@ -1362,10 +1460,16 @@ def tfr2csd(dat, sfreq, returnOrder = False):
 
     order  = []
     for chi in range(n_channels):
-        #r = dat[[chi]] * np.conj ( dat[chi:] )    # upper diagonal elements only, same freq cross-channels
-        r = np.conj ( dat[[chi]] ) *  ( dat[chi:] )    # upper diagonal elements only, same freq cross-channels
-
-        secarg   = np.arange(chi,n_channels)
+        if len(skip_same) > 0:
+            good_sec_inds = [chi]
+            for chi2 in range(chi+1,n_channels):
+                if not ( (chi in skip_same) and (chi2 in skip_same) ):
+                    good_sec_inds += [chi2]
+            r = np.conj ( dat[[chi]] ) *  ( dat[good_sec_inds] )    # upper diagonal elements only, same freq cross-channels
+            secarg = np.array( good_sec_inds, dtype=int )
+        else:
+            r = np.conj ( dat[[chi]] ) *  ( dat[chi:] )    # upper diagonal elements only, same freq cross-channels
+            secarg   = np.arange(chi,n_channels)
         firstarg = np.ones(len(secarg), dtype=int ) * chi
         curindPairs = np.vstack( [firstarg,secarg] )
         order += [curindPairs]
@@ -1494,7 +1598,142 @@ def ann2ivalDict(anns):
 
 #############################
 
+def plotTopomapTau(ax,tfr,timeint,fb,vmin,vmax,contours = 8, logscale=False, colorbar=False):
+    # tfr.data >= 0
+    import mne
+    from mne.viz.topomap import _prepare_topomap_plot,_get_ch_type,_make_head_outlines,_hide_frame
+    from mne.viz.topomap import _set_contour_locator, partial, plot_topomap,_onselect
+    from mne.viz.topomap import _setup_cmap, _merge_ch_data, _handle_default, _add_colorbar
+    from mne.viz.topomap import _setup_vmin_vmax
+    timin,timax,tiname = timeint
+    fbname, fbmin, fbmax = fb
 
+    ch_type=None
+    ch_type = _get_ch_type(tfr, ch_type)
+    layout = None
+    sphere = np.array([0,0,0,0.9])
+    picks, pos, merge_channels, names, _, sphere, clip_origin = \
+        _prepare_topomap_plot(tfr, ch_type, layout, sphere=sphere)
+
+    outlines = 'head'
+    head_pos = None
+    show_names = False
+    outlines = _make_head_outlines(sphere, pos, outlines, clip_origin,
+                                   head_pos)
+
+    if not show_names:
+        names = None
+
+    freqi = np.where( (tfr.freqs <= fbmax) * (tfr.freqs >=fbmin) )[0]
+    timei = np.where( (tfr.times <= timax) * (tfr.times >=timin) )[0]
+    data = tfr.data[picks]
+    if logscale:
+        data = np.log(data)
+
+    norm = np.min(data) >= 0  # assumes data is non-neg
+    cmap = _setup_cmap(None, norm=norm)
+
+    if merge_channels:
+        data, names = _merge_ch_data(data, ch_type, names, method='mean')
+
+    #data = mne.baseline.rescale(data, tfr.times, baseline=None, mode='mean', copy=True)
+
+    data = data[:,freqi[0]:freqi[-1]+1,timei[0]:timei[-1]+1]
+    data = np.mean(np.mean(data, axis=2), axis=1)[:, np.newaxis]
+
+    _hide_frame(ax)
+
+
+    #vmin = None; vmax = None
+    #vmin, vmax = _setup_vmin_vmax(data, vmin, vmax, norm)
+    #print(vmin,vmax, np.max(data) )
+
+    locator = None
+    if not isinstance(contours, (list, np.ndarray)):
+        locator, contours = _set_contour_locator(vmin, vmax, contours)
+
+    ax.set_title('{}_{}'.format(fbname,tiname) )
+    fig_wrapper = list()
+    #selection_callback = partial(_onselect, tfr=tfr, pos=pos, ch_type=ch_type,
+    #                             itmin=timei[0], itmax=timei[-1]+1,
+    #                             ifmin=freqi[0], ifmax=freqi[-1]+1,
+    #                             cmap=cmap[0], fig=fig_wrapper,
+    #                             layout=layout)
+    selection_callback = None
+
+    if not isinstance(contours, (list, np.ndarray)):
+        _, contours = _set_contour_locator(vmin, vmax, contours)
+
+    # data[:, 0]
+    im,_ = plot_topomap(data[:,0], pos, vmin=vmin, vmax=vmax,
+                            axes=ax, cmap=cmap[0], image_interp='bilinear',
+                            contours=contours, names=names, show_names=show_names,
+                            show=False, onselect=selection_callback,
+                            sensors=True, res=64, head_pos=head_pos,
+                            outlines=outlines, sphere=sphere)
+    cbar_fmt='%1.1e'
+
+    if colorbar:
+        from matplotlib import ticker
+        unit = None
+        unit = _handle_default('units', unit)['misc']
+        cbar, cax = _add_colorbar(ax, im, cmap, title=unit, format=cbar_fmt)
+        if locator is None:
+            locator = ticker.MaxNLocator(nbins=5)
+        cbar.locator = locator
+        cbar.update_ticks()
+        cbar.ax.tick_params(labelsize=12)
+
+def plotBandLocations(tfr,timeints,fbs,prefix='', logscale=False, colorbar=False):
+    '''
+    power output of mne.time_frequency applied to Epochs object
+    '''
+    import mne
+    nc = len(fbs); nr = len(timeints)
+    ww = 4; hh = 3
+    headsph = np.array([0,0,0,0.9])
+    fig,axs = plt.subplots( nrows = nr, ncols = nc, figsize= (nc*ww, nr*hh))
+    dat = np.abs(tfr.data)
+
+    picks = mne.pick_types(tfr.info, meg='mag', ref_meg=False,exclude='bads')
+    #timei = np.where( (tfr.times <= timax) * (tfr.times >=timin) )[0]
+    data = tfr.data[picks]
+
+    if logscale:
+        data = np.log(data)
+
+    for j,fb in enumerate(fbs):
+        print('Plotting band {} out of {}'.format(j+1, len(fbs) ) )
+        fbname, fbmin, fbmax = fb
+
+        freqi = np.where( (tfr.freqs <= fbmax) * (tfr.freqs >=fbmin) )[0]
+        data_band = data[:,freqi[0]:freqi[-1]+1,:]
+        data_band_me = np.mean(data_band, axis=1)  #mean over freq
+        #data_band_me = np.mean(np.mean(data, axis=2), axis=1)
+
+        qoffset=  2e-2
+        mn = np.quantile(data_band_me, qoffset)
+        mx = np.quantile(data_band_me, 1 - qoffset)
+        for i,ti in enumerate(timeints):
+            timin,timax,tiname = ti
+            ax = axs[i,j]
+            ttl = '{}:{}\n{:.1f},  {:.1f}'.format(tiname,fbname,timin,timax,logscale=logscale)
+            if i == 0:  # first raw always gets a colorbar
+                colorbar_cur = True
+            else:
+                colorbar_cur = colorbar
+            plotTopomapTau(ax,tfr,ti,fb,mn,mx,contours = 8,colorbar=colorbar_cur)
+            ax.set_title(ttl)
+
+            #tfr.plot_topomap(sensors=True, contours=8, tmin=timin, tmax=timax,
+            #                   fmin=fbmin, fmax=fbmax, axes=ax, colorbar=True,
+            #                   size=40, res=100, show=0, sphere=headsph,vmin=mn,vmax=mx);
+            #plt.gcf().suptitle('{} : {}'.format(tiname,fbname))
+    #plt.tight_layout()
+
+
+    plt.savefig('{}_bandpow_concentr_nints{}_nbands{}.pdf'.format(prefix,len(timeints), len(fbs) ))
+    plt.close()
 
 def plotTimecourse(plt):
     ndatasets = len(gv.raws)

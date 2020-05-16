@@ -39,6 +39,51 @@ def getSubRaw(rawname_naked, picks = ['EMG.*old'], raw=None, rawname = None):
 
     return subraw
 
+def saveLFP_nonresampled(rawname_naked, f_highpass = 2, skip_if_exist = 1,
+                         n_free_cores = 2 ):
+    if os.environ.get('DATA_DUSS') is not None:
+        data_dir = os.path.expandvars('$DATA_DUSS')
+    else:
+        data_dir = '/home/demitau/data'
+
+    lfp_fname_full = os.path.join(data_dir, '{}_LFP_1kHz.fif'.format(rawname_naked) )
+    if os.path.exists(lfp_fname_full):
+        #subraw = mne.io.read_raw_fif(lfp_fname_full, None)
+        #return subraw
+        print('{} already exists!'.format(lfp_fname_full) )
+
+        return None
+
+    fname = rawname_naked + '.mat'
+    fname_full = os.path.join(data_dir,fname)
+    if not os.path.exists(fname_full):
+        raise ValueError('wrong naked name' + rawname_naked )
+    raw = mne.io.read_raw_fieldtrip(fname_full, None)
+    print('Orig sfreq is {}'.format(raw.info['sfreq'] ) )
+
+    subraw = getSubRaw(rawname_naked, picks = ['LFP.*'], raw=raw )
+    del raw
+    import gc; gc.collect()
+
+    y = {}
+    for chname in subraw.ch_names:
+        y[chname] = 'eeg'
+    subraw.set_channel_types(y)
+
+    sfreq_to_use = 1024
+
+    import multiprocessing as mpr
+    num_cores = mpr.cpu_count() - 1
+    subraw.resample(sfreq_to_use, n_jobs= max(1, num_cores-n_free_cores) )
+
+    subraw.filter(l_freq=1, h_freq=None)
+
+    freqsToKill = np.arange(50, sfreq_to_use//2, 50) # harmonics of 50
+    subraw.notch_filter(freqsToKill)
+
+    subraw.save(lfp_fname_full, overwrite=1)
+    return subraw
+
 def saveRectConv(rawname_naked, raw=None, rawname = None, maxtremfreq=9, skip_if_exist = 0):
     if os.environ.get('DATA_DUSS') is not None:
         data_dir = os.path.expandvars('$DATA_DUSS')
