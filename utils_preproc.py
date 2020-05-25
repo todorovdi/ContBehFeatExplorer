@@ -40,7 +40,7 @@ def getSubRaw(rawname_naked, picks = ['EMG.*old'], raw=None, rawname = None):
     return subraw
 
 def saveLFP_nonresampled(rawname_naked, f_highpass = 2, skip_if_exist = 1,
-                         n_free_cores = 2 ):
+                         n_free_cores = 2, ret_if_exist = 0 ):
     if os.environ.get('DATA_DUSS') is not None:
         data_dir = os.path.expandvars('$DATA_DUSS')
     else:
@@ -51,8 +51,10 @@ def saveLFP_nonresampled(rawname_naked, f_highpass = 2, skip_if_exist = 1,
         #subraw = mne.io.read_raw_fif(lfp_fname_full, None)
         #return subraw
         print('{} already exists!'.format(lfp_fname_full) )
-
-        return None
+        if ret_if_exist:
+            return mne.io.read_raw_fif(lfp_fname_full, None)
+        else:
+            return None
 
     fname = rawname_naked + '.mat'
     fname_full = os.path.join(data_dir,fname)
@@ -132,3 +134,64 @@ def saveRectConv(rawname_naked, raw=None, rawname = None, maxtremfreq=9, skip_if
     rectconvraw.save(rectconv_fname_full, overwrite=1)
 
     return rectconvraw
+
+def read_raw_fieldtrip(fname, info, data_name='data'):
+    """Load continuous (raw) data from a FieldTrip preprocessing structure.
+
+    This function expects to find single trial raw data (FT_DATATYPE_RAW) in
+    the structure data_name is pointing at.
+
+    .. warning:: FieldTrip does not normally store the original information
+                 concerning channel location, orientation, type etc. It is
+                 therefore **highly recommended** to provide the info field.
+                 This can be obtained by reading the original raw data file
+                 with MNE functions (without preload). The returned object
+                 contains the necessary info field.
+
+    Parameters
+    ----------
+    fname : str
+        Path and filename of the .mat file containing the data.
+    info : dict or None
+        The info dict of the raw data file corresponding to the data to import.
+        If this is set to None, limited information is extracted from the
+        FieldTrip structure.
+    data_name : str
+        Name of heading dict/ variable name under which the data was originally
+        saved in MATLAB.
+
+    Returns
+    -------
+    raw : instance of RawArray
+        A Raw Object containing the loaded data.
+    """
+    from ...externals.pymatreader.pymatreader import read_mat
+
+    ft_struct = read_mat(fname,
+                         ignore_fields=['previous'],
+                         variable_names=[data_name])
+
+    # load data and set ft_struct to the heading dictionary
+    ft_struct = ft_struct[data_name]
+
+    from mne.utils import _validate_ft_struct, _create_info
+    _validate_ft_struct(ft_struct)
+    info = _create_info(ft_struct, info)  # create info structure
+    trial_struct = ft_struct['trial']
+    if isinstance(trial_struct, list) and len(trial_struct) > 1:
+        data = np.hstack( trial_struct)
+    else:
+        data = np.array(ft_struct['trial'])  # create the main data array
+
+    if data.ndim > 2:
+        data = np.squeeze(data)
+
+    if data.ndim == 1:
+        data = data[np.newaxis, ...]
+
+    if data.ndim != 2:
+        raise RuntimeError('The data you are trying to load does not seem to '
+                           'be raw data')
+
+    raw = RawArray(data, info)  # create an MNE RawArray
+    return raw

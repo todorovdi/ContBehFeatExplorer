@@ -12,8 +12,8 @@ medconds = ["off", "on"];
 tasks = ["rest", "move", "hold"];
 
 %subjstrs = ["S01" ] 
-medconds = ["off"];
-tasks = [ "move"];
+medconds = ["off", "on"];
+tasks = ["rest", "move", "hold"];
 
 
 % Brodmann 4 -- M1,   Brodmann 6 -- PMC

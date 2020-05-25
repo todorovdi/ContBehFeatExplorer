@@ -14,6 +14,8 @@ data_dir = getenv('DATA_DUSS');
 if ~exist("subjstr")
   subjstr = 'S02';
 end
+fprintf('Preparing source coordinates for subject %s',subjstr)
+
 basename_head = sprintf('/headmodel_grid_%s.mat',subjstr);
 fname_head = strcat(data_dir, basename_head );
 hdmf = load(fname_head);   %hdmf.hdm, hdmf.mni_aligned_grid
@@ -119,9 +121,6 @@ coords_Jan_actual_upd = projectPtOnBrainSurf(hdmf.hdm, coords_Jan_actual, 1);
 
 coords_Jan_actual = coords_Jan_actual_upd;
 
-if exist("skipPlot") & skipPlot
-  return;
-end
 
 cfg = [];
 cfg.atlas = atlas;
@@ -187,6 +186,7 @@ while nsurrPts < min_number_of_pts
     end
     % if we did not find any from the area, add the point itself
     if nclose == 0
+      
       fprintf('Warning! Failed to find roi pts close to point number %d = ',i)
       fprintf('%d',ptJan_cur)
       fprintf('\n')
@@ -207,6 +207,9 @@ save( strcat(subjstr,'_modcoord'),  'coords_Jan_actual', 'labels', 'surroundPts'
 
 %[sorted_pts,sort_inds] = sortrows(surroundPts,1)
  
+if exist("skipPlot") & skipPlot
+  return;
+end
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%% Plot
 close all

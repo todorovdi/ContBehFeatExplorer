@@ -8,8 +8,17 @@ do_tSNE=$3
 raw=S01_off_hold
 raw_compl=S01_off_move
 
-#raw=S01_on_hold
-#raw_compl=S01_on_move
+raw=S01_on_hold
+raw_compl=S01_on_move
+#
+#raw=S02_off_hold
+#raw_compl=S02_off_move
+#
+#raw=S02_on_hold
+#raw_compl=S02_on_move
+#
+#raw=S03_off_hold
+#raw_compl=S03_off_move
 
 interactive=""
 #interactive="-i"
@@ -18,108 +27,148 @@ DESIRED_PCA_EXPLAIN=0.95
 DESIRED_DISCARD=0.01
 PCA_PLOTS=1
 
+# tSNE run params
+DO_TSNE_USING_INDIVID_PCA=0
+DO_TSNE_USING_COMMON_PCA=1
+#dim_inp_tSNE=60
+#dim_inp_tSNE=80
+#dim_inp_tSNE=100
+dim_inp_tSNE=-1
+SUBSKIP=4
+TSNE_PLOTS=1
+#raws=$raw,$raw_compl
+LOAD_TSNE=1  #allows to skip those that were already computed
+
+DO_RAW_BOTH_PCA=1
+DO_RAW_COMPL_PCA=0
+DO_RAW_PCA=0
+
+DO_RAW=0
+DO_RAW_COMPL=0
+DO_RAW_BOTH=1
+
+PREFIXES_AUX=0
+
 if [ $do_genfeats -gt 0 ]; then
-  ipython3 $interactive run_genfeats.py -- -r $raw
-  ipython3 $interactive run_genfeats.py -- -r $raw_compl
+  ipython3 $interactive run_genfeats.py -- -r $raw,$raw_compl --bands fine
 fi
 
 if [ $do_PCA -gt 0 ]; then
-  ipython3 $interactive run_PCA.py  -- -r $raw,$raw_compl
 
-  COMMON_PART="-r $raw,$raw_compl --pcexpl $DESIRED_PCA_EXPLAIN --discard $DESIRED_DISCARD --show_plots $PCA_PLOTS"
+  #ipython3 $interactive run_PCA.py  -- -r $raw,$raw_compl
 
-  # use everything (from main trem side)
-  ipython3 $interactive run_PCA.py -- $COMMON_PART --prefix all
+  function PCA { 
+    RS="$interactive run_PCA.py -- $1"
+    # use everything (from main trem side)
+    ipython3 $RS --prefix all
+    ipython3 $RS --mods LFP --prefix modLFP
+    if [ $PREFIXES_AUX -gt 0 ]; then
+      ipython3 $RS --prefix allnoHFO --use_HFO 0
+      ipython3 $RS --mods LFP --prefix modLFPnoHFO --use_HFO 0
+      ipython3 $RS --mods msrc  --prefix modSrc 
+      ipython3 $RS --feat_types H_act,H_mob,H_compl,rbcorr --prefix onlyTD
+      ipython3 $RS --feat_types con,bpcorr --prefix onlyFD
+      ipython3 $RS --feat_types con,H_act,H_mob,H_compl --prefix conH
+      ipython3 $RS --feat_types H_act,H_mob,H_compl --prefix onlyH
+      ipython3 $RS --feat_types bpcorr --prefix onlyBpcorr
+      ipython3 $RS --feat_types bpcorr --use_HFO 0 --prefix onlyBpcorrNoHFO
+      ipython3 $RS --feat_types rbcorr --prefix onlyRbcorr
+      ipython3 $RS --feat_types con --prefix onlyCon
+      ipython3 $RS --feat_types con --use_HFO 0 --prefix onlyConNoHFO
+    fi
+  }
 
-  ipython3 $interactive run_PCA.py -- $COMMON_PART \
-  --mods LFP --prefix onlyLFP
+  if [ $DO_RAW_BOTH_PCA -gt 0 ]; then
+    COMMON_PART="-r $raw,$raw_compl --pcexpl $DESIRED_PCA_EXPLAIN --discard $DESIRED_DISCARD --show_plots $PCA_PLOTS"
+    #./subrun_pipeline_PCA.sh
+    PCA "$COMMON_PART"
+  fi
 
-  ipython3 $interactive run_PCA.py -- $COMMON_PART \
-  --mods msrc  --prefix src 
+  if [ $DO_RAW_PCA -gt 0 ]; then
+    COMMON_PART="-r $raw --pcexpl $DESIRED_PCA_EXPLAIN --discard $DESIRED_DISCARD --show_plots $PCA_PLOTS"
+    #./subrun_pipeline_PCA.sh
+    PCA "$COMMON_PART"
+  fi
 
-  # only time-domain
-  ipython3 $interactive run_PCA.py -- $COMMON_PART \
-  --feat_types H_act,H_mob,H_compl,rbcorr --prefix onlyTD
-
-  # only freq-dmain
-  ipython3 $interactive run_PCA.py -- $COMMON_PART \
-  --feat_types con,bpcorr --prefix onlyFD
-
-  ipython3 $interactive run_PCA.py -- $COMMON_PART \
-  --feat_types con,H_act,H_mob,H_compl --prefix conH
-
-  ipython3 $interactive run_PCA.py -- $COMMON_PART \
-  --feat_types H_act,H_mob,H_compl --prefix onlyH
-
-  ipython3 $interactive run_PCA.py -- $COMMON_PART \
-  --feat_types bpcorr --prefix onlyBpcorr
-
-  ipython3 $interactive run_PCA.py -- $COMMON_PART \
-  --feat_types bpcorr --use_HFO 0 --prefix onlyBpcorrNoHFO
-
-  ipython3 $interactive run_PCA.py -- $COMMON_PART \
-  --feat_types rbcorr --prefix onlyRbcorr
-
-  ipython3 $interactive run_PCA.py -- $COMMON_PART \
-  --feat_types con --prefix onlyCon
-
-  ipython3 $interactive run_PCA.py -- $COMMON_PART \
-  --feat_types con --use_HFO 0 --prefix onlyConNoHFO
+  if [ $DO_RAW_COMPL_PCA -gt 0 ]; then
+    COMMON_PART="-r $raw_compl --pcexpl $DESIRED_PCA_EXPLAIN --discard $DESIRED_DISCARD --show_plots $PCA_PLOTS"
+    #./subrun_pipeline_PCA.sh
+    PCA "$COMMON_PART"
+  fi
 
 fi
 
 if [ $do_tSNE -gt 0 ]; then
   #ipython3 $interactive run_tSNE.py --     -r $raw
  
-dim_inp_tSNE=60
-SUBSKIP=4
-TSNE_PLOTS=1
-#raws=$raw,$raw_compl
-LOAD_TSNE=0
 
-  raws=$raw
 
-  ipython3 $interactive run_tSNE.py -- -r $raws --prefix onlyTD          --n_feats_PCA 131 --dim_PCA 76  --subskip $SUBSKIP --dim_inp_tSNE $dim_inp_tSNE --show_plots $TSNE_PLOTS --load_tSNE $LOAD_TSNE
-  ipython3 $interactive run_tSNE.py -- -r $raws --prefix onlyLFP         --n_feats_PCA 48  --dim_PCA 31  --subskip $SUBSKIP --dim_inp_tSNE $dim_inp_tSNE --show_plots $TSNE_PLOTS --load_tSNE $LOAD_TSNE
-  ipython3 $interactive run_tSNE.py -- -r $raws --prefix onlyRbcorr      --n_feats_PCA 110 --dim_PCA 71  --subskip $SUBSKIP --dim_inp_tSNE $dim_inp_tSNE --show_plots $TSNE_PLOTS --load_tSNE $LOAD_TSNE
-  ipython3 $interactive run_tSNE.py -- -r $raws --prefix src             --n_feats_PCA 240 --dim_PCA 164 --subskip $SUBSKIP --dim_inp_tSNE $dim_inp_tSNE --show_plots $TSNE_PLOTS --load_tSNE $LOAD_TSNE
-  ipython3 $interactive run_tSNE.py -- -r $raws --prefix onlyH           --n_feats_PCA 21  --dim_PCA 7   --subskip $SUBSKIP --dim_inp_tSNE $dim_inp_tSNE --show_plots $TSNE_PLOTS --load_tSNE $LOAD_TSNE
-  ipython3 $interactive run_tSNE.py -- -r $raws --prefix onlyFD          --n_feats_PCA 469 --dim_PCA 266 --subskip $SUBSKIP --dim_inp_tSNE $dim_inp_tSNE --show_plots $TSNE_PLOTS --load_tSNE $LOAD_TSNE
-  ipython3 $interactive run_tSNE.py -- -r $raws --prefix conH            --n_feats_PCA 170 --dim_PCA 47  --subskip $SUBSKIP --dim_inp_tSNE $dim_inp_tSNE --show_plots $TSNE_PLOTS --load_tSNE $LOAD_TSNE
-  ipython3 $interactive run_tSNE.py -- -r $raws --prefix all             --n_feats_PCA 600 --dim_PCA 329 --subskip $SUBSKIP --dim_inp_tSNE $dim_inp_tSNE --show_plots $TSNE_PLOTS --load_tSNE $LOAD_TSNE
-  ipython3 $interactive run_tSNE.py -- -r $raws --prefix onlyCon         --n_feats_PCA 149 --dim_PCA 42  --subskip $SUBSKIP --dim_inp_tSNE $dim_inp_tSNE --show_plots $TSNE_PLOTS --load_tSNE $LOAD_TSNE
-  ipython3 $interactive run_tSNE.py -- -r $raws --prefix onlyBpcorrNoHFO --n_feats_PCA 320 --dim_PCA 227 --subskip $SUBSKIP --dim_inp_tSNE $dim_inp_tSNE --show_plots $TSNE_PLOTS --load_tSNE $LOAD_TSNE
-  ipython3 $interactive run_tSNE.py -- -r $raws --prefix onlyConNoHFO    --n_feats_PCA 140 --dim_PCA 33  --subskip $SUBSKIP --dim_inp_tSNE $dim_inp_tSNE --show_plots $TSNE_PLOTS --load_tSNE $LOAD_TSNE
-  ipython3 $interactive run_tSNE.py -- -r $raws --prefix onlyBpcorr      --n_feats_PCA 320 --dim_PCA 227 --subskip $SUBSKIP --dim_inp_tSNE $dim_inp_tSNE --show_plots $TSNE_PLOTS --load_tSNE $LOAD_TSNE
+  function tSNE {
+    ipython3 $interactive run_tSNE.py -- $1 --prefix all             
+    ipython3 $interactive run_tSNE.py -- $1 --prefix modLFP          
+    if [ $PREFIXES_AUX -gt 0 ]; then
+      ipython3 $interactive run_tSNE.py -- $1 --prefix allnoHFO             
+      ipython3 $interactive run_tSNE.py -- $1 --prefix onlyTD          
+      ipython3 $interactive run_tSNE.py -- $1 --prefix modLFPnoHFO          
+      ipython3 $interactive run_tSNE.py -- $1 --prefix onlyRbcorr      
+      ipython3 $interactive run_tSNE.py -- $1 --prefix modSrc          
+      ipython3 $interactive run_tSNE.py -- $1 --prefix onlyH           
+      ipython3 $interactive run_tSNE.py -- $1 --prefix onlyFD          
+      ipython3 $interactive run_tSNE.py -- $1 --prefix conH            
+      ipython3 $interactive run_tSNE.py -- $1 --prefix onlyCon         
+      ipython3 $interactive run_tSNE.py -- $1 --prefix onlyBpcorrNoHFO 
+      ipython3 $interactive run_tSNE.py -- $1 --prefix onlyConNoHFO    
+      ipython3 $interactive run_tSNE.py -- $1 --prefix onlyBpcorr      
+    fi
+  }
 
-  raws=$raw_compl
 
-  ipython3 $interactive run_tSNE.py -- -r $raws --prefix onlyTD          --n_feats_PCA 131 --dim_PCA 76  --subskip $SUBSKIP --dim_inp_tSNE $dim_inp_tSNE --show_plots $TSNE_PLOTS --load_tSNE $LOAD_TSNE
-  ipython3 $interactive run_tSNE.py -- -r $raws --prefix onlyLFP         --n_feats_PCA 48  --dim_PCA 31  --subskip $SUBSKIP --dim_inp_tSNE $dim_inp_tSNE --show_plots $TSNE_PLOTS --load_tSNE $LOAD_TSNE
-  ipython3 $interactive run_tSNE.py -- -r $raws --prefix onlyRbcorr      --n_feats_PCA 110 --dim_PCA 71  --subskip $SUBSKIP --dim_inp_tSNE $dim_inp_tSNE --show_plots $TSNE_PLOTS --load_tSNE $LOAD_TSNE
-  ipython3 $interactive run_tSNE.py -- -r $raws --prefix src             --n_feats_PCA 240 --dim_PCA 164 --subskip $SUBSKIP --dim_inp_tSNE $dim_inp_tSNE --show_plots $TSNE_PLOTS --load_tSNE $LOAD_TSNE
-  ipython3 $interactive run_tSNE.py -- -r $raws --prefix onlyH           --n_feats_PCA 21  --dim_PCA 7   --subskip $SUBSKIP --dim_inp_tSNE $dim_inp_tSNE --show_plots $TSNE_PLOTS --load_tSNE $LOAD_TSNE
-  ipython3 $interactive run_tSNE.py -- -r $raws --prefix onlyFD          --n_feats_PCA 469 --dim_PCA 266 --subskip $SUBSKIP --dim_inp_tSNE $dim_inp_tSNE --show_plots $TSNE_PLOTS --load_tSNE $LOAD_TSNE
-  ipython3 $interactive run_tSNE.py -- -r $raws --prefix conH            --n_feats_PCA 170 --dim_PCA 47  --subskip $SUBSKIP --dim_inp_tSNE $dim_inp_tSNE --show_plots $TSNE_PLOTS --load_tSNE $LOAD_TSNE
-  ipython3 $interactive run_tSNE.py -- -r $raws --prefix all             --n_feats_PCA 600 --dim_PCA 329 --subskip $SUBSKIP --dim_inp_tSNE $dim_inp_tSNE --show_plots $TSNE_PLOTS --load_tSNE $LOAD_TSNE
-  ipython3 $interactive run_tSNE.py -- -r $raws --prefix onlyCon         --n_feats_PCA 149 --dim_PCA 42  --subskip $SUBSKIP --dim_inp_tSNE $dim_inp_tSNE --show_plots $TSNE_PLOTS --load_tSNE $LOAD_TSNE
-  ipython3 $interactive run_tSNE.py -- -r $raws --prefix onlyBpcorrNoHFO --n_feats_PCA 320 --dim_PCA 227 --subskip $SUBSKIP --dim_inp_tSNE $dim_inp_tSNE --show_plots $TSNE_PLOTS --load_tSNE $LOAD_TSNE
-  ipython3 $interactive run_tSNE.py -- -r $raws --prefix onlyConNoHFO    --n_feats_PCA 140 --dim_PCA 33  --subskip $SUBSKIP --dim_inp_tSNE $dim_inp_tSNE --show_plots $TSNE_PLOTS --load_tSNE $LOAD_TSNE
-  ipython3 $interactive run_tSNE.py -- -r $raws --prefix onlyBpcorr      --n_feats_PCA 320 --dim_PCA 227 --subskip $SUBSKIP --dim_inp_tSNE $dim_inp_tSNE --show_plots $TSNE_PLOTS --load_tSNE $LOAD_TSNE
+    RUNSTRING_COMMON="--subskip $SUBSKIP --dim_inp_tSNE $dim_inp_tSNE --show_plots $TSNE_PLOTS --load_tSNE $LOAD_TSNE"
+  if [ $DO_TSNE_USING_INDIVID_PCA -gt 0 ]; then
+    NRAWS_PCA=1
+    RUNSTRING="--nrPCA $NRAWS_PCA $RUNSTRING_COMMON"
+    if [ $DO_RAW -gt 0 ]; then
+      raws=$raw
+      COMMON_PART="-r $raws $RUNSTRING"
+      tSNE "$COMMON_PART"
+    fi
 
-  raws=$raw,$raw_compl
+    if [ $DO_RAW_COMPL -gt 0 ]; then
+      raws=$raw_compl
+      COMMON_PART="-r $raws $RUNSTRING"
+      tSNE "$COMMON_PART"
+    fi
 
-  ipython3 $interactive run_tSNE.py -- -r $raws --prefix onlyTD          --n_feats_PCA 131 --dim_PCA 76  --subskip $SUBSKIP --dim_inp_tSNE $dim_inp_tSNE --show_plots $TSNE_PLOTS --load_tSNE $LOAD_TSNE
-  ipython3 $interactive run_tSNE.py -- -r $raws --prefix onlyLFP         --n_feats_PCA 48  --dim_PCA 31  --subskip $SUBSKIP --dim_inp_tSNE $dim_inp_tSNE --show_plots $TSNE_PLOTS --load_tSNE $LOAD_TSNE
-  ipython3 $interactive run_tSNE.py -- -r $raws --prefix onlyRbcorr      --n_feats_PCA 110 --dim_PCA 71  --subskip $SUBSKIP --dim_inp_tSNE $dim_inp_tSNE --show_plots $TSNE_PLOTS --load_tSNE $LOAD_TSNE
-  ipython3 $interactive run_tSNE.py -- -r $raws --prefix src             --n_feats_PCA 240 --dim_PCA 164 --subskip $SUBSKIP --dim_inp_tSNE $dim_inp_tSNE --show_plots $TSNE_PLOTS --load_tSNE $LOAD_TSNE
-  ipython3 $interactive run_tSNE.py -- -r $raws --prefix onlyH           --n_feats_PCA 21  --dim_PCA 7   --subskip $SUBSKIP --dim_inp_tSNE $dim_inp_tSNE --show_plots $TSNE_PLOTS --load_tSNE $LOAD_TSNE
-  ipython3 $interactive run_tSNE.py -- -r $raws --prefix onlyFD          --n_feats_PCA 469 --dim_PCA 266 --subskip $SUBSKIP --dim_inp_tSNE $dim_inp_tSNE --show_plots $TSNE_PLOTS --load_tSNE $LOAD_TSNE
-  ipython3 $interactive run_tSNE.py -- -r $raws --prefix conH            --n_feats_PCA 170 --dim_PCA 47  --subskip $SUBSKIP --dim_inp_tSNE $dim_inp_tSNE --show_plots $TSNE_PLOTS --load_tSNE $LOAD_TSNE
-  ipython3 $interactive run_tSNE.py -- -r $raws --prefix all             --n_feats_PCA 600 --dim_PCA 329 --subskip $SUBSKIP --dim_inp_tSNE $dim_inp_tSNE --show_plots $TSNE_PLOTS --load_tSNE $LOAD_TSNE
-  ipython3 $interactive run_tSNE.py -- -r $raws --prefix onlyCon         --n_feats_PCA 149 --dim_PCA 42  --subskip $SUBSKIP --dim_inp_tSNE $dim_inp_tSNE --show_plots $TSNE_PLOTS --load_tSNE $LOAD_TSNE
-  ipython3 $interactive run_tSNE.py -- -r $raws --prefix onlyBpcorrNoHFO --n_feats_PCA 320 --dim_PCA 227 --subskip $SUBSKIP --dim_inp_tSNE $dim_inp_tSNE --show_plots $TSNE_PLOTS --load_tSNE $LOAD_TSNE
-  ipython3 $interactive run_tSNE.py -- -r $raws --prefix onlyConNoHFO    --n_feats_PCA 140 --dim_PCA 33  --subskip $SUBSKIP --dim_inp_tSNE $dim_inp_tSNE --show_plots $TSNE_PLOTS --load_tSNE $LOAD_TSNE
-  ipython3 $interactive run_tSNE.py -- -r $raws --prefix onlyBpcorr      --n_feats_PCA 320 --dim_PCA 227 --subskip $SUBSKIP --dim_inp_tSNE $dim_inp_tSNE --show_plots $TSNE_PLOTS --load_tSNE $LOAD_TSNE
+    if [ $DO_RAW_BOTH -gt 0 ]; then
+      raws=$raw,$raw_compl
+      COMMON_PART="-r $raws $RUNSTRING"
+      tSNE "$COMMON_PART"
+    fi
+  fi
+
+  if [ $DO_TSNE_USING_COMMON_PCA -gt 0 ]; then
+    NRAWS_PCA=2
+    RUNSTRING="--nrPCA $NRAWS_PCA $RUNSTRING_COMMON"
+    if [ $DO_RAW -gt 0 ]; then
+      raws=$raw
+      COMMON_PART="-r $raws $RUNSTRING"
+      tSNE "$COMMON_PART"
+    fi
+
+    if [ $DO_RAW_COMPL -gt 0 ]; then
+      raws=$raw_compl
+      COMMON_PART="-r $raws $RUNSTRING"
+      tSNE "$COMMON_PART"
+    fi
+
+    if [ $DO_RAW_BOTH -gt 0 ]; then
+      raws=$raw,$raw_compl
+      COMMON_PART="-r $raws $RUNSTRING"
+      tSNE "$COMMON_PART"
+    fi
+  fi
 
 fi
+
+
+

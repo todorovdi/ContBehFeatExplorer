@@ -69,6 +69,9 @@ msrc_inds = np.arange(8,dtype=int)  #indices appearing in channel (sources) name
 
 use_LFP_to_LFP = 0
 
+corr_time_lagged = []
+corr_time_lagged = [0.5, 1] # in window size fractions
+
 extend = 3  # for plotting
 
 
@@ -76,7 +79,7 @@ extend = 3  # for plotting
 
 load_TFR                     = 0
 save_TFR                     = 0  # maybe better no to waste space, since I change params often
-use_existing_TFR             = 1
+use_existing_TFR             = 0
 load_feat                    = 0
 save_feat                    = 1
 

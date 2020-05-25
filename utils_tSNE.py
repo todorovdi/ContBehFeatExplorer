@@ -163,8 +163,9 @@ def plotBasicStatsMultiCh(dats, chan_names=None, printMeans = True, singleAx = 1
     nr = dats[0].shape[0]; nc=len(dats);  ww = 5; hh = 2
     if singleAx :
         ww = min( len(chan_names)*2, 60)
-        hh = 5
+        hh = 8
         fig,axs = plt.subplots(nrows=nc, ncols=1, figsize = (ww, hh))
+        plt.subplots_adjust(left=0.01, right=0.99,top=0.99, bottom = 0.4)
         if nc == 1:
             axs = [axs]
         xshift = 0
@@ -395,21 +396,35 @@ def plotCSD(csd, fbs_list, channel_names, timebins, sfreq=256, intervalMode=1,
                  format( timebins[0]// sfreq, timebins[-1]// sfreq ))
 
 
-def plotMultiMarker(ax,dat1, dat2, c, m, alpha=None, s=None, picker=False):
+def plotMultiMarker(ax,dat1, dat2, c, m, alpha=None, s=None, picker=False, emph_inds=[]):
     '''  returns tuple -- list , list of lists , list of artists '''
+    assert len(dat1) == len(dat2)
+    assert len(c) == len(m)
+    assert len(c) == len(dat1)
     resinds = []
     markerset = list( set( m ) )
     scs = []
     m = np.array(m)
     c = np.array(c)
+    if isinstance(s,list):
+        s = np.array(s)
+    #if len(emph_inds) > 0:
+
     for curm in markerset:
         inds = np.where(m==curm)[0]
 
         #print(curm, len(inds))
         if len(inds):
             #print(inds)
+            if isinstance(s,int):
+                ss = [s]*len(inds)
+            elif s is None:
+                ss = None
+            else:
+                ss = s[inds]
+
             sc = ax.scatter(dat1[inds],dat2[inds],c=c[inds],marker=curm,alpha=alpha,
-                       s=s,picker=picker)
+                       s=ss,picker=picker)
             resinds += [ inds.tolist() ]  # yes, I want list of lists
             scs += [sc]
     return markerset,resinds,scs
@@ -478,7 +493,8 @@ def selFeatsRegex(data, names, regexs, unique=1):
     import re
     if isinstance(regexs,str):
         regexs = [regexs]
-    assert len(data) == len(names)
+    if data is not None:
+        assert len(data) == len(names)
 
     inds = selFeatsRegexInds( names, regexs, unique)
     namesel = np.array(names) [inds]
@@ -542,7 +558,7 @@ def _feat_correl(arg):
             # want to measure deviations from global means
             r =  np.mean( (dfrom[sl] - mfrom) *(dto[sl] - mto) )  #mean in time
         elif oper == 'div':
-            r = dfrom[sl] / dto[sl]
+            r = np.mean( dfrom[sl] / dto[sl] )
         corr_window += [r]
     rr = np.hstack(corr_window)
 
@@ -596,7 +612,17 @@ def computeFeatOrd2(dat, names, skip, windowsz, band_pairs,
 
                 nfrom,nto = namesel_from[fromi], namesel_to[toi]
                 if nfrom.find('LFP') >= 0 and nto.find('LFP') >= 0:
-                    continue
+                    regex = '.*(LFP.[0-9]+).*'
+                    r = re.match(regex, nfrom)
+                    assert len(r.groups() ) == 1
+                    rfrom = r.groups()[0]
+
+                    r = re.match(regex, nto)
+                    assert len(r.groups() ) == 1
+                    rto = r.groups()[0]
+
+                    if not ( (oper == 'div') and rfrom == rto ):
+                        continue
 
                 nfrom = nfrom.replace('con_',''); nfrom = nfrom.replace('allf_','');
                 nto = nto.replace('con_',''); nto = nto.replace('allf_','')
@@ -677,10 +703,50 @@ def prepareLegendElements(mrk,mrknames,colors,tasks, s=8, m_unlab='o', skipExt =
     legend_elements += [legel_unlab]
     return legend_elements
 
+def colNames2Rgba(cols):
+    assert isinstance(cols,list) or isinstance(cols,np.ndarray)
+    import matplotlib.colors as mcolors
+    res = [0]*len(cols)
+    for k in range(len(cols)):
+        cname = cols[k]
+        if isinstance(cname,str):
+            res[k] = mcolors.to_rgba(cname)
+    return res
+
+def getImporantCoordInds(components, nfeats_show = 140, q=0.8, printLog = 1):
+    # components is N x nfeats
+    assert components.shape[0] <= components.shape[1]
+    strong_inds_pc = []
+    strongest_inds_pc = []
+    nfeats_show_pc = min(nfeats_show, components.shape[1] // len(components) )
+    if printLog:
+        print('Per component we use {} feats'.format(nfeats_show_pc) )
+    inds_toshow = []
+    for i in range(len(components) ):
+        dd = np.abs(components[i  ] )
+
+        inds_sort = np.argsort(dd)  # smallest go first
+        inds_toshow_cur = inds_sort[-nfeats_show_pc:]
+        inds_toshow += [inds_toshow_cur]
+
+        #dd_toshow = dd[inds_toshow_cur]
+        strong_inds = np.where(dd   > np.quantile(dd,q) ) [0]
+        #print(i, strong_inds )
+        strongest_ind = np.argmax(dd)
+        assert  strongest_ind == inds_toshow_cur[-1]
+        strongest_inds_pc += [strongest_ind]
+
+        #strong_inds_pc += [strong_inds.copy() ]
+        strong_inds_pc += [inds_sort[-nfeats_show_pc//2:]  ]
+
+    inds_toshow = np.sort( np.unique( inds_toshow) )
+
+    return inds_toshow, strong_inds_pc, strongest_inds_pc
+
 def prepColorsMarkers(side_letter, anns, Xtimes,
                nedgeBins, windowsz, sfreq, totskip, mrk,mrknames,
                color_per_int_type, extend = 3, defmarker='o', neutcolor='grey',
-                     convert_to_rgb = False ):
+                     convert_to_rgb = False, dataset_bounds = None ):
     #windowsz is in 1/sfreq bins
     #Xtimes_almost is in bins whose size comes from gen_features
     #Xtimes is in possible smaller bins
@@ -701,104 +767,193 @@ def prepColorsMarkers(side_letter, anns, Xtimes,
     #for task in tasks:
     #    annot_colors_cur[ '{}_{}'.format(task, hsfc) ] = color_per_int_type[task]
 
+    assert Xtimes[0] <= 1e-10
+
     colors =  [neutcolor] * len(Xtimes)
     markers = [defmarker] * len(Xtimes)
 
+    globend = Xtimes[-1]
+    globstart = 0
+
     for an in anns:
         for descr in annot_colors_cur:
-            if an['description'] == descr:
-                col = annot_colors_cur[descr]
+            if an['description'] != descr:
+                continue
+            col = annot_colors_cur[descr]
 
-                start = an['onset']
-                end = start + an['duration']
+            start = an['onset']
+            end = start + an['duration']
 
-                timesBnds, indsBnd, sliceNames = getIntervalSurround( start,end, extend,
-                                                                    times=Xtimes)
-                #print('indBnds in color prep ',indsBnd)
-                for ii in range(len(indsBnd)-1 ):
-                    # do not set prestart, poststart for left recording edge
-                    if start <= nedgeBins/sfreq and ii in [0,1]:
-                        continue
-                    # do not set preend, posted for right recording edge
-                    #globend = Xtimes_almost[-1] + nedgeBins/sfreq
-                    globend = Xtimes[-1] + nedgeBins/sfreq
-                    if  globend - end <= nedgeBins/sfreq and ii in [3,4]:
-                        continue
-                    # window size correction because it goes _before_
-                    bnd0 = min(len(Xtimes)-1, indsBnd[ii]   + windowsz // totskip -1   )
-                    bnd1 = min(len(Xtimes)-1, indsBnd[ii+1] + windowsz // totskip -1   )
-                    #inds2 = slice( bnd0, bnd1 )
-                    inds2 = range( bnd0, bnd1 )
+            if dataset_bounds is not None:
+                interval_dataset_ind = None
+                for di in range(len(dataset_bounds)):
+                    dlb,drb = dataset_bounds[di]
+                    if start >= dlb and end <= drb:
+                        interval_dataset_ind = di
+                        break
+                assert interval_dataset_ind  is not None
+                globend = drb
+                globstart = dlb
 
-                    #inds2 = slice( indsBnd[ii], indsBnd[ii+1] )
-                    #markers[inds2] = mrk[ii]
+            timesBnds, indsBnd, sliceNames = getIntervalSurround( start,end, extend,
+                                                                times=Xtimes)
+            #print('indBnds in color prep ',indsBnd)
+            for ii in range(len(indsBnd)-1 ):
+                # do not set prestart, poststart for left recording edge
+                if start <= globstart + nedgeBins/sfreq and ii in [0,1]:
+                    continue
+                # do not set preend, posted for right recording edge
+                #globend = Xtimes_almost[-1] + nedgeBins/sfreq
+                if  globend - end <= nedgeBins/sfreq and ii in [3,4]:
+                    continue
+                # window size correction because it goes _before_
+                bnd0 = min(len(Xtimes)-1, indsBnd[ii]   + windowsz // totskip -1   )
+                bnd1 = min(len(Xtimes)-1, indsBnd[ii+1] + windowsz // totskip -1   )
+                #inds2 = slice( bnd0, bnd1 )
+                inds2 = range( bnd0, bnd1 )
 
-                    for jj in inds2:
-                        colors [jj] = col
-                        markers[jj] = mrk[ii]
-                    #print(len(inds2))
+                #inds2 = slice( indsBnd[ii], indsBnd[ii+1] )
+                #markers[inds2] = mrk[ii]
+
+                for jj in inds2:
+                    colors [jj] = col
+                    markers[jj] = mrk[ii]
+                #print(len(inds2))
     return colors,markers
 
 def plotPCA(pcapts,pca, nPCAcomponents_to_plot,feature_names_all, colors, markers,
             mrk, mrknames, color_per_int_type, task,
-            pdf=None,neutcolor='grey'):
+            pdf=None,neutcolor='grey', nfeats_show = 50, q = 0.8):
+
+
+    if hasattr(pca, 'components_'):
+        pt_type = 'PCA'
+        components = pca.components_
+    elif hasattr(pca, 'scalings_'):
+        pt_type = 'LDA'
+        components = pca.scalings_.T
+    else:
+        pt_type = 'unk'
+
+    toshow_decide_0th_component = 0
 
     ##################  Plot PCA
     nc = min(nPCAcomponents_to_plot, pcapts.shape[1] );
     nr = 1; ww = 5; hh = 4
     fig,axs = plt.subplots(nrows=nr, ncols=nc, figsize=(nc*ww,nr*hh))
+    if not isinstance(axs,np.ndarray):
+        axs = np.array([axs])
     ii = 0
     while ii < nc:
-        indx = 0
-        indy = ii+1
+        indx = ii
+        indy = (ii+1 ) % nc
         ax = axs[ii];  ii+=1
         plotMultiMarker(ax, pcapts[:,indx], pcapts[:,indy], c=colors, m = markers, alpha=0.5);
-        ax.set_xlabel('PCA comp {}'.format(indx) )
-        ax.set_ylabel('PCA comp {}'.format(indy) )
+        ax.set_xlabel('{} comp {}'.format(pt_type,indx) )
+        ax.set_ylabel('{} comp {}'.format(pt_type,indy) )
 
     legend_elements = prepareLegendElements(mrk,mrknames,color_per_int_type, task )
 
     plt.legend(handles=legend_elements)
-    plt.suptitle('PCA')
+    plt.suptitle(pt_type)
     #plt.show()
     if pdf is not None:
         pdf.savefig()
-    plt.close()
+        plt.close()
 
     ######################### Plot PCA components structure
+    dd = np.abs(components[0] )
 
     nr = min(nPCAcomponents_to_plot, pcapts.shape[1] )
+    if toshow_decide_0th_component:
+        print('0th component')
+        inds_sort = np.argsort(dd)  # smallest go first
+        inds_toshow = inds_sort[-nfeats_show:]
+
+        dd_toshow = dd[inds_toshow]
+        #strong_inds = np.where(dd_toshow   > np.quantile(dd_toshow,q) ) [0]
+        strong_inds = inds_toshow
+        strongest_ind = np.argmax(dd_toshow)
+        strong_inds_pc = [strong_inds]
+        strongest_inds_pc = [strongest_ind]
+    else:
+        strong_inds_pc = []
+        strongest_inds_pc = []
+        nfeats_show_pc = nfeats_show // nPCAcomponents_to_plot
+        print('Per component we will plot {} feats'.format(nfeats_show_pc) )
+        inds_toshow = []
+        for i in range(nr):
+            dd = np.abs(components[i  ] )
+
+            inds_sort = np.argsort(dd)  # smallest go first
+            inds_toshow_cur = inds_sort[-nfeats_show_pc:]
+            inds_toshow += [inds_toshow_cur]
+
+            #dd_toshow = dd[inds_toshow_cur]
+            strong_inds = np.where(dd   > np.quantile(dd,q) ) [0]
+            #print(i, strong_inds )
+            strongest_ind = np.argmax(dd)
+            assert  strongest_ind == inds_toshow_cur[-1]
+            strongest_inds_pc += [strongest_ind]
+
+            #strong_inds_pc += [strong_inds.copy() ]
+            strong_inds_pc += [inds_sort[-nfeats_show_pc//2:]  ]
+
+        inds_toshow = np.sort( np.unique( inds_toshow) )
+
+    #print(inds_toshow, strong_inds_pc, strongest_inds_pc)
+
+
     nc = 1
-    hh=2
-    ww = max(14 , min(40, len(feature_names_all)/3 ) )
+    hh=4
+    ww = max(14 , min(40, components.shape[1]/3 ) )
     fig,axs = plt.subplots(nrows=nr, ncols=nc, figsize=(ww*nc, hh*nr), sharex='col')
+    if nr == 1:
+        axs = [axs]
     for i in range(nr):
         ax = axs[i]
-        dd = np.abs(pca.components_[i] )
+        #dd = np.abs(pca.components_[i] )
+        dd = np.abs(components[i,inds_toshow  ] )
         ax.plot( dd )
-        ax.set_title('(abs of) PCA component {}, expl {:.2f} of variance (ratio)'.format(i, pca.explained_variance_ratio_[i]))
+        ax.axhline( np.quantile(dd, q), ls=':', c='r' )
+        ttl = '(abs of) component {}' .format(i)
+        if hasattr(pca, 'explained_variance_ratio_'):
+            ttl += ', expl {:.2f} of variance (ratio)'.format(pca.explained_variance_ratio_[i])
+        ax.set_title(ttl)
 
         ax.grid()
-        ax.set_xlim(0, len(dd) )
+        ax.set_xlim(0, len(inds_toshow) )
 
-    dd = np.abs(pca.components_[0] )
-    strongInds = np.where( dd  > np.quantile(dd,0.75) ) [0]
-    strongestInd = np.argmax(dd)
 
-    ax.set_xticks(np.arange(pca.components_.shape[1]))
-    ax.set_xticklabels(feature_names_all, rotation=90)
+    ax.set_xticks(np.arange(len(inds_toshow) ))
+    if feature_names_all is not None:
+        ax.set_xticklabels(feature_names_all[inds_toshow], rotation=90)
 
     tls = ax.get_xticklabels()
-    for i in strongInds:
-        tls[i].set_color("red")
-    tls[strongestInd].set_color("purple")
+    ratio = 0.5 * len(inds_toshow) / len(strong_inds_pc )
+    for compi in range(len(strong_inds_pc ) ):
+        sipc = 0
+        #print(compi, strong_inds_pc[compi] )
+        si_cur = strong_inds_pc[compi]
+        for i in si_cur[::-1]:
+            ii = np.where(inds_toshow == i)[0]
+            #print(ratio, sipc  )
+            if len(ii) > 0 and (sipc < ratio ):
+                sipc += 1
+                ii = ii[0]
+                tls[ii].set_color("purple")
+    for compi in range(len(strong_inds_pc ) ):
+        ii = np.where(inds_toshow == strongest_inds_pc[compi])[0][0]
+        tls[ii ].set_color("red")
 
     plt.tight_layout()
     #plt.suptitle('PCA first components info')
     #plt.savefig('PCA_info.png')
     if pdf is not None:
         pdf.savefig()
-    plt.close()
+        plt.close()
+
+    return strong_inds_pc
 
 
 def findOutlierInds(X, qvmult = 2, qshift = 1e-2, printLog = False):
@@ -855,12 +1010,194 @@ def findOutlierLimitDiscard(X, discard=1e-2, qshift = 1e-2, qvmult_start=2, prin
 
     return bad_inds, qvmult, discard_ratio
 
-def downsample(X, skip):
+def downsample(X, skip, axis=0, mean=True):
+    if skip == 1:
+        return X
+    if axis != 0:
+        X = np.swapaxes(X, 0,axis)
     outlen = (X.shape[0] // skip  ) * skip
-    res = np.zeros((X.shape[0] // skip, X.shape[1]), dtype=X.dtype)
+    res = np.zeros((X.shape[0] // skip, X.size // X.shape[0]), dtype=X.dtype)
+    sh = list(X.shape)
+    if len(sh) > 0:
+        sh[0] //= skip
+        res = res.reshape( sh  )
     for i in range(skip):
-        r = X[i:i+outlen:skip]
+        r = X[i:i+outlen:skip]  # using just X[i::skip] would give different lengths for differnt i-s
+        #print(i, len(r),  X[i::skip].shape )
+        #r = X.take(indices =slice(i:i+outlen:skip), aixs=axis)
         res += r
-    res /= skip
 
-    return X
+
+    #raise ValueError('ff')
+
+    if mean:  #sometimes we might not want mean to save perfrmance -- we'll scale later anyway
+        res /= skip
+
+    print('_X and res shapes ',X.shape,res.shape)
+
+    dif = len(X) - len(res) * skip
+    if dif >0 :
+        res = np.vstack( [ res, np.mean(X[-dif:] , axis=0)[None,:] ] )
+        dif2 = len(X) - len(res) * skip
+        print('Warning downsample killed {} samples, but we put them at then end and get {}'.format(dif,dif2) )
+
+    print('X and res shapes ',X.shape,res.shape)
+
+    if axis != 0:
+        res = np.swapaxes(res, axis,0)
+
+    return res
+
+def findByPrefix(data_dir, rawname, prefix, ftype='PCA',regex=None):
+    #returns relative path
+    import os, re
+    if regex is None:
+        regex = '{}_{}_{}_[0-9]+chs_nfeats([0-9]+)_pcadim([0-9]+).*'.format(rawname, prefix,ftype)
+    fnfound = []
+    for fn in os.listdir(data_dir):
+        r = re.match(regex,fn)
+        if r is not None:
+            #n_feats,PCA_dim = r.groups()
+            if prefix in ['move', 'hold', 'rest']:
+                continue
+            #print(fn,r.groups())
+            fnfound += [fn]
+    return fnfound
+
+def concatAnns(rawnames,Xtimes_pri):
+    import os
+    if os.environ.get('DATA_DUSS') is not None:
+        data_dir = os.path.expandvars('$DATA_DUSS')
+    else:
+        data_dir = '/home/demitau/data'
+
+    assert len(rawnames) == len(Xtimes_pri)
+    anns_pri = []
+    for rawname_ in rawnames:
+        subj,medcond,task  = utils.getParamsFromRawname(rawname_)
+        #tasks += [task]
+
+        anns_fn = rawname_ + '_anns.txt'
+        anns_fn_full = os.path.join(data_dir, anns_fn)
+        anns = mne.read_annotations(anns_fn_full)
+        #raw.set_annotations(anns)
+        anns_pri += [anns]
+
+        dt = Xtimes_pri[0][1] - Xtimes_pri[0][0]  #note that this is not 1/sfreq (since we skipped)
+
+
+    anns = mne.Annotations([],[],[])
+
+    dataset_bounds = []
+    Xtimes_almost = []
+    timeshift = 0
+    for xti in range(len(Xtimes_pri)):
+
+        Xtimes_cur = Xtimes_pri[xti]
+        # since we had shifted by nedgeBins, we have to correct for it
+        timeshift += -Xtimes_cur[0]
+
+        #print(timeshift)
+
+        Xtimes_shifted = Xtimes_cur + timeshift
+        Xtimes_almost += [Xtimes_shifted]
+        ann_cur = anns_pri[xti]
+        onset_ = np.maximum(Xtimes_shifted[0],ann_cur.onset + timeshift)   # kill negatives
+        end_ = np.minimum(onset_ + ann_cur.duration, Xtimes_shifted[-1] )  # kill over-end
+        duration_ = np.maximum(0, end_ - onset_)
+        assert np.all(duration_ > dt )
+        anns.append(onset_ , duration_,ann_cur.description)
+
+        #print(Xtimes_shifted[0],timeshift,Xtimes_cur[-1], Xtimes_cur[-1] -Xtimes_cur[0])
+        dataset_bounds += [ (Xtimes_shifted[0], Xtimes_shifted[-1] ) ]
+
+        timeshift += Xtimes_cur[-1] + dt
+
+    #print('fd',Xtimes_almost[0][0],Xtimes_almost[0][-1],Xtimes_almost[1][0],Xtimes_almost[1][-1] )
+    Xtimes_almost = np.hstack(Xtimes_almost)
+    df = np.diff(Xtimes_almost)
+    assert abs( np.max(df) - np.min(df) ) <= 1e-10,  (np.max(df), np.min(df))
+    assert np.all( anns.onset >= 0 ), anns.onset
+
+    return anns, anns_pri, Xtimes_almost, dataset_bounds
+
+def getAnnBins(ivalis,Xtimes_almost,nedgeBins, sfreq,totskip, windowsz, dataset_bounds,
+               set_empty_arrays = 0):
+    #ivalis is dict of lists of tuples (beg,start, itype)
+    ivalis_tb = {}  # only bounds
+    ivalis_tb_indarrays = {}  # entire arrays
+    #globend = Xtimes[-1] + nedgeBins/sfreq
+
+    assert( Xtimes_almost[0] < 1e-10 )
+
+    maxind = len(Xtimes_almost)-1
+
+    for itype in ivalis:
+        intervals = ivalis[itype]
+        intervals_bins = []
+        ivalis_tb_indarrays[itype] = []
+        #print(itype)
+        for interval in intervals:
+            st,end,it_ = interval
+
+            if dataset_bounds is not None:
+                interval_dataset_ind = None
+                for di in range(len(dataset_bounds)):
+                    dlb,drb = dataset_bounds[di]
+                    if st >= dlb and end <= drb:
+                        interval_dataset_ind = di
+                        break
+                assert interval_dataset_ind  is not None, interval
+                globend = drb
+                globstart = dlb
+
+            if st <= dlb:
+                bnd0 = int(dlb * sfreq) // totskip
+                #print('lbam ',bnd0, dlb, interval)
+            else:
+                bnd0 = int( min(maxind, (st * sfreq   + windowsz) // totskip -1   ) )
+            if drb - end <= windowsz / sfreq:
+                bnd1 = int(drb * sfreq) // totskip
+            else:
+                bnd1 = int( min(maxind, (end *sfreq   + windowsz) // totskip -1   ))
+
+            assert bnd1 <= maxind
+            #print('fdfsdlbam ',bnd0, bnd1, interval)
+            if bnd1 - bnd0 > 0:
+                intervals_bins += [(bnd0,bnd1,it_)]
+                ar = np.arange(bnd0,bnd1, dtype=int)
+                if len(ar) or set_empty_arrays:
+                    ivalis_tb_indarrays[itype] += [ar]
+                else:
+                    print('skip', it_)
+            else:
+                print(interval, bnd1, bnd0)
+        if len(intervals_bins) > 0 or set_empty_arrays:
+            #print('__', itype, len(ivalis_tb_indarrays), intervals_bins )
+            ivalis_tb[itype] =  intervals_bins
+        else:
+            print('skip', itype)
+
+    return ivalis_tb, ivalis_tb_indarrays
+
+def mergeAnnBinArras(ivalis_tb_indarrays):
+    ivalis_tb_indarrays_merged = {}
+    for k in ivalis_tb_indarrays:
+        ivalis_tb_indarrays_merged[k] = np.hstack(ivalis_tb_indarrays[k])
+    return ivalis_tb_indarrays_merged
+
+
+def getLDApredPower(lda,X,class_labels,class_ind):
+    true_ind = class_ind
+    mask = class_labels == true_ind
+    mask_inv = np.logical_not(mask)
+
+    X_P = X[mask]
+    r = lda.predict(X_P)
+    sens = sum(r == true_ind) / len(r)
+
+    X_N = X[mask_inv]
+    r = lda.predict(X_N)
+    spec = sum(r != true_ind) / len(r)
+
+    return sens,spec
