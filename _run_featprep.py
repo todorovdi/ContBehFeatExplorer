@@ -253,7 +253,8 @@ if 'rbcorr' in features_to_use or 'bpcorr' in features_to_use:
         low,high = fbands[bandname]
         for chi in range(n_channels):
             #dat_flt_cur = utils._flt(dat_scaled[chi,:], sfreq, low,high)
-            ang, instfreq, instampl,dat_flt_cur = utils.getBandHilbDat (dat_scaled[chi,:], sfreq, low,high,ret_flt=1)
+            ang, instfreq, instampl,dat_flt_cur = \
+                utils.getBandHilbDat (dat_scaled[chi,:], sfreq, low,high,ret_flt=1)
         #return ang, instfreq, instampl, fltdata
 
             name = '{}_{}'.format(bandname, chnames_tfr[chi] )

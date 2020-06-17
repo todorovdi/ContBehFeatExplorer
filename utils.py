@@ -7,6 +7,8 @@ import scipy.signal as sig
 import matplotlib.pyplot as plt
 
 def getIntervalIntersection(a1,b1, a2, b2):
+    assert b1 >= a1
+    assert b2 >= a2
     if b1 < a2:
         return []
     if a1 > b2:
@@ -17,8 +19,21 @@ def getIntervalIntersection(a1,b1, a2, b2):
     else:
         return []
 
+def findIntersectingAnns(ts,te,anns):
+    assert te >= ts
+    if te-ts <= 1e-10:
+        print('Warning, using empty interval {},{}'.format(ts,te) )
+    d = []
+    for an in anns:
+        isect = getIntervalIntersection(ts,te,an['onset'],an['onset']+an['duration'])
+        #print(isect)
+        if len(isect) > 0:
+            d.append( an['description'] )
+
+    return d
+
 def unpackTimeIntervals(trem_times_byhand, mainSide = True, gen_subj_info=None,
-        skipNotLoadedRaws=True):
+                        skipNotLoadedRaws=True):
     # unpack tremor intervals sent by Jan
     artif = {}
     tremIntervalJan = {}
@@ -100,8 +115,8 @@ def unpackTimeIntervals(trem_times_byhand, mainSide = True, gen_subj_info=None,
 
                 tremIntervalJan[rawname] = { 'left':[], 'right':[] }
                 tremIntervalJan[rawname][side] =  tremdat
-                    #print(subjstr,medcond,task,kt,len(s4), s4)
-                    #print(subjstr,medcond,task,kt,len(s4p), s4p)
+                #print(subjstr,medcond,task,kt,len(s4), s4)
+                #print(subjstr,medcond,task,kt,len(s4p), s4p)
     return tremIntervalJan, artif
 
 def removeBadIntervals(intervals ):
@@ -152,7 +167,7 @@ def processJanIntervals( intervalData, intvlen, intvlenStats, loffset, roffset, 
       each containing lists of triples (a,b,intervalType)
     '''
 
-      # in sec. Don't want the interval to start with recording (there are artifacts)
+    # in sec. Don't want the interval to start with recording (there are artifacts)
     def intervalParse(a,b, itype = 'incPre' ):
         #if a <= loffset / 2:   # if a is close to the recoding beginning
         #    intType = 'incPost'
@@ -396,7 +411,7 @@ def isMEGsrcchanBad(rawname, chn):
     else:
         return 0
 
-def MEGsrcChind2data(rawname,chi):
+def MEGsrcChind2data(rawname,chi, MEGsrc_roi):
     indshift = 0
     for roistr in sorted(MEGsrc_roi):  # very important to use sorted!
         sind_str,medcond,task = getParamsFromRawname(rawname)
@@ -755,6 +770,7 @@ def prepFreqs(min_freq = 3, max_freq = 400, min_freqres=2, gamma_bound = 30, HFO
         n_cycles += (freqs_cur * fm).tolist()
         prev_fe = fb[1]
 
+
     freqs = np.array(freqs)
     n_cycles = np.array(n_cycles)
 
@@ -789,7 +805,8 @@ def tfr(dat, sfreq, freqs, n_cycles, decim=1, n_jobs = None):
 
 def getIntervals(bininds,width=100,thr=0.1, percentthr=0.8,inc=5, minlen=50,
         extFactorL = 0.25, extFactorR  = 0.25, endbin = None, cvl=None,
-                 percent_check_window_width=256, min_dist_between = 100):
+                 percent_check_window_width=256, min_dist_between = 100,
+                 include_short_spikes=0):
     '''
     width -- number of bins for the averaging filter
     tremini -- indices of timebins, where tremor was detected
@@ -801,7 +818,6 @@ def getIntervals(bininds,width=100,thr=0.1, percentthr=0.8,inc=5, minlen=50,
     extFactor -- we'll extend found intervals by width * extFactor
     endbin -- max timebin
     '''
-    assert cvl.ndim == 1
 
     if cvl is None:
         if endbin is None:
@@ -816,6 +832,8 @@ def getIntervals(bininds,width=100,thr=0.1, percentthr=0.8,inc=5, minlen=50,
         #avflt = sig.gaussian(width, width/4)
         avflt /= np.sum(avflt)   # normalize
         cvl = np.convolve(raster,avflt,mode='same')
+    else:
+        assert cvl.ndim == 1
 
     #cvlskip = cvl[::skip]
     cvlskip = cvl
@@ -857,7 +875,8 @@ def getIntervals(bininds,width=100,thr=0.1, percentthr=0.8,inc=5, minlen=50,
                 rightEnd += inc
                 subcvl = cvlskip[leftEnd:rightEnd]
             else:
-                break
+                if not (include_short_spikes and cvlskip[rightEnd] > thr ):
+                    break
 
         if rightEnd-leftEnd >= minlen:
             newp = (  max(0, leftEnd-shiftL), max(0, rightEnd-shiftR) ) # extend the interval on both sides
@@ -882,7 +901,8 @@ def getIntervals(bininds,width=100,thr=0.1, percentthr=0.8,inc=5, minlen=50,
     return cvlskip,pairs
 
 def findTremor(k,thrSpec = None, thrInt=0.13, width=40, percentthr=0.8, inc=1, minlen=50,
-        extFactorL=0.25, extFactorR=0.25):
+        extFactorL=0.25, extFactorR=0.25, tremor_band=[3,10], tremorDetectUseCustomThr=1,
+              tremrDet_clusterMultiEMG = 1 ):
     '''
     k is raw name
     output -- per raw, per side,  couples of start, end
@@ -896,6 +916,8 @@ def findTremor(k,thrSpec = None, thrInt=0.13, width=40, percentthr=0.8, inc=1, m
     chnames = gv.raws[k].info['ch_names']
     orderEMG, chinds_tuples, chnames_tuples = getTuples(sind_str)
 
+    tremorBandStart, tremorBandEnd = tremor_band
+    specgramoverlap = 0.5
 
     tremorIntervals = {}
     cvlPerChan = {}
@@ -919,7 +941,7 @@ def findTremor(k,thrSpec = None, thrInt=0.13, width=40, percentthr=0.8, inc=1, m
                         pp = np.where( logcond )
                         trembini = pp[0]
                     else:
-                        if tremrDet_clusterMultiMEG:
+                        if tremrDet_clusterMultiEMG:
                             # thresholds per channel
                             thr = gv.glob_stats[sind_str][medcond]['thrPerCh_trem_allEMG'][chn]  # computed using k-means
                             logcond = np.sum( bandspec, axis=0 ) > thr # sum over freq
@@ -991,8 +1013,8 @@ def findTremor(k,thrSpec = None, thrInt=0.13, width=40, percentthr=0.8, inc=1, m
         tremorIntervals[orderEMG[pair_ind]] = sideinfo
 
     return tremorIntervals, cvlPerChan
-            #print(Sxx.shape, freqinds)
-            #return yy
+    #print(Sxx.shape, freqinds)
+    #return yy
     #assert chdata.ndim == 1
 
 
@@ -1174,7 +1196,7 @@ def getSubspec(freqs,bins,Sxx,freq_min,freq_max,time_start=None,time_end=None,ra
         Sxx = Sxx[:,bininds]
 
     freqinds = np.where( np.logical_and(freqs >= freq_min,freqs <= freq_max) )[0]
-    if len(freqinds) == 0 and spec_specgramtype in ['scaleogram', 'mne.wavelet']:
+    if len(freqinds) == 0 and gv.spec_specgramtype in ['scaleogram', 'mne.wavelet']:
         print('WARNING:  getSubspec did not find any spegram info for freq band {}-{}'.format( freq_min, freq_max) )
         #import pdb; pdb.set_trace()
         return None
@@ -1433,14 +1455,15 @@ def H_difactmob(dat,dt, windowsz = None):
     return dif,activity, mobility
 
 def Hjorth(dat, dt, windowsz = None):
-#     if windowsz is not None:
-#         raise ValueError('not implemented yet')
-#     activity = np.var(dat, axis=-1)
-#     dif = np.diff(dat,axis=-1) / dt
-#     vardif = np.var(dif)
-#     mobility = np.sqrt( vardif / activity )
+    # if windowsz is not None:
+    #     raise ValueError('not implemented yet')
+    # activity = np.var(dat, axis=-1)
+    # dif = np.diff(dat,axis=-1) / dt
+    # vardif = np.var(dif)
+    # mobility = np.sqrt( vardif / activity )
     dif, activity, mobility = H_difactmob(dat,dt, windowsz=windowsz)
     #dif2 = np.diff(dif) / dt
+
 
     dif2, act2, mob2 = H_difactmob(dif,dt, windowsz=windowsz)
     complexity = mob2 / mobility
@@ -1628,7 +1651,8 @@ def plotTopomapTau(ax,tfr,timeint,fb,vmin,vmax,contours = 8, logscale=False, col
     timei = np.where( (tfr.times <= timax) * (tfr.times >=timin) )[0]
     data = tfr.data[picks]
     if logscale:
-        data = np.log(data)
+        data = np.log(np.abs(data) )
+        data -= np.min(data,axis=2)[:,:,None]
 
     norm = np.min(data) >= 0  # assumes data is non-neg
     cmap = _setup_cmap(None, norm=norm)
@@ -1665,6 +1689,8 @@ def plotTopomapTau(ax,tfr,timeint,fb,vmin,vmax,contours = 8, logscale=False, col
         _, contours = _set_contour_locator(vmin, vmax, contours)
 
     # data[:, 0]
+    #print(vmin,vmax, data.shape, data)
+    #print(np.min(data), np.max(data), vmin,vmax)
     im,_ = plot_topomap(data[:,0], pos, vmin=vmin, vmax=vmax,
                             axes=ax, cmap=cmap[0], image_interp='bilinear',
                             contours=contours, names=names, show_names=show_names,
@@ -1684,7 +1710,8 @@ def plotTopomapTau(ax,tfr,timeint,fb,vmin,vmax,contours = 8, logscale=False, col
         cbar.update_ticks()
         cbar.ax.tick_params(labelsize=12)
 
-def plotBandLocations(tfr,timeints,fbs,prefix='', logscale=False, colorbar=False):
+def plotBandLocations(tfr,timeints,fbs,prefix='', logscale=False,
+                      colorbar=False, anns=None, qoffset=5e-2):
     '''
     power output of mne.time_frequency applied to Epochs object
     '''
@@ -1693,6 +1720,7 @@ def plotBandLocations(tfr,timeints,fbs,prefix='', logscale=False, colorbar=False
     ww = 4; hh = 3
     headsph = np.array([0,0,0,0.9])
     fig,axs = plt.subplots( nrows = nr, ncols = nc, figsize= (nc*ww, nr*hh))
+    plt.subplots_adjust(top=0.97, bottom=0.02, right=0.95, left=0.01)
     dat = np.abs(tfr.data)
 
     picks = mne.pick_types(tfr.info, meg='mag', ref_meg=False,exclude='bads')
@@ -1711,13 +1739,16 @@ def plotBandLocations(tfr,timeints,fbs,prefix='', logscale=False, colorbar=False
         data_band_me = np.mean(data_band, axis=1)  #mean over freq
         #data_band_me = np.mean(np.mean(data, axis=2), axis=1)
 
-        qoffset=  2e-2
-        mn = np.quantile(data_band_me, qoffset)
-        mx = np.quantile(data_band_me, 1 - qoffset)
+        mn,mx = np.percentile(data_band_me, 100*np.array([qoffset, 1-qoffset]) )        # over time and sensors
         for i,ti in enumerate(timeints):
             timin,timax,tiname = ti
             ax = axs[i,j]
             ttl = '{}:{}\n{:.1f},  {:.1f}'.format(tiname,fbname,timin,timax,logscale=logscale)
+            if anns is not None and tiname != 'entire':
+                ann_descrs = findIntersectingAnns(timin,timax,anns)
+                if len(ann_descrs) > 0 :
+                    ttl += '\n' + ','.join(ann_descrs)
+
             if i == 0:  # first raw always gets a colorbar
                 colorbar_cur = True
             else:
@@ -1735,88 +1766,216 @@ def plotBandLocations(tfr,timeints,fbs,prefix='', logscale=False, colorbar=False
     plt.savefig('{}_bandpow_concentr_nints{}_nbands{}.pdf'.format(prefix,len(timeints), len(fbs) ))
     plt.close()
 
-def plotTimecourse(plt):
-    ndatasets = len(gv.raws)
-    #nffts = [512,1024]
+#def plotTimecourse(plt):
+#    ndatasets = len(gv.raws)
+#    #nffts = [512,1024]
+#
+#
+#    ymaxEMG = 0.00035
+#    ymaxLFP = 0.00012
+#
+#    chanTypes_toshow = ['EMG','LFP']
+#    ymaxs = {'EMG':ymaxEMG, 'LFP':ymaxLFP}
+#    #chanTypes_toshow = ['EMG']
+#
+#    nc = 4
+#    nr = len(ks)
+#
+#    time_start,time_end = 0,1000
+#    #time_start,time_end = 0,300  # to get only rest part
+#
+#    fig, axs = plt.subplots(ncols = nc, nrows=nr, figsize= (ww*nc,hh*nr), sharey='none')
+#    plt.subplots_adjust(top=0.95, bottom=0.05, right=0.95, left=0.05)
+#    axind = 0
+#
+#    colind = 0
+#
+#    for axind in range(nr):
+#        k = ks[axind]
+#
+#        chnames = gv.raws[k].info['ch_names']
+#        orderEMG, chinds_tuples, chnames_tuples = getTuples(sind_str)
+#
+#        for channel_pair_ind in [0,1]:
+#            inds = []
+#            for cti in range(len(chanTypes_toshow_timecourse) ):
+#                ct = chanTypes_toshow[cti]
+#                inds = chinds_tuples[channel_pair_ind][ct]
+#                #inds += lfp_inds[3:] + emgkil_inds[-2:] #+ eog_inds
+#                # convert indices to channel names
+#                ch_toplot = [chnames[i] for i in inds]
+#                chs = mne.pick_channels(chnames,include=ch_toplot, ordered=True )
+#
+#                ts,te = f.time_as_index([time_start, time_end])
+#
+#                chdata, chtimes = gv.raws[k][chs,ts:te]
+#                mintime = min(chtimes)
+#                maxtime = max(chtimes)
+#
+#
+#                if nc == 1:
+#                    ax = axs[axind]
+#                else:
+#                    colind = channel_pair_ind * 2 + cti
+#                    ax = axs[axind,colind]
+#
+#                for i in range(chdata.shape[0] ):
+#                    ax.plot(chtimes,chdata[i,:], label = '{}'.format(chnames[chs[i] ] ), alpha=0.7 )
+#                    ax.set_ylim(-ymaxEMG/2,ymaxs[ct])
+#                    ax.set_xlim(mintime,maxtime)
+#
+#                ax.legend(loc=legendloc,framealpha = legalpha)
+#                side = orderEMG[channel_pair_ind]
+#                ax.set_title('{:10} {} {}'.format(k,ct,side)  )
+#                ax.set_xlabel('Time, [s]')
+#                ax.set_ylabel('Voltage')
+#
+#    ss = []
+#    subjstr = ''
+#    for k in ks:
+#        sind_str,medcond,task = getParamsFromRawname(k)
+#        if sind_str in ss:
+#            continue
+#        ss += [sind_str]
+#        subjstr += '{},'.format( sind_str )
+#
+#    plt.tight_layout()
+#    if savefig:
+#        figname = '_{}_{} nr{}, {:.2f},{:.2f}.{}'. \
+#                    format(subjstr, data_type, nr, float(time_start), \
+#                           float(time_end),ext)
+#        plt.savefig( os.path.join(plot_output_dir, figname ) )
+#    if not showfig:
+#        plt.close()
+#    else:
+#        plt.show()
+#
+#    print('Plotting all finished')
 
+def plotICAdamage(filt_raw, rawname_, ica, comp_inds_intr,xlim, nr=20,
+                  do_plot=1, ecg_comp_ind=-1, mult=20/100, multECG = 35/100,
+                  fbands=None, pctshift=20, onlyVarInc = 1):
 
-    ymaxEMG = 0.00035
-    ymaxLFP = 0.00012
+    icacomp = ica.get_sources(filt_raw)
 
-    chanTypes_toshow = ['EMG','LFP']
-    ymaxs = {'EMG':ymaxEMG, 'LFP':ymaxLFP}
-    #chanTypes_toshow = ['EMG']
+    pcts = [pctshift,100 - pctshift]
+    ext = 'png'
+    figname = '{}_ICA_damage_dur{:.1f}s.{}'.format(rawname_, xlim[1]-xlim[0],ext)
+    skip = 5
+    if xlim[1] - xlim[0] > 100:
+        skip = 40
 
-    nc = 4
-    nr = len(ks)
+    if fbands is None:
+        fbands = {'tremor': [3,10], 'beta':[15,30],   'gamma':[30,100] }
 
-    time_start,time_end = 0,1000
-    #time_start,time_end = 0,300  # to get only rest part
-
-    fig, axs = plt.subplots(ncols = nc, nrows=nr, figsize= (ww*nc,hh*nr), sharey='none')
-    plt.subplots_adjust(top=0.95, bottom=0.05, right=0.95, left=0.05)
-    axind = 0
-
-    colind = 0
-
-    for axind in range(nr):
-        k = ks[axind]
-
-        chnames = gv.raws[k].info['ch_names']
-        orderEMG, chinds_tuples, chnames_tuples = getTuples(sind_str)
-
-        for channel_pair_ind in [0,1]:
-            inds = []
-            for cti in range(len(chanTypes_toshow_timecourse) ):
-                ct = chanTypes_toshow[cti]
-                inds = chinds_tuples[channel_pair_ind][ct]
-                #inds += lfp_inds[3:] + emgkil_inds[-2:] #+ eog_inds
-                # convert indices to channel names
-                ch_toplot = [chnames[i] for i in inds]
-                chs = mne.pick_channels(chnames,include=ch_toplot, ordered=True )
-
-                ts,te = f.time_as_index([time_start, time_end])
-
-                chdata, chtimes = gv.raws[k][chs,ts:te]
-                mintime = min(chtimes)
-                maxtime = max(chtimes)
-
-
-                if nc == 1:
-                    ax = axs[axind]
-                else:
-                    colind = channel_pair_ind * 2 + cti
-                    ax = axs[axind,colind]
-
-                for i in range(chdata.shape[0] ):
-                    ax.plot(chtimes,chdata[i,:], label = '{}'.format(chnames[chs[i] ] ), alpha=0.7 )
-                    ax.set_ylim(-ymaxEMG/2,ymaxs[ct])
-                    ax.set_xlim(mintime,maxtime)
-
-                ax.legend(loc=legendloc,framealpha = legalpha)
-                side = orderEMG[channel_pair_ind]
-                ax.set_title('{:10} {} {}'.format(k,ct,side)  )
-                ax.set_xlabel('Time, [s]')
-                ax.set_ylabel('Voltage')
-
-    ss = []
-    subjstr = ''
-    for k in ks:
-        sind_str,medcond,task = getParamsFromRawname(k)
-        if sind_str in ss:
-            continue
-        ss += [sind_str]
-        subjstr += '{},'.format( sind_str )
-
-    plt.tight_layout()
-    if savefig:
-        figname = '_{}_{} nr{}, {:.2f},{:.2f}.{}'. \
-                    format(subjstr, data_type, nr, float(time_start), \
-                           float(time_end),ext)
-        plt.savefig( os.path.join(plot_output_dir, figname ) )
-    if not showfig:
+    if do_plot:
         plt.close()
-    else:
-        plt.show()
+        nc = len(fbands)
+        ww = 14; hh = 2
+        fig,axs = plt.subplots(nr,nc, figsize=(nc*ww, nr*hh), sharex='col')
+        plt.subplots_adjust(top=0.97,bottom=0.02,right=0.98, left=0.03, wspace=0.03)
+    use_MNE_infl_calc = 1
 
-    print('Plotting all finished')
+    rawdat = filt_raw.get_data()
+    rawdat_meg,times = filt_raw[ica.ch_names]
+
+    import utils_tSNE as utsne
+
+    ii = 0
+    printLog =1
+
+
+    sfreq = filt_raw.info['sfreq']
+
+    for fbi,fbname in enumerate(fbands.keys() ):
+        b0,b1 = fbands[fbname]
+        ii = 0
+        for compi in comp_inds_intr:
+            curcomp = icacomp[compi][0][0]
+            #efflims = np.percentile(curcomp, [5,95])
+
+            curcomp_flt = _flt(curcomp, sfreq, b0,b1)
+            ax = axs[ii,fbi]; ii+= 1
+            ax.plot(filt_raw.times,curcomp_flt, label='comp')
+            ax.set_xlim(xlim)
+            ax.set_title('{} band of component {}'.format(fbname, compi) )
+
+            if use_MNE_infl_calc:
+                raw_cur = filt_raw.copy()
+                ica.apply(raw_cur,exclude=[compi])
+            else:
+                src_ica = None
+                import utils_preproc as upre
+                infl = upre.getCompInfl(ica, src_ica, comp_inds_intr)
+                contrib = infl[compi] # nchans x ntimebins
+
+            stop = False
+            for chi in range(len(rawdat_meg)):
+                if ii >= nr and do_plot:
+                    stop = True
+                    break
+                large = 0
+
+                curdat = rawdat[chi]
+                if use_MNE_infl_calc:
+                    corrected_dat = raw_cur[chi][0][0]
+                else:
+                    corrected_dat = curdat - contrib[chi]
+
+                curdatl       = _flt(curdat, sfreq, b0,b1)
+                corrected_dat = _flt(corrected_dat, sfreq, b0,b1)
+
+                #print(curdat.shape, corrected_dat.shape)
+                #efflims_cur = efflims[chi]
+                efflims_cur = np.percentile(curdat, pcts)
+                efflims_cur_corr = np.percentile(corrected_dat, pcts)
+                d = (efflims_cur[1] - efflims_cur[0])
+                #range of corrected - range of current
+                reduction = (efflims_cur_corr[1] - efflims_cur_corr[0]) - d
+                change= reduction
+
+                mult_cur = mult
+                if compi == ecg_comp_ind:
+                    mult_cur = multECG
+
+                #Axis X: From the origin towards the RPA point (exactly through)  #ears
+                #Axis Y: From the origin towards the nasion (exactly through)     #nose
+                #Axiz Z: From the origin towards the top of the head
+                #Origin: Intersection of the line L through LPA and RPA and a plane orthogonal
+                #to L and passing through the nasion.
+                # positive Y means more frontal
+
+                if onlyVarInc:
+                    large = (-reduction)  > mult_cur*d
+                else:
+                    large = abs(change)  > mult_cur*d
+
+                loc = filt_raw.info['chs'][chi]['loc'][:3]
+                coord_str = ', '.join( map(lambda x: '{:.4f}'.format(x),  loc.tolist() ) )
+                coord_str = '[{}]'.format(coord_str)
+
+                if large or printLog:
+                    print('comp {}_chi {} {} large={} change {:.3f}%'.format(compi,chi, coord_str,
+                                                                               large, 100*change/d) )
+
+                if do_plot and large:
+                    ax = axs[ii,fbi]; ii+= 1
+                    curdat_ds = utsne.downsample(curdat, skip ,printLog=0 )
+                    corrected_dat_ds = utsne.downsample(corrected_dat, skip ,printLog=0 )
+                    ax.plot(filt_raw.times[::skip],curdat_ds, label='orig')
+                    ax.plot(filt_raw.times[::skip],corrected_dat_ds, label='corr',alpha=0.5)
+                    #ax.set_xlim(raw.times[0],raw.times[-1])
+                    #ica.plot_overlay(filt_raw,picks=[ica.ch_names[chi]], exclude=[compi])
+
+                    ax.set_title('{}: comp {} chanind {} {}:  {:.3f}%'.format(fbname, compi,chi,
+                                                                               coord_str, 100*change/d))
+                    ax.legend(loc='upper right')
+                    ax.set_xlim(xlim)
+
+                #print('comp {}_chi {} change ratio {:.3f}%'.format(compi,chi, 100*change/d) )
+            if stop:
+                break
+        # I want to check if variance overall reduces (bad) or only during transient events
+    plt.savefig(figname, dpi=200)
+    plt.close()
+    import gc; gc.collect()

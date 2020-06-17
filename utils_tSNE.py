@@ -11,6 +11,7 @@ import utils
 import multiprocessing as mpr
 import mne
 
+from scipy.stats import pearsonr
 
 def plotEvolutionMultiCh(dat, times, chan_names=None, interval = None, extend=5,
                          yshift_stdmult = 4, bnd_toshow = 'start', rawname='',
@@ -519,12 +520,35 @@ def selFeatsRegex(data, names, regexs, unique=1):
 
     return datsel, namesel
 
-def robustMean(dat,axis=None, q=0.05):
+def robustMean(dat,axis=None, q=0.05, ret_aux = False, per_dim = False, pos = False):
     if q < 1e-10:
         return np.mean(dat)
-    qvmn = np.quantile(dat, q,   axis=axis)
-    qvmx = np.quantile(dat, 1-q, axis=axis)
-    return np.mean(  dat[ (dat<=qvmx) * (dat>=qvmn) ] )
+    pcts = np.array([q, 1-q])  * 100
+    if pos:
+        pcts[0 ] = 0
+    assert pcts[1] <= 100
+    r = np.percentile(dat, pcts,   axis=axis)
+    if r.ndim > 1:
+        qvmn = r[0,:]
+        qvmx = r[1,:]
+    else:
+        qvmn,qvmx = r
+
+    res = None
+    if per_dim and dat.ndim > 1:
+        res = []
+        for d in range(dat.shape[0]):
+            dcur = dat[d]
+            rr = np.mean(  dcur[ (dcur<=qvmx[d]) * (dcur>=qvmn[d]) ] )
+            res.append(rr)
+        res = np.array(res)
+    else:
+        res = np.mean(  dat[ (dat<=qvmx) * (dat>=qvmn) ] )
+
+    if ret_aux:
+        return res, qvmn, qvmx
+    else:
+        return res
     #np.mean(  dat[dat<q
 
 def robustMeanPos(dat,axis=None, q=0.05):
@@ -535,7 +559,6 @@ def robustMeanPos(dat,axis=None, q=0.05):
         # dat[dat<=qvmx] is a flattened array anyway
         return np.mean(  dat[dat<=qvmx] )
 
-from scipy.stats import pearsonr
 def _feat_correl(arg):
     bn_from,bn_to,fromi,toi,name,window_starts,windowsz,dfrom,dto,oper,pos = arg
 
@@ -980,8 +1003,8 @@ def findOutlierInds(X, qvmult = 2, qshift = 1e-2, printLog = False):
         #print(len(inds), inds)
         l,m = np.sum(mask_less), np.sum(mask_more)
         if l + m > 0:
-            if printLog:
-                print(feature_names_all[i], l,m)
+            #if printLog:
+            #    print(feature_names_all[i], l,m)
             bad_inds_cur = np.where( np.logical_or(mask_less,mask_more) )[0]
             bad_inds += list(bad_inds_cur)
 
@@ -1010,9 +1033,11 @@ def findOutlierLimitDiscard(X, discard=1e-2, qshift = 1e-2, qvmult_start=2, prin
 
     return bad_inds, qvmult, discard_ratio
 
-def downsample(X, skip, axis=0, mean=True):
+def downsample(X, skip, axis=0, mean=True, printLog = 1):
     if skip == 1:
         return X
+    if X.ndim == 1:
+        X = X[:,None]
     if axis != 0:
         X = np.swapaxes(X, 0,axis)
     outlen = (X.shape[0] // skip  ) * skip
@@ -1033,15 +1058,20 @@ def downsample(X, skip, axis=0, mean=True):
     if mean:  #sometimes we might not want mean to save perfrmance -- we'll scale later anyway
         res /= skip
 
-    print('_X and res shapes ',X.shape,res.shape)
+    if printLog:
+        print('_X and res shapes ',X.shape,res.shape)
 
     dif = len(X) - len(res) * skip
     if dif >0 :
         res = np.vstack( [ res, np.mean(X[-dif:] , axis=0)[None,:] ] )
         dif2 = len(X) - len(res) * skip
-        print('Warning downsample killed {} samples, but we put them at then end and get {}'.format(dif,dif2) )
+        if printLog:
+            print('Warning downsample killed {} samples, but we put them at then end and get {}'.format(dif,dif2) )
 
-    print('X and res shapes ',X.shape,res.shape)
+
+
+    if printLog:
+        print('X and res shapes ',X.shape,res.shape)
 
     if axis != 0:
         res = np.swapaxes(res, axis,0)

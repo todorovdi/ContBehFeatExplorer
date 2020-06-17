@@ -80,7 +80,7 @@ def saveLFP_nonresampled(rawname_naked, f_highpass = 2, skip_if_exist = 1,
 
     subraw.filter(l_freq=1, h_freq=None)
 
-    freqsToKill = np.arange(50, sfreq_to_use//2, 50) # harmonics of 50
+    freqsToKill = np.arange(50, sfreq_to_use//2, 50)  # harmonics of 50
     subraw.notch_filter(freqsToKill)
 
     subraw.save(lfp_fname_full, overwrite=1)
@@ -193,5 +193,179 @@ def read_raw_fieldtrip(fname, info, data_name='data'):
         raise RuntimeError('The data you are trying to load does not seem to '
                            'be raw data')
 
-    raw = RawArray(data, info)  # create an MNE RawArray
+    raw = mne.RawArray(data, info)  # create an MNE RawArray
     return raw
+
+def getCompInfl(ica,sources, comp_inds = None):
+    if comp_inds is None:
+        comp_inds = np.arange(ica.n_components_)
+
+    sel = comp_inds
+
+    # unmix_large = np.eye(ica.pca_components_.shape[0])
+    # unmix_large[:ica.n_components_, :ica.n_components_]  = ica.unmixing_matrix_
+    # unmix_appl = np.dot(unmix_large,   ica.pca_components_ ) [sel, :]
+
+    mix_large = np.eye(ica.pca_components_.shape[0])
+    mix_large[:ica.n_components_, :ica.n_components_]  = ica.mixing_matrix_
+    mix_appl = ica.pca_components_.T @ mix_large  #np.dot(mix_large,   ica.pca_components_ ) [ sel]
+    mix_appl = mix_appl [:, sel]
+
+    #print(mix_appl.shape, unmix_appl.shape)
+    print(mix_appl.shape, sources[comp_inds].shape)
+
+
+    assert ica.noise_cov is None
+    # if not none
+    #inved = linalg.pinv(self.pre_whitener_, cond=1e-14)
+
+    # influence of component on every channel
+    infl = []
+    for curi in sel:
+        r = np.dot(mix_appl[ :,[curi]] , sources[[curi]])
+        r += ica.pca_mean_[curi]
+        print(curi, r.shape)
+
+        r *= ica.pre_whitener_[curi]
+
+
+        infl += [r ]
+    return infl #np.vstack( infl )
+
+def readInfo(rawname, raw, sis=[1,2], check_info_diff = 1, bandpass_info=0 ):
+    if os.environ.get('DATA_DUSS') is not None:
+        data_dir = os.path.expandvars('$DATA_DUSS')
+    else:
+        data_dir = '/home/demitau/data'
+
+    import pymatreader
+    infos = {}
+    for si in sis:
+        info_name = rawname + '{}_info.mat'.format(si)
+        fn = os.path.join(data_dir,info_name)
+        if not os.path.exists(fn):
+            continue
+        rr  =pymatreader.read_mat(fn )
+        print( rr['info']['chs'].keys() )
+        print( len( rr['info']['chs']['loc'] ) )
+        info_Jan = rr['info']
+        chs_info_Jan = info_Jan['chs']
+
+        infos[si] = info_Jan
+
+    assert len(infos) > 0
+
+    if len(infos) > 1 and check_info_diff:
+        from deepdiff import DeepDiff
+        dif = DeepDiff(infos[1],infos[2])
+        dif_ch = DeepDiff(infos[1]['chs'],infos[2]['chs'])
+        print('Dif betwenn infos is ',dif)
+        assert len(dif_ch) == 0
+
+
+    import copy
+    unmod_info = raw.info
+    mod_info  = copy.deepcopy(unmod_info)
+    fields = ['loc', 'coord_frame', 'unit', 'unit_mul', 'range',
+              'scanno', 'cal', 'logno', 'coil_type', 'kind' ]
+    fields += ['coil_trans']
+    for ch in mod_info['chs']:
+        chn = ch['ch_name']
+        if chn.find('MEG') < 0:
+            continue
+        ind = chs_info_Jan['ch_name'].index(chn)
+        #for i,ch_Jan in enumerate(info_Jan['ch_name']):
+        for field in fields:
+            ch[field] = chs_info_Jan[field][ind]
+        #ch['coord_frame'] = chs_info_Jan['coord_frame'][ind]
+
+    digs = info_Jan['dig']
+    fields = digs.keys()
+    digpts = []
+    for digi in range(len(digs['kind'])):
+        curdig = {}
+        for key in fields:
+            curdig[key] = digs[key][digi]
+        curdig_ = mne.io._digitization.DigPoint(curdig)
+        digpts.append( curdig_)
+    #     digs['kind'][digi]
+    #     digs['ident'][digi]
+    #     digs['coord_frame']
+    #     digs['r']
+    mod_info['dig'] = digpts
+
+    # if we load it to use in conjunction with already processed file, maybe we
+    # don't want it to be saved. Same with number of channels
+    if bandpass_info:
+        fields_outer = ['highpass', 'lowpass']
+        for field in fields_outer:
+            mod_info[field] = info_Jan[field]
+
+    d = info_Jan['dev_head_t']
+    mod_info['dev_head_t'] =  mne.transforms.Transform(d['from'],d['to'], d['trans'])
+
+
+    prj = infos[1]['projs']
+
+    projs = []
+    for i in range(len(prj)):
+        p = {}
+        for k in prj:
+            p[k] = prj[k][i]
+
+    #     proj_cur = prj[i]
+        if len(p['data']['row_names']) == 0:
+            p['row_names'] = None
+
+        if p['data']['data'].ndim == 1:
+            p['data']['data'] =  p['data']['data'][None,:]
+        one = mne.Projection(kind=p['kind'], active=p['active'], desc=p['desc'],
+                        data=p['data'],explained_var=None)
+
+    #     one = Projection(kind=p['kind'], active=p['active'], desc=p['desc'],
+    #                      data=dict(nrow=nvec, ncol=nchan, row_names=None,
+    #                                col_names=names, data=data),
+    #                      explained_var=explained_var)
+
+        projs.append(one)
+
+    mod_info['projs'] = projs
+
+    mne.channels.fix_mag_coil_types(mod_info)
+
+    return mod_info, infos
+
+
+#Coord frames:  1  -- device , 4 -- head,
+
+
+#FIFF.FIFFV_POINT_CARDINAL = 1
+#FIFF.FIFFV_POINT_HPI      = 2
+#FIFF.FIFFV_POINT_EEG      = 3
+#FIFF.FIFFV_POINT_ECG      = FIFF.FIFFV_POINT_EEG
+#FIFF.FIFFV_POINT_EXTRA    = 4
+#FIFF.FIFFV_POINT_HEAD     = 5  # Point on the surface of the head
+#
+#
+#
+#_dig_kind_dict = {
+#    'cardinal': FIFF.FIFFV_POINT_CARDINAL,
+#    'hpi': FIFF.FIFFV_POINT_HPI,
+#    'eeg': FIFF.FIFFV_POINT_EEG,
+#    'extra': FIFF.FIFFV_POINT_EXTRA,
+#}
+#
+#
+#_cardinal_kind_rev = {1: 'LPA', 2: 'Nasion', 3: 'RPA', 4: 'Inion'}
+#
+#    kind : int
+#        The kind of channel,
+#        e.g. ``FIFFV_POINT_EEG``, ``FIFFV_POINT_CARDINAL``.
+#    r : array, shape (3,)
+#        3D position in m. and coord_frame.
+#    ident : int
+#        Number specifying the identity of the point.
+#        e.g.  ``FIFFV_POINT_NASION`` if kind is ``FIFFV_POINT_CARDINAL``,
+#        or 42 if kind is ``FIFFV_POINT_EEG``.
+#    coord_frame : int
+#        The coordinate frame used, e.g. ``FIFFV_COORD_HEAD``.

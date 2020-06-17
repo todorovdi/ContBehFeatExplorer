@@ -61,7 +61,7 @@ prefix = ''
 
 load_only = 0
 do_LDA = 1
-n_feats = 609
+n_feats = 609  # this actually depends on the dataset which may have some channels bad :(
 ##############################
 import sys, getopt
 
@@ -314,30 +314,54 @@ print('PCA First several var ratios ',pca.explained_variance_ratio_[:5])
 
 
 if do_LDA:
+    # don't change the order!
+    int_types_L = ['trem_L', 'notrem_L', 'hold_L', 'move_L', 'undef_L', 'holdtrem_L', 'movetrem_L']
+    int_types_R = ['trem_R', 'notrem_R', 'hold_R', 'move_R', 'undef_R', 'holdtrem_R', 'movetrem_R']
+    class_ids = {}
+    for ind, it in enumerate(int_types_L):
+        class_ids[it] = ind+1
+    for ind, it in enumerate(int_types_R):
+        class_ids[it] = -ind-1
+
+    merge_mvt_types = 1
+    if merge_mvt_types:
+        class_ids['hold_L'] = class_ids['move_L']
+        class_ids['hold_R'] = class_ids['move_R']
+
     #TODO: make possible non-main side
     sides_hand = [mts_letter]
     int_types_basic = ['trem', 'notrem', 'hold', 'move']
 
-    int_types = set()
-    for itb in int_types_basic:
-        for side in sides_hand:
-            assert len(side) == 1
-            int_types.update(['{}_{}'.format(itb,side)])
-    #int_types = ['trem_L', 'notrem_L', 'hold_L', 'move_L']
-    int_types = list(int_types)
-    #print(int_types)
-
-    classes = [k for k in ivalis_tb_indarrays.keys() if k in int_types]  #need to be ordered
-    #classes
-
     defclass = 0
     class_labels = np.repeat(defclass,len(Xconcat))
     assert defclass == 0
-    for i,k in enumerate(classes):
-        #print(i,k)
-        for bininds in ivalis_tb_indarrays[k]:
-            #print(i,len(bininds), bininds[0], bininds[-1])
-            class_labels[ bininds ] = i + 1
+
+    old_ver = 0
+    if old_ver:
+        int_types = set()
+        for itb in int_types_basic:
+            for side in sides_hand:
+                assert len(side) == 1
+                int_types.update(['{}_{}'.format(itb,side)])
+        #int_types = ['trem_L', 'notrem_L', 'hold_L', 'move_L']
+        int_types = list(int_types)
+        #print(int_types)
+
+        classes = [k for k in ivalis_tb_indarrays.keys() if k in int_types]  #need to be ordered
+        #classes
+
+        for i,k in enumerate(classes):
+            #print(i,k)
+            for bininds in ivalis_tb_indarrays[k]:
+                #print(i,len(bininds), bininds[0], bininds[-1])
+                class_labels[ bininds ] = i + 1
+
+    for itb in int_types_basic:
+        for side in sides_hand:
+            class_name = '{}_{}'.format(itb,side)
+            for bininds in ivalis_tb_indarrays[class_name]:
+                #print(i,len(bininds), bininds[0], bininds[-1])
+                class_labels[ bininds ] = class_ids[class_name]
 
 
     class_labels_good = class_labels[good_inds]
@@ -367,7 +391,10 @@ if do_LDA:
     X_LDA = lda.transform(Xconcat)  # we transform all points, even bad and ulabeled ones. Transform is done using scalings
 
     class_to_check = 'trem_{}'.format(mts_letter)
-    class_ind = classes.index(class_to_check) + 1
+    if old_ver:
+        class_ind = classes.index(class_to_check) + 1
+    else:
+        class_ind = class_ids[class_to_check]
     sens,spec = utsne.getLDApredPower(lda,Xconcat, class_labels, class_ind)
     print('--!! LDA on training data, identifying {}: sens = {:.3f};  spec = {:.3f}'.format(class_to_check,sens,spec))
 else:
