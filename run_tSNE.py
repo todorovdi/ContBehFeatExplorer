@@ -17,6 +17,7 @@ from sklearn.manifold import TSNE
 from sklearn.decomposition import PCA
 
 import utils_tSNE as utsne
+import globvars as gv
 
 from matplotlib.backends.backend_pdf import PdfPages
 import utils_preproc as upre
@@ -202,10 +203,8 @@ fname_feat_full = os.path.join( data_dir,a)
 #############################################################
 
 
- # get info about bad MEG channels (from separate file)
+# get info about bad MEG channels (from separate file)
 with open('subj_info.json') as info_json:
-        #raise TypeError
-
     #json.dumps({'value': numpy.int64(42)}, default=convert)
     gen_subj_info = json.load(info_json)
 
@@ -215,7 +214,7 @@ for rawname_ in rawnames:
     subj,medcond,task  = utils.getParamsFromRawname(rawname_)
     tasks += [task]
 
- # for current raw
+# for current raw
 maintremside = gen_subj_info[subj]['tremor_side']
 mainLFPchan = gen_subj_info[subj]['lfpchan_used_in_paper']
 tremfreq_Jan = gen_subj_info[subj]['tremfreq']
@@ -386,6 +385,7 @@ if do_tSNE:
 
     print('Starting tSNE')
     # function to be run in parallel
+
     def run_tsne(p):
         t0 = time.time()
         pi,si, pts, seed, perplex_cur, lrate, dtype = p
@@ -478,7 +478,7 @@ if do_tSNE:
 
 if show_plots and do_tSNE:
     print('Starting tSNE plotting ')
-    pdf= PdfPages( out_name+'.pdf'  )
+    pdf= PdfPages( os.path.join(gv.dir_fig, out_name+'.pdf' ) )
 
     #cols = [colors, colors2, colors3]
     cols = [colors]

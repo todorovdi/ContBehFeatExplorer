@@ -8,6 +8,9 @@ import matplotlib.pyplot as plt
 import matplotlib as mpl
 import utils
 
+import globvars as gv
+import os
+
 import multiprocessing as mpr
 import mne
 
@@ -143,7 +146,7 @@ def plotEvolutionMultiCh(dat, times, chan_names=None, interval = None, extend=5,
                                                     n_channels,int_type,bnd_toshow,
                                                     time_wnd[0], time_wnd[1])
     if save:
-        plt.savefig(figname)
+        plt.savefig(os.path.join(gv.dir_fig,figname))
         print('Plot saved to ',figname)
 
     return yshifts, mn, mx
@@ -1094,12 +1097,13 @@ def findByPrefix(data_dir, rawname, prefix, ftype='PCA',regex=None):
             fnfound += [fn]
     return fnfound
 
-def concatAnns(rawnames,Xtimes_pri):
-    import os
-    if os.environ.get('DATA_DUSS') is not None:
-        data_dir = os.path.expandvars('$DATA_DUSS')
-    else:
-        data_dir = '/home/demitau/data'
+
+def concatArtif(rawnames,Xtimes_pri):
+    return concatAnns(rawnames,Xtimes_pri, ['_ann_LFPartif', '_ann_MEGartif' ] )
+
+def concatAnns(rawnames,Xtimes_pri, suffixes=['_anns']):
+    import globvars as gv
+    data_dir = gv.data_dir
 
     assert len(rawnames) == len(Xtimes_pri)
     anns_pri = []
@@ -1107,9 +1111,11 @@ def concatAnns(rawnames,Xtimes_pri):
         subj,medcond,task  = utils.getParamsFromRawname(rawname_)
         #tasks += [task]
 
-        anns_fn = rawname_ + '_anns.txt'
-        anns_fn_full = os.path.join(data_dir, anns_fn)
-        anns = mne.read_annotations(anns_fn_full)
+        anns = mne.Annotations([],[],[])
+        for suffix in suffixes:
+            anns_fn = rawname_ + suffix + '.txt'
+            anns_fn_full = os.path.join(data_dir, anns_fn)
+            anns += mne.read_annotations(anns_fn_full)
         #raw.set_annotations(anns)
         anns_pri += [anns]
 
@@ -1153,12 +1159,18 @@ def concatAnns(rawnames,Xtimes_pri):
 
 def getAnnBins(ivalis,Xtimes_almost,nedgeBins, sfreq,totskip, windowsz, dataset_bounds,
                set_empty_arrays = 0):
+    '''
+    nedgeBins -- currently unused
+    windowsz -- in bins
+    totskip -- in bins
+    '''
     #ivalis is dict of lists of tuples (beg,start, itype)
     ivalis_tb = {}  # only bounds
     ivalis_tb_indarrays = {}  # entire arrays
     #globend = Xtimes[-1] + nedgeBins/sfreq
+    sfreq = int(sfreq)
 
-    assert( Xtimes_almost[0] < 1e-10 )
+    #assert( Xtimes_almost[0] < 1e-10 )
 
     maxind = len(Xtimes_almost)-1
 
@@ -1180,6 +1192,9 @@ def getAnnBins(ivalis,Xtimes_almost,nedgeBins, sfreq,totskip, windowsz, dataset_
                 assert interval_dataset_ind  is not None, interval
                 globend = drb
                 globstart = dlb
+            else:
+                dlb = Xtimes_almost[0]
+                drb = Xtimes_almost[-1]
 
             if st <= dlb:
                 bnd0 = int(dlb * sfreq) // totskip
@@ -1210,7 +1225,11 @@ def getAnnBins(ivalis,Xtimes_almost,nedgeBins, sfreq,totskip, windowsz, dataset_
 
     return ivalis_tb, ivalis_tb_indarrays
 
-def mergeAnnBinArras(ivalis_tb_indarrays):
+def mergeAnnBinArrays(ivalis_tb_indarrays):
+    '''
+    takes dict of lists of binind arrays
+    returns dict of bininds arrays
+    '''
     ivalis_tb_indarrays_merged = {}
     for k in ivalis_tb_indarrays:
         ivalis_tb_indarrays_merged[k] = np.hstack(ivalis_tb_indarrays[k])

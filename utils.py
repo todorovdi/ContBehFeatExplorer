@@ -5,6 +5,8 @@ import re
 import globvars as gv
 import scipy.signal as sig
 import matplotlib.pyplot as plt
+import globvars as gv
+import os
 
 def getIntervalIntersection(a1,b1, a2, b2):
     assert b1 >= a1
@@ -19,21 +21,32 @@ def getIntervalIntersection(a1,b1, a2, b2):
     else:
         return []
 
-def findIntersectingAnns(ts,te,anns):
+def findIntersectingAnns(ts,te,anns, ret_type='types'):
+    # by default returns only types
     assert te >= ts
     if te-ts <= 1e-10:
         print('Warning, using empty interval {},{}'.format(ts,te) )
     d = []
-    for an in anns:
+    inds = []
+    import mne
+    newanns = mne.Annotations([],[],[])
+    for ani,an in enumerate(anns):
         isect = getIntervalIntersection(ts,te,an['onset'],an['onset']+an['duration'])
         #print(isect)
         if len(isect) > 0:
             d.append( an['description'] )
+            inds.append(ani)
+            newanns.append( isect[0], isect[1] - isect[0], an['description'] )
 
-    return d
+    if ret_type == 'indices':
+        return ani
+    elif ret_type == 'anns':
+        return newanns
+    elif ret_type == 'types':
+        return d
 
 def unpackTimeIntervals(trem_times_byhand, mainSide = True, gen_subj_info=None,
-                        skipNotLoadedRaws=True):
+                        skipNotLoadedRaws=True, printArtifacts=False):
     # unpack tremor intervals sent by Jan
     artif = {}
     tremIntervalJan = {}
@@ -89,7 +102,8 @@ def unpackTimeIntervals(trem_times_byhand, mainSide = True, gen_subj_info=None,
                         del s4p[0]
 
                     if intType.find('artifact') >= 0:
-                        print(rawname,intType, s4p)
+                        if printArtifacts:
+                            print(rawname,intType, s4p)
                         r = re.match( "artifact_(.+)", intType ).groups()
                         chn = r[0]
                         if chn == 'MEG':
@@ -806,27 +820,38 @@ def tfr(dat, sfreq, freqs, n_cycles, decim=1, n_jobs = None):
 def getIntervals(bininds,width=100,thr=0.1, percentthr=0.8,inc=5, minlen=50,
         extFactorL = 0.25, extFactorR  = 0.25, endbin = None, cvl=None,
                  percent_check_window_width=256, min_dist_between = 100,
-                 include_short_spikes=0):
+                 include_short_spikes=0, printLog = 0, minlen_ext=None):
     '''
+    bininds either indices of bins where interesting happens OR the mask
     width -- number of bins for the averaging filter
     tremini -- indices of timebins, where tremor was detected
     thr -- thershold for convolution to be larger then, for L\infty-normalized data
+        (works together with width arg). Max sensitive thr is 1/width
     output -- convolution, intervals (pairs of timebin indices)
     inc -- how much we extend the interval each time (larger means larger intervals, but worse boundaries)
     minlen -- minimum number of bins required to make the interval be included
+    minlen_ext -- same as minlin, but after extFactors were applied
     percentthr -- min ratio of thr crossings within the window to continue extending the interval
-    extFactor -- we'll extend found intervals by width * extFactor
+    extFactor[R,L] -- we'll extend found intervals by width * extFactor (negative allowed)
     endbin -- max timebin
     '''
 
     if cvl is None:
+        if np.max(bininds) == 1:
+            if endbin is not None:
+                assert len(bininds) == endbin
+            raster = bininds
+        else:
+            raster = None
+
         if endbin is None:
             mt = np.max (bininds ) + 1
         else:
             mt = endbin
 
-        raster = np.zeros( mt, dtype=np.int )
-        raster[bininds] = 1
+        if raster is None:
+            raster = np.zeros( mt, dtype=np.int )
+            raster[bininds] = 1
         #width = 100
         avflt = np.ones(width) #box filter
         #avflt = sig.gaussian(width, width/4)
@@ -835,13 +860,16 @@ def getIntervals(bininds,width=100,thr=0.1, percentthr=0.8,inc=5, minlen=50,
     else:
         assert cvl.ndim == 1
 
+    if minlen_ext is None:
+        minlen_ext = minlen
     #cvlskip = cvl[::skip]
     cvlskip = cvl
-    thrcross = np.where( cvlskip > thr )[0]
-    belowthr = np.where( cvlskip <= thr )[0]
+    thrcross = np.where( cvlskip >= thr )[0]
+    belowthr = np.where( cvlskip < thr )[0]
     shiftL = int(width * extFactorL )
     shiftR = int(width * extFactorR )
 
+    assert thr > 0
     #print('cross len ',len(thrcross), thrcross )
     #print('below len ',len(belowthr), belowthr )
 
@@ -858,9 +886,18 @@ def getIntervals(bininds,width=100,thr=0.1, percentthr=0.8,inc=5, minlen=50,
             di = searchres[0]
             rightEnd = belowthr[di]
 
-        #print(searchres, rightEnd)
+        if printLog:
+            print('searchres={}, rightEnd={}'.format(searchres, rightEnd) )
         subcvl = cvlskip[leftEnd:rightEnd]
+        rightEnd_hist = []
+        success = True
         while rightEnd < len(cvlskip) + inc + 1: # try to enlarge until possible
+            rightEnd_hist += [rightEnd]
+
+            if len(rightEnd_hist) > 10 and np.std(rightEnd_hist[-5:] ) < 1e-10:
+                assert False
+            if printLog:
+                print('Extending: rightEnd={}, {}'.format(rightEnd, rightEnd_hist ) )
             if len(subcvl) <= percent_check_window_width:
                 tmp = subcvl
             else:
@@ -877,9 +914,17 @@ def getIntervals(bininds,width=100,thr=0.1, percentthr=0.8,inc=5, minlen=50,
             else:
                 if not (include_short_spikes and cvlskip[rightEnd] > thr ):
                     break
+                if (len(rightEnd_hist) > 4) and (np.std(rightEnd_hist[-2:] ) < 1e-10):
+                    success = False # the found segment has too low percentage
+                    #rightEnd += 1
+                    break
+                #, (rightEnd_hist, subcvl)
+                if printLog:
+                    print('Ext: val={}'.format(val), (len(rightEnd_hist) , np.std(rightEnd_hist[-5:] )   ) )
 
-        if rightEnd-leftEnd >= minlen:
-            newp = (  max(0, leftEnd-shiftL), max(0, rightEnd-shiftR) ) # extend the interval on both sides
+        newp = (  max(0, leftEnd-shiftL), max(0, rightEnd+shiftR) )
+        if rightEnd-leftEnd >= minlen and (newp[1]-newp[0]) >= minlen_ext and success:
+            newp = (  max(0, leftEnd-shiftL), max(0, rightEnd+shiftR) ) # extend the interval on both sides
             if len(pairs):  #maybe we'd prefer to glue together two pairs
                 prev_st,prev_end = pairs[-1]
                 if newp[0] - prev_end > min_dist_between:
@@ -1030,10 +1075,28 @@ def findAllTremor(thrSpec = None, thr=0.13, width=40, percentthr=0.8, inc=1, min
 
     return tremPerRaw, cvls
 
-def mergeTremorIntervals(intervals, mode='intersect'):
+def anns2intervals(anns, tuple_len=2):
+    import mne
+    assert isinstance(anns,mne.Annotations)
+    ivals = []
+    for an in anns:
+        tpl_ = [an['onset'], an['onset']+an['duration']]
+        if tuple_len == 3:
+            tpl_.append(an['description'] )
+        tpl = tuple(tpl_)
+        ivals += [tpl  ]
+    return ivals
+
+def mergeTremorIntervalsRawSide(intervals, mode='intersect'):
     '''
     mode -- 'intersect' or 'union' -- how to deal with intervals coming from differnt muscles
+    intervals -- dict (rawname) of dicts (side) of dicts (chns) of lists of tuples
     '''
+    import mne
+    ann_mode = False
+    if isinstance(intervals, mne.Annotations):
+        intervals = anns2intervals(intervals)
+        ann_mode = True
     newintervals = {}
     for k in intervals:
         ips = intervals[k]
@@ -1097,6 +1160,119 @@ def mergeTremorIntervals(intervals, mode='intersect'):
                 newips[side] = resp
         newintervals[k] = newips
     return newintervals
+
+def mergeTremorIntervals(pairs1, pairs2, mode='intersect'):
+    '''
+    Mergint intervals _of the same type_
+    mode -- 'intersect' or 'union' -- how to deal with intervals coming from differnt muscles
+    '''
+    import mne
+    ann_mode = False
+    if isinstance(pairs1, mne.Annotations) or isinstance(pairs2, mne.Annotations):
+        assert  isinstance(pairs1, mne.Annotations) and isinstance(pairs2, mne.Annotations)
+        pairs1 = anns2intervals(pairs1, tuple_len=3)
+        pairs2 = anns2intervals(pairs2, tuple_len=3)
+        ann_mode = True
+
+    #intcur = intervals
+    #assert len(intcur) == 2
+    #chns = list( intcur.keys() )
+    #pairs1 = intcur[chns[0] ]
+    #pairs2 = intcur[chns[1] ]
+
+    mask2 = np.ones(len(pairs2) )
+
+    # currently tremor that appear only in one MEG, gets ignored (otherwise I'd have to add non-merged to the list as well)
+    resp = []
+    #for i1, (a1,b1) in enumerate(pairs):
+    #    for i2,(a2,b2) in enumerate(pairs):
+    for i1, p1 in enumerate(pairs1):
+        (a1,b1) = p1[0],p1[1]
+        mergewas = 0
+        for i2,p2 in enumerate(pairs2):
+            (a2,b2) = p2[0],p2[1]
+            #if i1 == i2 or mask[i2] == 0 or mask[i1] == 0:
+            #    continue
+            if mask2[i2] == 0:
+                continue
+
+            if len(p1) == 3 or len(p2) == 3:
+                #if p1[2] != p2[2]:
+                #    continue
+                assert p1[2] == p2[2]
+
+            # if one of the end is inside the other interval
+            if (b1 <=  b2 and b1 >= a2) or ( b2 <= b1 and b2 >= a1 ) :
+                if mode == 'intersect':
+                    newp = (max(a1,a2), min(b1,b2) )
+                elif mode == 'union':
+                    newp = (min(a1,a2), max(b1,b2) )
+                resp += [ newp ]
+                #mask[i1] = 0
+                #mask[i2] = 0  # we mark those who participated in merging
+                mask2[i2] = 0
+                mergewas = 1
+                break
+
+        #resp += [ p for i,p in enumerate(pairs) if mask[i] == 1 ]  # add non-merged
+
+    result = []
+
+    if mode == 'union':
+        result = mergeIntervalsWithinList(resp,pairs1,pairs2)
+    elif mode == 'intersect':
+        result = resp
+    else:
+        raise ValueError('wrong mode')
+
+    return result
+
+def mergeIntervalsWithinList(pairs,pairs1=None,pairs2=None, printLog=False):
+    # now merging intersecting things that could have arised from joining
+    if pairs1 is None:
+        pairs1 = pairs
+    if pairs2 is None:
+        pairs2 = pairs
+
+    import mne
+    ann_mode = False
+    if isinstance(pairs1, mne.Annotations) or isinstance(pairs2, mne.Annotations):
+        assert  isinstance(pairs1, mne.Annotations) and isinstance(pairs2, mne.Annotations)
+        pairs1 = anns2intervals(pairs1, tuple_len=3)
+        pairs2 = anns2intervals(pairs2, tuple_len=3)
+        ann_mode = True
+    if isinstance(pairs, mne.Annotations):
+        pairs = anns2intervals(pairs, tuple_len=3)
+
+    n_merges = 0
+
+    mask = np.ones(len(pairs) )
+    resp2 = []
+    for i1, p1 in enumerate(pairs1):
+        (a1,b1) = p1[0],p1[1]
+        for i2,p2 in enumerate(pairs2):
+            (a2,b2) = p2[0],p2[1]
+            if i1 == i2 or mask[i2] == 0 or mask[i1] == 0:
+                continue
+            if len(p1) == 3 and p1[2] != p2[2]:      # if descriptions are different
+                continue
+            if (b1 <=  b2 and b1 >= a2) or ( b2 <= b1 and b2 >= a1 ) :
+                tpl_ = [min(a1,a2), max(b1,b2) ]
+                if ann_mode:
+                    tpl_.append(p1[2] )
+                resp2 +=  [ tuple(tpl_)  ]
+                mask[i1] = 0
+                mask[i2] = 0  # we mark those who participated in merging
+                if printLog:
+                    print('merged {} and {}'.format(p1,p2) )
+                n_merges += 1
+                break
+    resp2 += [ p for i,p in enumerate(pairs) if mask[i] == 1 ]  # add non-merged
+
+    res  = resp2
+    if ann_mode:
+        res = intervals2anns(resp2)
+    return res
 
 ############################# Spec helper funcions
 def getBandpow(k,chn,fbname,time_start,time_end, mean_corr = False, spdat=None):
@@ -1763,7 +1939,9 @@ def plotBandLocations(tfr,timeints,fbs,prefix='', logscale=False,
     #plt.tight_layout()
 
 
-    plt.savefig('{}_bandpow_concentr_nints{}_nbands{}.pdf'.format(prefix,len(timeints), len(fbs) ))
+    plt.savefig(os.path.join(gv.dir_fig,\
+        '{}_bandpow_concentr_nints{}_nbands{}.pdf'.
+                             format(prefix,len(timeints), len(fbs) )))
     plt.close()
 
 #def plotTimecourse(plt):
@@ -1844,13 +2022,117 @@ def plotBandLocations(tfr,timeints,fbs,prefix='', logscale=False,
 #        figname = '_{}_{} nr{}, {:.2f},{:.2f}.{}'. \
 #                    format(subjstr, data_type, nr, float(time_start), \
 #                           float(time_end),ext)
-#        plt.savefig( os.path.join(plot_output_dir, figname ) )
+#        plt.savefig(os.path.join(gv.dir_fig, os.path.join(plot_output_dir, figname ) ))
 #    if not showfig:
 #        plt.close()
 #    else:
 #        plt.show()
 #
 #    print('Plotting all finished')
+
+def collectChnamesBySide(info):
+    #Axis X: From the origin towards the RPA point (exactly through)  #ears
+    #Axis Y: From the origin towards the nasion (exactly through)     #nose
+    #Axiz Z: From the origin towards the top of the head
+    #Origin: Intersection of the line L through LPA and RPA and a plane orthogonal
+    #to L and passing through the nasion.
+    # positive Y means more frontal
+
+    res = {'left':[], 'right':[] }
+    res_inds = {'left':[], 'right':[] }
+    chs = info['chs']
+    for chi,ch in enumerate(chs):
+        loc = ch['loc'][:3]
+        if loc[0] >= 0:
+            side  = 'right'
+        else:
+            side = 'left'
+        res[side] += [ch['ch_name']]
+        res_inds[side] += [chi]
+
+    return res, res_inds
+
+def intervals2anns(intlist, int_name=None, times=None):
+    '''
+    int_name -- str or list of strs or None; if None, description is taken as third tuple element
+    if times is None, intlist items interpreted as pairs of times, else as paris of timebins
+    '''
+    assert isinstance(intlist,list)
+    import mne
+    anns = mne.Annotations([],[],[])
+    for ivli,ivl in enumerate(intlist):
+        b0,b1 = ivl[0], ivl[1]
+        if times is not None:
+            b0t,b1t = times[b0], times[b1]
+        else:
+            b0t,b1t = b0,b1
+        if isinstance(int_name,str):
+            int_name_cur = int_name
+        elif isinstance(int_name,list):
+            int_name_cur = int_name[ivli]
+        elif int_name is None:
+            assert len(ivl) > 2
+            int_name_cur = ivl[2]
+        anns.append([b0t],[b1t-b0t], [int_name_cur ]  )
+    return anns
+
+def findMEGartifacts(filt_raw , thr_mult = 2.5, thr_use_mean=0):
+    raw_only_meg = filt_raw.copy()
+    raw_only_meg.pick_types(meg=True)
+
+    assert len(raw_only_meg.info['bads']) == 0, 'There are bad channels!'
+
+    chnames_perside_meg, chis_perside_meg = collectChnamesBySide(filt_raw.info)
+    import utils_tSNE as utsne
+    import mne
+
+    fig,axs = plt.subplots(2,1, figsize=(14,7), sharex='col')
+
+    sides = sorted(chnames_perside_meg.keys())
+    anns = mne.Annotations([],[],[])
+    cvl_per_side = {}
+    for sidei,side in enumerate(sides ):
+        chnames_curside = chnames_perside_meg[side]
+        megdat, times = raw_only_meg[chnames_curside]
+        #megdat = raw_only_meg.get_data()
+        me, mn,mx = utsne.robustMean(megdat, axis=1, per_dim =1, ret_aux=1, q = .25)
+        megdat_scaled = ( megdat - me[:,None] ) / (mx-mn)[:,None]
+        megdat_sum = np.sum(np.abs(megdat_scaled),axis=0)
+        me_s, mn_s,mx_s = utsne.robustMean(megdat_sum, axis=None, per_dim =1, ret_aux=1, pos = 1)
+
+        if thr_use_mean:
+            mask= megdat_sum > me_s * thr_mult
+        else:
+            mask= megdat_sum > mx_s * thr_mult
+        cvl,ivals_meg_artif = getIntervals(np.where(mask)[0] ,\
+            include_short_spikes=1, endbin=len(mask), minlen=2, thr=0.001, inc=1,\
+            extFactorL=0.1, extFactorR=0.1 )
+        cvl_per_side[side] = cvl
+
+        print('MEG artifact intervals found ' ,ivals_meg_artif)
+        #import ipdb; ipdb.set_trace()
+
+        ax = axs[sidei]
+        ax.plot(filt_raw.times,megdat_sum)
+        ax.axhline( me_s , c='r', ls=':')
+        ax.axhline( mx_s , c='purple', ls=':')
+        ax.axhline( me_s * thr_mult , c='r', ls='--')
+        ax.axhline( mx_s * thr_mult , c='purple', ls='--')
+        ax.set_title('{} MEG artif'.format(side) )
+
+        for ivl in ivals_meg_artif:
+            b0,b1 = ivl
+            #b0t,b1t = filt_raw.times[b0], filt_raw.times[b1]
+            #anns.append([b0t],[b1t-b0t], ['BAD_MEG{}'.format( side[0].upper() ) ]  )
+            ax.axvline( filt_raw.times[b0] , c='r', ls=':')
+            ax.axvline( filt_raw.times[b1] , c='r', ls=':')
+
+        anns = intervals2anns(ivals_meg_artif,  'BAD_MEG{}'.format( side[0].upper() ), filt_raw.times )
+
+        ax.set_xlim(filt_raw.times[0], filt_raw.times[-1]  )
+
+    return anns, cvl_per_side
+
 
 def plotICAdamage(filt_raw, rawname_, ica, comp_inds_intr,xlim, nr=20,
                   do_plot=1, ecg_comp_ind=-1, mult=20/100, multECG = 35/100,
@@ -1976,6 +2258,384 @@ def plotICAdamage(filt_raw, rawname_, ica, comp_inds_intr,xlim, nr=20,
             if stop:
                 break
         # I want to check if variance overall reduces (bad) or only during transient events
-    plt.savefig(figname, dpi=200)
+    plt.savefig(os.path.join(gv.dir_fig_preproc,figname), dpi=200)
     plt.close()
     import gc; gc.collect()
+
+def artif2ann(art_dict, art_dict_nms, maintremside, side='main', LFPonly=1):
+    # art_dict -- key: ch name -> list of 2-el-lists,
+    onset = []
+    duration = []
+    description = []
+    assert len(maintremside) > 1 and len(side) > 1
+
+    if side == 'main' or side == maintremside:
+        artifacts = [art_dict]
+    elif side == 'other' or side == getOppositeSideStr(side):
+        artifacts = [art_dict_nms]
+    elif side == 'both':
+        artifacts = [art_dict, art_dict_nms]
+    for artifacts_cur in artifacts:
+        for chn in artifacts_cur:
+            intervals_cur = artifacts_cur[chn]
+            curdescr = 'BAD_{}'.format(chn)
+            for ivl in intervals_cur:
+                onset += [ ivl[0]  ]
+                duration += [ ivl[1]-ivl[0] ]
+                description += [ curdescr ]
+
+    import mne
+    anns = mne.Annotations(onset, duration, description)
+    return anns
+# note than maintremside should correspond to the rawname!
+
+
+def getEMGperHand(rectconvraw):
+    EMG_per_hand = {'right':['EMG061_old', 'EMG062_old'], 'left':['EMG063_old', 'EMG064_old' ] }
+    rectconvraw.load_data()
+
+    rectconvraw_perside = {}
+    for side in EMG_per_hand:
+        chns = EMG_per_hand[side]
+        tmp = rectconvraw.copy()
+        tmp.pick_channels(chns)
+
+        assert len(tmp.ch_names) == 2
+        rectconvraw_perside[side] = tmp
+
+    for side in EMG_per_hand:
+        badstr = '_' + getOppositeSideStr(side[0].upper())
+        #print(badstr)
+        anns_upd = removeAnnsByDescr(rectconvraw_perside[side].annotations, [badstr])
+        rectconvraw_perside[side].set_annotations(anns_upd)
+
+    return  rectconvraw_perside
+
+def getLFPperSide(raw_lfponly, key='letter'):
+    '''
+    Also filter annotations
+    '''
+    #EMG_per_hand = {'right':['EMG061_old', 'EMG062_old'], 'left':['EMG063_old', 'EMG064_old' ] }
+    import mne
+    raw_lfponly.load_data()
+
+    raws_lfp_perside = {}
+    for side in ['left', 'right' ]:
+        sidelet = side[0].upper()
+        if key == 'str':
+            sidekey = side
+        elif key == 'letter':
+            sidekey = sidelet
+        raws_lfp_perside[sidekey] = raw_lfponly.copy()
+        chis = mne.pick_channels_regexp(raw_lfponly.ch_names, 'LFP{}.*'.format(sidelet))
+        chnames_lfp = [raw_lfponly.ch_names[chi] for chi in chis]
+        raws_lfp_perside[sidekey].pick_channels(   chnames_lfp  )
+
+    for sidekey in raws_lfp_perside:
+        # first we remove tremor annotations from other side. Since it is
+        # brain, other side means ipsilateral
+        sidelet = sidekey[0].upper()
+        badstr = '_' + sidelet
+        anns_upd = removeAnnsByDescr(raws_lfp_perside[sidekey].annotations, [badstr])
+
+        # now we remove artifcats for other side of the brain
+        badstr = 'LFP' + getOppositeSideStr(sidelet)
+        anns_upd = removeAnnsByDescr(anns_upd, [badstr])
+
+        # set result
+        raws_lfp_perside[sidekey].set_annotations(anns_upd)
+
+    return  raws_lfp_perside
+
+def extendAnns(anns,ext_left, ext_right):
+    # in sec
+    import copy
+    newanns = copy.deepcopy(anns)
+    newanns.onset -= ext_left
+    newanns.duration += ext_right
+    return newanns
+
+def findTaskStart(anns):
+    r = None
+    tasks = ['hold', 'move']
+    for ann in anns:
+        for task in tasks:
+            if ann['description'].find(task) >= 0:
+                r = ann
+                break
+        if r is not None:
+            break
+    if r is not None:
+        return r['onset']
+    else:
+        return None
+
+def getMainEMGcompOneSide(emg, side, store_both=False):
+    # emg is raw with data from one side
+    from sklearn.decomposition import PCA
+    emgdat = emg.get_data()
+    assert emgdat.shape[0] == 2
+    pca = PCA(2)
+    emgdat_rot = pca.fit_transform(emgdat.T)
+    emgdat_rot = emgdat_rot.T
+
+    #print( pca.explained_variance_ratio_ )
+    import mne
+
+    info_newemg = mne.create_info(ch_names = ['EMGmain{}'.format(side[0].upper())],
+                sfreq = emg.info['sfreq'])
+    if store_both:
+        retchis = [0,1]
+    else:
+        retchis = [0]
+    r = mne.io.RawArray(emgdat_rot[retchis], info_newemg)
+    r.set_annotations(emg.annotations)
+    return r, pca
+
+def getMainEMGcomp(emg):
+    if isinstance(emg,dict):
+        ps = emg
+    else:
+        ps = getEMGperHand(emg)
+
+    res = {}
+    for side in ps:
+        #names = mne.pick_channels_regexp(emg.ch_names,'EMG.*_old')
+        #emgdat, times = emg[names]
+        #assert emgdat.shape[0] == 2
+        curraw = ps[side]
+
+        r, pca = getMainEMGcompOneSide(curraw, side)
+        res[side] = r
+
+        print('-- On {} side, explain {} ratio by EMG components '.format(side, pca.explained_variance_ratio_ ) )
+    return res
+
+def getIntervalMaxs(raw,intervals, q=0.995):
+    #m = np.zeros(2)
+    alldat = []
+    qpi = []
+    for ivi,iv in enumerate(intervals):
+        if len(iv) == 3:
+            st,end,tt = iv
+        elif len(iv ) == 2:
+            st,end = iv
+        else:
+            raise ValueError('wrong len', len(iv))
+        sti,endi = raw.time_as_index([st,end])
+        dat,times = raw[:,sti:endi]
+        alldat += [dat]
+        mcur = np.quantile(dat,q,axis=1)
+        qpi += [mcur]
+        #m = np.maximum(m,mcur)
+        print('mcur for interval {} is {}'.format(ivi,mcur) )
+    alldat = np.hstack(alldat)
+    m0 = np.max(alldat, axis=1)
+    m = np.quantile(alldat, q, axis=1)
+    return m,m0
+
+
+def intervalJSON2Anns(rawname_, use_new_intervals = True, maintremside=None, return_artifacts = False):
+    import json
+    from copy import deepcopy
+
+    with open('subj_info.json') as info_json:
+        gen_subj_info = json.load(info_json)
+
+    subj,medcond,task  = getParamsFromRawname(rawname_)
+    subj_num = int(subj[1:])
+
+    if maintremside is None:
+        maintremside = gen_subj_info[subj]['tremor_side']
+    nonmaintremside = getOppositeSideStr(maintremside)
+
+    rawname_impr = rawname_
+    # in Jan's file 8,9,10 are called 'hold' instead of 'rest', but in my json
+    # it was corrected
+    if subj_num > 7: # and not use_new_intervals:
+        rawname_impr = '{}_{}_hold'.format(subj,medcond)
+
+    if use_new_intervals:
+        trem_times_fn = 'trem_times_tau.json'
+    else:
+        trem_times_fn = 'trem_time_jan_unmod.json'
+
+    with open(trem_times_fn ) as jf:
+        trem_times_byhand = json.load(jf)
+
+    tremIntervalJan, artif_main         = unpackTimeIntervals(trem_times_byhand, mainSide = True,
+                                                            gen_subj_info=gen_subj_info, skipNotLoadedRaws=0)
+
+    if use_new_intervals:
+        trem_times_nms_fn = 'trem_times_tau_nms.json'
+        with open(trem_times_nms_fn ) as jf:
+            trem_times_nms_byhand = json.load(jf)
+        tremIntervalJan_nms, artif_nms = unpackTimeIntervals(trem_times_nms_byhand, mainSide = False,
+                                                                gen_subj_info=gen_subj_info, skipNotLoadedRaws=0)
+
+    #%debug
+
+    artif = deepcopy(artif_main)
+    if use_new_intervals:
+        #for rawn in [rawname_]:
+        if rawname_ in artif_nms and rawname_ not in artif:
+            artif[rawname_] = artif_nms[rawname_]
+        else:
+            if rawname_ in artif_nms:
+                artif[rawname_].update(artif_nms[rawname_] )
+
+    #for rawn in tremIntervalJan:
+    #    sind_str,medcond_,task_ = getParamsFromRawname(rawn)
+    #    maintremside_cur = gen_subj_info[sind_str]['tremor_side']
+    #    opside= getOppositeSideStr(maintremside_cur)
+    #    if use_new_intervals:
+    #        if rawn in tremIntervalJan_nms:
+    #            tremIntervalJan[rawn][opside] = tremIntervalJan_nms[rawn][opside]
+    if use_new_intervals:
+        # first try to get the 'converted rawname' then the original (because I
+        # was lazy when dealing with nms)
+        if rawname_impr in tremIntervalJan_nms:
+            tremIntervalJan[rawname_impr][nonmaintremside] = tremIntervalJan_nms[rawname_impr][nonmaintremside]
+        else:
+            assert rawname_ in tremIntervalJan_nms
+            tremIntervalJan[rawname_impr][nonmaintremside] = tremIntervalJan_nms[rawname_][nonmaintremside]
+
+
+    mvtTypes = ['tremor', 'no_tremor', 'unk_activity']
+
+    plotTremNegOffset = 2.
+    plotTremPosOffset = 2.
+    maxPlotLen = 6   # for those interval that are made for plotting, not touching intervals for stats
+    addIntLenStat = 5
+    plot_time_end = 150
+
+    #import ipdb; ipdb.set_trace()
+
+    timeIntervalPerRaw_processed = processJanIntervals(tremIntervalJan, maxPlotLen, addIntLenStat,
+                            plotTremNegOffset, plotTremPosOffset, plot_time_end, mvtTypes=mvtTypes)
+
+    #print(timeIntervalPerRaw_processed[rawname_].keys() )
+    intervals = timeIntervalPerRaw_processed[rawname_impr][maintremside]   #[rawn][side] -- list of tuples (beg,end, type string)]   #[rawn][side] -- list of tuples (beg,end, type string)
+    if use_new_intervals:
+        intervals_nms = timeIntervalPerRaw_processed[rawname_impr][nonmaintremside]   #[rawn][side] -- list of tuples (beg,end, type string)]   #[rawn][side] -- list of tuples (beg,end, type string)
+
+    # convert to intervalType -> intervalInds
+    import globvars as gv
+    ivalis = {}  # dict of indices of intervals per interval type
+    ivalis_nms = {}
+    for itype in gv.gparams['intTypes']:
+        ivit = []
+        for i,interval in enumerate(intervals):
+            t1,t2,it = interval
+
+            if it == itype:
+                ivit += [i]
+        if len(ivit) > 0:
+            ivalis[itype] = ivit
+
+        ivit = []
+        if use_new_intervals:
+            for i,interval in enumerate(intervals_nms):
+                t1,t2,it = interval
+
+                if it == itype:
+                    ivit += [i]
+            if len(ivit) > 0:
+                ivalis_nms[itype] = ivit
+
+    #print('Main tremor side here is ',maintremside)
+
+    #display('all intervals:' ,intervals)
+    #display('intervals by type:', ivalis )
+
+    # convert intervals to MNE type
+    #annotation_desc_2_event_id = {'middle_full':0, 'no_tremor':1, 'endseg':2}
+    #annotation_desc_2_event_id = {'middle_full':0, 'no_tremor':1}
+
+    side2ivls = {maintremside:intervals}
+    if use_new_intervals:
+        side2ivls[nonmaintremside] = intervals_nms
+
+    oldIntName2annDescr = {'middle_full': 'trem_{}' ,
+                        'no_tremor':'notrem_{}',
+                        'unk_activity_full': 'undef_{}'}
+
+    onset = []
+    duration = []
+    description = []
+    for side_hand in side2ivls:
+        intervals_cur = side2ivls[side_hand]
+        for ivl in intervals_cur:
+            curdescr = ivl[2]
+            if curdescr not in oldIntName2annDescr:
+                continue
+            onset += [ ivl[0]  ]
+            duration += [ ivl[1]-ivl[0] ]
+            newDescrName = oldIntName2annDescr[curdescr].format(side_hand[0].upper())
+            description += [ newDescrName ]
+
+    import mne
+    anns_cnv = mne.Annotations(onset, duration, description)
+
+    if return_artifacts:
+        r =  anns_cnv, side2ivls , artif
+    else:
+        r =  anns_cnv, side2ivls
+    return r
+
+def getIntervalsTotalLens(ann, include_unlabeled = False, times=None):
+    if isinstance(ann,dict):
+        ivalis = ann
+    else:
+        ivalis = ann2ivalDict(ann)
+
+    lens = {}
+    totlen_labeled = {'_L':0, '_R':0 }
+    for it in ivalis:
+        lens[it] = 0
+        for ival in ivalis[it]:
+            a,b,it_ = ival
+            len_cur = b-a
+            lens[it] += len_cur
+            for sidestr in totlen_labeled:
+                if it.find(sidestr) >= 0:
+                    totlen_labeled[sidestr] += len_cur
+
+    if include_unlabeled:
+        assert times is not None
+        for sidestr in totlen_labeled:
+            lens['nolabel'+sidestr] = times[-1] - times[0] - totlen_labeled[sidestr]
+
+    return lens
+
+def setArtifNaN(X, ivalis_artif_tb_indarrays_merged, feat_names):
+    assert isinstance(X,np.ndarray)
+    assert isinstance(ivalis_artif_tb_indarrays_merged, dict)
+    assert isinstance(feat_names[0], str)
+    Xout = X.copy()
+    for interval_name in ivalis_artif_tb_indarrays_merged:
+        templ = 'BAD_(.+)'
+        matchres = re.match(templ,interval_name).groups()
+        assert len(matchres) > 0
+        artif_type = matchres[0]
+        mode_MEG_artif = False
+        mode_LFP_artif = False
+        if artif_type.find('MEG') >= 0:
+            mode_MEG_artif = True
+            #print('MEG',artif_type)
+        elif artif_type.find('LFP') >= 0:
+            mode_LFP_artif = True
+            artif_chn = artif_type
+            #print('LFP',artif_type)
+        interval_bins = ivalis_artif_tb_indarrays_merged[interval_name]
+
+        for feati,featn in enumerate(feat_names):
+            #print(featn)
+            if mode_LFP_artif and featn.find(artif_chn) >= 0:
+                Xout[interval_bins,feati] = np.nan
+                #print('fd')
+            elif mode_MEG_artif and featn.find('msrc') >= 0:
+                Xout[interval_bins,feati] = np.nan
+                #print('fd')
+
+    return Xout

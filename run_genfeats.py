@@ -79,7 +79,7 @@ extend = 3  # for plotting
 
 load_TFR                     = 0
 save_TFR                     = 0  # maybe better no to waste space, since I change params often
-use_existing_TFR             = 0
+use_existing_TFR             = 1
 load_feat                    = 0
 save_feat                    = 1
 
@@ -240,26 +240,24 @@ nedgeBins_highres = int( windowsz_highres * 1.5 )
 
 percentileOffset = 25
 
+import globvars as gv
 ################################
 
 if show_plots:
-    pdf= PdfPages(  '{}_feat_plots{}_side{}_LFP{}_{}_nmod{}_nfeattp{}.pdf'.format(
+    pdf= PdfPages( os.path.join(gv.dir_fig,  '{}_feat_plots{}_side{}_LFP{}_{}_nmod{}_nfeattp{}.pdf'.format(
         rawname_,show_plots, use_main_tremorside, use_main_LFP_chan, bands_only,
-        len(data_modalities),len(features_to_use)   ))
+        len(data_modalities),len(features_to_use)   )) )
 
 #############################################################
 
 
 
- # get info about bad MEG channels (from separate file)
+# get info about bad MEG channels (from separate file)
 with open('subj_info.json') as info_json:
-        #raise TypeError
-
     #json.dumps({'value': numpy.int64(42)}, default=convert)
     gen_subj_info = json.load(info_json)
 
 subj,medcond,task  = utils.getParamsFromRawname(rawname_)
- # for current raw
 maintremside = gen_subj_info[subj]['tremor_side']
 mainLFPchan = gen_subj_info[subj]['lfpchan_used_in_paper']
 tremfreq_Jan = gen_subj_info[subj]['tremfreq']
@@ -287,6 +285,7 @@ fband_names_fine_inc_HFO = fband_names_fine + ['HFO1', 'HFO2', 'HFO3']
 if subsample_type == 'half':
     skip = (1 * sfreq) // 2
 elif subsample_type == 'desiredNpts':
+    ntimebins = None
     skip = ntimebins // desiredNpts
 elif subsample_type == 'prescribedSkip':
     skip = prescribedSkip
@@ -296,6 +295,7 @@ skip_highres = sfreq_highres //   (sfreq  // skip)
 
 dat_pri = []
 times_pri = []
+times_highres_pri = []
 dats_lfp_highres_pri = []
 ivalis_pri = []
 
@@ -404,6 +404,7 @@ for rawind in range(len(rawnames) ):
 
     dat_pri += [dat]
     times_pri += [times]
+    times_highres_pri += [raw_lfp_highres.times]
 
     if use_lfp_HFO:
         dats_lfp_highres = []
@@ -457,24 +458,61 @@ times = np.hstack(times_pri_shifted)
 print('Total raw data length for {} datasets is {} bins (={}s)'.format(len(rawnames), len(times),
                                                                        len(times) // sfreq ) )
 
+fname_full_LFPartif = os.path.join(gv.data_dir, '{}_ann_LFPartif.txt'.format(rawname_) )
+fname_full_MEGartif = os.path.join(gv.data_dir, '{}_ann_MEGartif.txt'.format(rawname_) )
+
+################
+
+anns_artif, anns_artif_pri, times2, dataset_bounds = utsne.concatArtif(rawnames,times_pri)
+ivalis_artif = utils.ann2ivalDict(anns_artif)
+ivalis_artif_tb, ivalis_artif_tb_indarrays = utsne.getAnnBins(ivalis_artif, times,
+                                                            nedgeBins, sfreq, skip, 1, dataset_bounds)
+ivalis_artif_tb_indarrays_merged = utsne.mergeAnnBinArrays(ivalis_artif_tb_indarrays)
+
+dat_artif_nan  = utils.setArtifNaN(dat.T, ivalis_artif_tb_indarrays_merged, subfeature_order).T
+
+##
+
+anns_artif, anns_artif_pri, times2_highres, dataset_bounds_highres = utsne.concatArtif(rawnames,times_highres_pri)
+ivalis_artif = utils.ann2ivalDict(anns_artif)
+ivalis_artif_highres_tb, ivalis_artif_highres_tb_indarrays = utsne.getAnnBins(ivalis_artif, times2_highres,
+                                                            nedgeBins_highres, sfreq_highres, skip_highres,
+                                                                              1, dataset_bounds_highres)
+ivalis_artif_highres_tb_indarrays_merged = utsne.mergeAnnBinArrays(ivalis_artif_highres_tb_indarrays)
+
+dat_lfp_highres_artif_nan  = \
+    utils.setArtifNaN(dat_lfp_highres.T, ivalis_artif_highres_tb_indarrays_merged,
+                      subfeature_order_lfp_highres).T
+
 ############# scale raw data
+
 
 # scale channel data separately
 dat_scaled = np.zeros(dat.shape)
 for i in range( dat.shape[0] ):
-    inp = dat[i][:,None]
+    #inp = dat[i][:,None]
+
+    inp = dat_artif_nan[i]
+    inp = inp[ np.logical_not(np.isnan(inp ) ) ] [:,None]
+    inp_transform = dat[i][:,None]
+    # TODO: fit to data without aftifacts, apply to whole
     scaler = RobustScaler(quantile_range=(percentileOffset,100-percentileOffset), with_centering=1)
     scaler.fit(inp)
-    outd = scaler.transform(inp)
+    outd = scaler.transform(inp_transform)
     dat_scaled[i,:] = outd[:,0]
 
 if use_lfp_HFO:
     dat_lfp_highres_scaled = np.zeros(dat_lfp_highres.shape)
     for i in range( dat_lfp_highres.shape[0] ):
-        inp = dat_lfp_highres[i][:,None]
+        #inp = dat_lfp_highres[i][:,None]
+
+        inp = dat_lfp_highres_artif_nan[i]
+        inp = inp[ np.logical_not(np.isnan(inp ) ) ][:,None]
+        inp_transform = dat_lfp_highres[i][:,None]
+
         scaler = RobustScaler(quantile_range=(percentileOffset,100-percentileOffset), with_centering=1)
         scaler.fit(inp)
-        outd = scaler.transform(inp)
+        outd = scaler.transform(inp_transform)
         dat_lfp_highres_scaled[i,:] = outd[:,0]
 
 

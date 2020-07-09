@@ -1,5 +1,4 @@
 # resample data uing MNE
-
 import os
 import mne
 from mne.preprocessing import ICA
@@ -10,11 +9,14 @@ import json
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_pdf import PdfPages
 
+import utils_preproc as upre
 import matplotlib as mpl
+import globvars as gv
 mpl.use('Agg')
 
 subdir = ''
 # subdir = '/new'
+subdir_fig = '/preproc'
 
 if os.environ.get('DATA_DUSS') is not None:
     data_dir_input = os.path.expandvars('$DATA_DUSS') + subdir
@@ -22,6 +24,12 @@ if os.environ.get('DATA_DUSS') is not None:
 else:
     data_dir_input = '/home/demitau/data'   + subdir
     data_dir_output = '/home/demitau/data'
+
+if os.environ.get('OUTPUT_OSCBAGDIS') is not None:
+    dir_fig = os.path.expandvars('$OUTPUT_OSCBAGDIS')  + subdir_fig
+else:
+    dir_fig = '.' + subdir_fig
+
 
 fine_cal_file  = os.path.join(data_dir_input, 'sss_cal.dat')
 crosstalk_file = os.path.join(data_dir_input,  'ct_sparse.fif')
@@ -33,24 +41,28 @@ overwrite_res = 1
 read_resampled = 1
 
 do_notch = 1
-read_add_badchans = 1
+read_add_badchans = 1  # instead of recomputing
 do_SSS = 1
 do_SSP = 0
 do_ICA   = 1
 n_components_ICA = 0.95
 tSSS_duration = 10  # default is 10s
 frame_SSS = 'head'  # 'head'
+do_ICA_only = 1
 
 # mark few things as MEG artifacts
 MEG_thr_use_mean = 0
-MEG_artif_thr_mult = 2.5
+MEG_artif_thr_mult = 2.25 # before I used 2.5
+
+plot_ICA_prop = 1
+ICA_exclude_EOG = 0
+ICA_exclude_ECG = 1
 
 # mark many things as MEG artifacts
 #MEG_thr_use_mean = 1
 #MEG_artif_thr_mult = 3
 assert not (do_resample and read_resampled)
 assert (not do_SSS) or (not do_SSP)   # not both together!
-
 
 num_cores = mpr.cpu_count() - 1
 
@@ -68,14 +80,23 @@ subjinds = [1,2,3,4]
 subjinds = [2,3,4]
 subjinds = [4]
 
-subjinds = [1]
+#subjinds = [2,3,4]
+#subjinds = [5,6,7,8,9,10]
+subjinds = [8]
+subjinds = range(1,11)
+
+subjinds = [1,2,3]
 tasks = ['hold' , 'move', 'rest']
 medstates = ['on','off']
 
+# there is a small MEG artifact in the middle here
 #subjinds = [1]
-#tasks = ['hold', 'move' ]
+#tasks = ['hold' ]
+#medstates = ['off']
+
+#subjinds = [1]
+#tasks = ['move' ]
 #medstates = ['on']
-import utils_preproc as upre
 
 for subjind in subjinds:
     sis = '{:02d}'.format(subjind)
@@ -90,7 +111,6 @@ for subjind in subjinds:
             fname = fname_noext + '.mat'
             print('Reading {}'.format(fname) )
 
-            #raw_lfp_highres = upre.saveLFP_nonresampled(fname_noext, skip_if_exist = 1)
 
             addStr = ''
             if do_removeMEG:
@@ -119,6 +139,8 @@ for subjind in subjinds:
                 continue
             #else:
             #    print('Start processing {}'.format(fname_full) )
+            raw_lfp_highres = upre.saveLFP_nonresampled(fname_noext, skip_if_exist = 1)
+            #continue
 
             resfn = os.path.join(data_dir_output,fname_noext + addStr + '_raw.fif') # always to out dir
             #fname = 'S01_off_hold.mat'
@@ -128,10 +150,14 @@ for subjind in subjinds:
                 f.load_data()
             else:
                 #fname_full = os.path.join(data_dir_input,fname)
-
                 if os.path.exists(resfn) and not overwrite_res:
                     continue
-                f = mne.io.read_raw_fieldtrip(fname_full, None)
+                #f = mne.io.read_raw_fieldtrip(fname_full, None)
+                f = utils.read_raw_fieldtrip(fname_full, None)
+
+            upre.extractEMGData(f,fname_noext, skip_if_exist = 1)  #saves emg_rectconv
+
+            assert np.std( np.diff(f.times) ) < 1e-10  #we really want times to be equally spaced
 
             #reshuffle channels types (by default LFP and EMG types are determined wronng)
             # set types for some misc channels
@@ -210,7 +236,7 @@ for subjind in subjinds:
                 print('Start notch filtering!')
                 f.notch_filter(freqsToKill, n_jobs=num_cores)
 
-            if not do_removeMEG:
+            if not do_removeMEG and not do_ICA_only:
                 import mayavi
                 mod_info, infos = upre.readInfo(fname_noext, f)
                 radius, origin, _ = mne.bem.fit_sphere_to_headshape(mod_info, dig_kinds=('cardinal','hpi'))
@@ -219,8 +245,8 @@ for subjind in subjinds:
                 mne.viz.plot_alignment(
                     mod_info, eeg='projected', bem=sphere, src=src, dig=True,
                     surfaces=['brain', 'outer_skin'], coord_frame='meg', show_axes=True)
-                mayavi.mlab.savefig('{}_sensor_loc_vs_head.iv'.format(fname_noext) )
-                mayavi.mlab.savefig('{}_sensor_loc_vs_head.png'.format(fname_noext) )
+                mayavi.mlab.savefig(os.path.join(dir_fig,'{}_sensor_loc_vs_head.iv'.format(fname_noext) ) )
+                mayavi.mlab.savefig(os.path.join(dir_fig,'{}_sensor_loc_vs_head.png'.format(fname_noext)) )
                 mayavi.mlab.close()
 
                 f.info = mod_info
@@ -270,72 +296,46 @@ for subjind in subjinds:
                     f.apply_proj()
 
 
-
-            f.save(resfn,overwrite=True)
+            if do_ICA_only:
+                #f.save(resfn,overwrite=True)
+                f = mne.io.read_raw_fif(resfn, None)
+            else:
+                f.save(resfn,overwrite=True)
 
             if do_ICA:  # we don't want to apply ICA right away, I have to look at it first
                 addstr_ica = ''
                 icafname = '{}_{}resampled-ica.fif.gz'.format(fname_noext,addstr_ica)
                 icafname_full = os.path.join(data_dir_output,icafname)
 
+
                 filt_raw = f.copy()
                 filt_raw.load_data().filter(l_freq=1., h_freq=None)
 
                 #############################  Plot
-                raw_only_meg = filt_raw.copy()
-                raw_only_meg.pick_types(meg=True)
-                megdat = raw_only_meg.get_data()
+                anns, cvl_per_side = utils.findMEGartifacts(filt_raw , thr_mult = MEG_artif_thr_mult,
+                    thr_use_mean = MEG_thr_use_mean)
+                filt_raw.set_annotations(anns)
 
-                # pctshift = 25
-                # pcts = [pctshift, 100-pctshift]
-                # qs = np.percentile(megdat, pcts, axis=1)
-                import utils_tSNE as utsne
-                me, mn,mx = utsne.robustMean(megdat, axis=1, per_dim =1, ret_aux=1, q = .25)
-                megdat_scaled = ( megdat - me[:,None] ) / (mx-mn)[:,None]
-                megdat_sum = np.sum(np.abs(megdat_scaled),axis=0)
-                me_s, mn_s,mx_s = utsne.robustMean(megdat_sum, axis=None, per_dim =1, ret_aux=1, pos = 1)
+                filt_raw.annotations.save(os.path.join(data_dir_output, '{}_ann_MEGartif.txt'.format(fname_noext) ) )
+                print('Artif found ',anns)
 
-                if MEG_thr_use_mean:
-                    mask= megdat_sum > me_s * MEG_artif_thr_mult
-                else:
-                    mask= megdat_sum > mx_s * MEG_artif_thr_mult
-                _,ivals_meg_artif = utils.getIntervals(np.where(mask)[0] ,\
-                    include_short_spikes=1, endbin=len(mask), minlen=2, thr=0.01, inc=1,\
-                    extFactorL=0.1, extFactorR=0.1 )
-
-                print('MEG artifact intervals found ' ,ivals_meg_artif)
-
-                plt.figure(figsize=(14,4))
-                ax = plt.gca()
-                ax.plot(f.times,megdat_sum)
-                ax.axhline( me_s , c='r', ls=':')
-                ax.axhline( mx_s , c='purple', ls=':')
-                ax.axhline( me_s * MEG_artif_thr_mult , c='r', ls='--')
-                ax.axhline( mx_s * MEG_artif_thr_mult , c='purple', ls='--')
-
-                for ivl in ivals_meg_artif:
-                    b0,b1 = ivl
-                    filt_raw.annotations.append([b0],[b1-b0], ['BAD_MEG'])
-                    ax.axvline( f.times[b0] , c='r', ls=':')
-                    ax.axvline( f.times[b1] , c='r', ls=':')
-
-                filt_raw.annotations.save('{}_ann_MEGartif.txt'.format(fname_noext) )
-
-                plt.savefig('{}_MEG_deviation_before_ICA.pdf'.format(fname_noext) )
+                plt.savefig(os.path.join(dir_fig,('{}_MEG_deviation_before_ICA.png'.
+                                                  format(fname_noext) )), dpi=200)
                 plt.close()
                 #################################
-
-
-
                 ica = ICA(n_components = n_components_ICA, random_state=0).fit(filt_raw)
-
-                #eog_inds, scores = ica.find_bads_eog(raw)
-                eog_epochs = mne.preprocessing.create_eog_epochs(filt_raw)  # get single EOG trials
-                eog_inds, scores = ica.find_bads_eog(eog_epochs)
-                ica.exclude = eog_inds
+                ica.exclude = []
+                if ICA_exclude_EOG:
+                    #eog_inds, scores = ica.find_bads_eog(raw)
+                    eog_epochs = mne.preprocessing.create_eog_epochs(filt_raw)  # get single EOG trials
+                    eog_inds, scores = ica.find_bads_eog(eog_epochs)
+                    ica.exclude += eog_inds
+                if ICA_exclude_ECG:
+                    icacomp = ica.get_sources(filt_raw)
+                    ecg_inds,ratios,ecg_intervals = upre.getECGindsICAcomp(icacomp)
+                    ica.exclude += ecg_inds
 
                 ica.save(icafname_full)
-
 
                 nonexcluded = list(  set( range( ica.get_components().shape[1] ) ) - set(ica.exclude) )
                 #print( sorted(nonexcluded) )
@@ -346,12 +346,15 @@ for subjind in subjinds:
 
                 compinds =  range( ica.get_components().shape[1] )  #all components
                 #nr = len(compinds); nc = 2
-                with PdfPages('{}_ica_components_{}.pdf'.format(fname_noext,exclStr)) as pdf:
-                    figs = mne.viz.plot_ica_properties(ica,filt_raw,compinds,
-                                                    show=0, psd_args={'fmax':75} )
-                    for fig in figs:
-                        pdf.savefig(fig)
-                        plt.close()
+                if plot_ICA_prop:
+                    with PdfPages(os.path.join(dir_fig, '{}_ica_components_{}.pdf'.format(fname_noext,exclStr)) ) as pdf:
+                        filt_raw_tmp = filt_raw.copy()
+                        filt_raw_tmp.set_annotations(mne.Annotations([],[],[]) )
+                        figs = mne.viz.plot_ica_properties(ica,filt_raw_tmp,compinds,
+                                                        show=0, psd_args={'fmax':75} )
+                        for fig in figs:
+                            pdf.savefig(fig)
+                            plt.close()
                 plt.close('all')
 
                 xlim = [filt_raw.times[0],filt_raw.times[-1]]

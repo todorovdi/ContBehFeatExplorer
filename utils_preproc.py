@@ -60,7 +60,8 @@ def saveLFP_nonresampled(rawname_naked, f_highpass = 2, skip_if_exist = 1,
     fname_full = os.path.join(data_dir,fname)
     if not os.path.exists(fname_full):
         raise ValueError('wrong naked name' + rawname_naked )
-    raw = mne.io.read_raw_fieldtrip(fname_full, None)
+    #raw = mne.io.read_raw_fieldtrip(fname_full, None)
+    raw = read_raw_fieldtrip(fname_full, None)
     print('Orig sfreq is {}'.format(raw.info['sfreq'] ) )
 
     subraw = getSubRaw(rawname_naked, picks = ['LFP.*'], raw=raw )
@@ -165,17 +166,18 @@ def read_raw_fieldtrip(fname, info, data_name='data'):
     raw : instance of RawArray
         A Raw Object containing the loaded data.
     """
-    from ...externals.pymatreader.pymatreader import read_mat
+    #from ...externals.pymatreader.pymatreader import read_mat
+    from mne.externals.pymatreader.pymatreader import read_mat
+    from mne.io.fieldtrip.utils import _validate_ft_struct, _create_info
 
     ft_struct = read_mat(fname,
                          ignore_fields=['previous'],
                          variable_names=[data_name])
 
+    _validate_ft_struct(ft_struct)
     # load data and set ft_struct to the heading dictionary
     ft_struct = ft_struct[data_name]
 
-    from mne.utils import _validate_ft_struct, _create_info
-    _validate_ft_struct(ft_struct)
     info = _create_info(ft_struct, info)  # create info structure
     trial_struct = ft_struct['trial']
     if isinstance(trial_struct, list) and len(trial_struct) > 1:
@@ -193,7 +195,7 @@ def read_raw_fieldtrip(fname, info, data_name='data'):
         raise RuntimeError('The data you are trying to load does not seem to '
                            'be raw data')
 
-    raw = mne.RawArray(data, info)  # create an MNE RawArray
+    raw = mne.io.RawArray(data, info)  # create an MNE RawArray
     return raw
 
 def getCompInfl(ica,sources, comp_inds = None):
@@ -335,6 +337,107 @@ def readInfo(rawname, raw, sis=[1,2], check_info_diff = 1, bandpass_info=0 ):
 
     return mod_info, infos
 
+def extractEMGData(raw, rawname_=None, skip_if_exist = 1, tremfreq = 9):
+    import globvars as gv
+    raw.info['bads'] = []
+
+    chis = mne.pick_channels_regexp(raw.ch_names, 'EMG.*old')
+    restr_names = np.array( raw.ch_names )[chis]
+
+    emgonly = raw.copy()
+    emgonly.load_data()
+    emgonly.pick_channels(restr_names.tolist())
+    emgonly_unfilt = emgonly.copy()
+    print(emgonly.ch_names)
+    #help(emgonly.filter)
+
+    y = {}
+    for chname in emgonly.ch_names:
+        y[chname] = 'eeg'
+    emgonly.set_channel_types(y)
+
+    emgonly.filter(l_freq=10, h_freq=None, picks='all')
+
+    sfreq = raw.info['sfreq']
+    windowsz = int( sfreq / tremfreq )
+    print( 'wind size is {} s = {} bins'.format(windowsz/emgonly.info['sfreq'], windowsz ))
+
+    rectconvraw = emgonly.copy()
+    #hilbraw.plot(duration=2)
+
+    rectconvraw.apply_function( np.abs)
+    rectconvraw.apply_function( lambda x: np.convolve(x,  np.ones(windowsz),  mode='same') )
+    #rectconvraw.apply_function( lambda x: x / np.quantile(x,0.75) )
+
+    rectconvraw.apply_function( lambda x: x / 100 ) # 100 is just empirical so that I don't have to scale the plot
+
+    if rawname_ is not None:
+        rectconv_fname_full = os.path.join(gv.data_dir, '{}_emg_rectconv.fif'.format(rawname_) )
+        if not (skip_if_exist and os.path.exists(rectconv_fname_full) ):
+            rectconvraw.save(rectconv_fname_full, overwrite=1)
+
+    return rectconvraw
+
+def getECGindsICAcomp(icacomp):
+    sfreq = int(icacomp.info['sfreq'])
+    normal_hr  = [55,105]  # heart rate bounds, Mayo clinic says 60 to 100
+    mult = 1.25  # smaller give stricter rule
+    ecg_compinds = []
+    ecg_ratio_thr = 6
+    rmax = 0
+    ratios = []
+    for i in range(len(icacomp.ch_names)):
+        comp_ecg_test,times = icacomp[i]
+        #r_ecg_ica_test = mne.preprocessing.ica_find_ecg_events(filt_raw,comp_ecg_test)
+        da = np.abs(comp_ecg_test[0])
+        thr = (normal_hr[1]/60) * mult
+        qq = np.percentile(da, [ thr, 100-thr, 50 ] )
+        mask = da > qq[1]
+        bis = np.where(mask)[0]
+        pl = False
+        r = (qq[1] - qq[2]) / qq[2]
+        ratios += [r]
+        rmax = max(rmax, r)
+        if r < ecg_ratio_thr:
+            continue
+
+    strog_ratio_inds = np.where( ratios > ( np.max(ratios) + np.min(ratios) )  /2  )[0]
+    nstrong_ratios = len(strog_ratio_inds)
+    print('nstrong_ratios = ', nstrong_ratios)
+
+    ncomp_test_for_ecg = 3
+
+    import utils
+    ecg_evts_all = []
+    for i in np.argsort(ratios)[::-1][:ncomp_test_for_ecg]:
+        comp_ecg_test,times = icacomp[i]
+        #r_ecg_ica_test = mne.preprocessing.ica_find_ecg_events(filt_raw,comp_ecg_test)
+        da = np.abs(comp_ecg_test[0])
+        thr = (normal_hr[1]/60) * mult
+        qq = np.percentile(da, [ thr, 100-thr, 50 ] )
+        mask = da > qq[1]
+        bis = np.where(mask)[0]
+
+        if i > 8:
+            pl = 0
+        cvl, ecg_evts  = utils.getIntervals(bis, width=5, thr=1e-5, percentthr=0.95,
+                                      inc=5, minlen=2,
+                           extFactorL=1e-2, extFactorR=1e-2, endbin = len(mask),
+                           include_short_spikes=1, min_dist_between=50, printLog=pl,
+                                     percent_check_window_width = sfreq//10)
+
+        nevents = len( ecg_evts )
+        #nevents = r_ecg_ica_test.shape[0]
+
+        event_rate_min = 60 * nevents / (icacomp.times[-1] - icacomp.times[0])
+        print('ICA comp inds {:2}, ratio={:.2f} event rate {:.2f}'.format(i,ratios[i],event_rate_min) )
+        if  event_rate_min >= normal_hr[0]  and event_rate_min <= normal_hr[1]:
+            ecg_compinds += [i]
+            ecg_evts_all += [ecg_evts]
+    return ecg_compinds, ratios, ecg_evts_all
+
+
+    #rectconvraw_perside[side] = tmp
 
 #Coord frames:  1  -- device , 4 -- head,
 

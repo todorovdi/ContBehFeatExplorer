@@ -16,6 +16,7 @@ from sklearn.preprocessing import RobustScaler
 from sklearn.manifold import TSNE
 from sklearn.decomposition import PCA
 
+import globvars as gv
 import utils
 import utils_tSNE as utsne
 import utils_preproc as upre
@@ -59,6 +60,9 @@ fbands_to_use = fband_names_fine_inc_HFO
 
 prefix = ''
 
+do_impute_artifacts = 1
+do_outliers_discard = 1
+
 load_only = 0
 do_LDA = 1
 n_feats = 609  # this actually depends on the dataset which may have some channels bad :(
@@ -70,6 +74,7 @@ if sys.argv[0].find('ipykernel_launcher') >= 0:
     effargv = sys.argv[3:]  # to skip first three
 
 print(effargv)
+n_feats_set_explicitly  = False
 
 helpstr = 'Usage example\nrun_PCA.py --rawnames <rawname_naked1,rawnames_naked2> '
 opts, args = getopt.getopt(effargv,"hr:n:s:w:p:",
@@ -86,6 +91,7 @@ for opt, arg in opts:
         n_channels = int(arg)
     elif opt == "--n_feats":
         n_feats = int(arg)
+        n_feats_set_explicitly = True
     elif opt == "--mods":
         data_modalities = arg.split(',')
     elif opt == "--skip_feat":
@@ -132,8 +138,6 @@ print('nPCA_comp = ',nPCA_comp)
 ############################
 
 with open('subj_info.json') as info_json:
-        #raise TypeError
-
     #json.dumps({'value': numpy.int64(42)}, default=convert)
     gen_subj_info = json.load(info_json)
 
@@ -149,6 +153,10 @@ feat_fnames = []
 feat_file_pri = []
 Xtimes_pri = []
 for rawname_ in rawnames_for_PCA:
+    subj,medcond,task  = utils.getParamsFromRawname(rawname_)
+    #8,9 -- more LFP chanenls
+    if subj in ['S08', 'S09' ] and not n_feats_set_explicitly:
+        n_feats #= some special number
 
     a = '{}_feats_{}chs_nfeats{}_skip{}_wsz{}.npz'.\
         format(rawname_,n_channels, n_feats, skip, windowsz)
@@ -171,7 +179,6 @@ for rawname_ in rawnames_for_PCA:
 
     Xtimes_pri += [Xtimes]
 
-    subj,medcond,task  = utils.getParamsFromRawname(rawname_)
     tasks += [task]
 
     mainLFPchan = gen_subj_info[subj]['lfpchan_used_in_paper']
@@ -273,16 +280,54 @@ for rawname_ in rawnames_for_PCA:
 
 Xconcat = np.concatenate(Xs,axis=0)
 
-out_bininds, qvmult, discard_ratio = \
-    utsne.findOutlierLimitDiscard(Xconcat,discard=discard,qshift=1e-2)
-good_inds = np.setdiff1d( np.arange(Xconcat.shape[0] ), out_bininds)
+if do_outliers_discard:
+    out_bininds, qvmult, discard_ratio = \
+        utsne.findOutlierLimitDiscard(Xconcat,discard=discard,qshift=1e-2)
+    good_inds = np.setdiff1d( np.arange(Xconcat.shape[0] ), out_bininds)
+else:
+    good_inds = np.arange(Xconcat.shape[0])
 
 anns, anns_pri, Xtimes, dataset_bounds = utsne.concatAnns(rawnames_for_PCA, Xtimes_pri)
 ivalis = utils.ann2ivalDict(anns)
 ivalis_tb, ivalis_tb_indarrays = utsne.getAnnBins(ivalis, Xtimes, nedgeBins, sfreq, skip, windowsz, dataset_bounds)
-ivalis_tb_indarrays_merged = utsne.mergeAnnBinArras(ivalis_tb_indarrays)
-all_interval_inds = np.hstack( [inds for inds in ivalis_tb_indarrays_merged.values()] )
+ivalis_tb_indarrays_merged = utsne.mergeAnnBinArrays(ivalis_tb_indarrays)
+
+if do_impute_artifacts:
+    suffixes = []
+    if 'LFP' in data_modalities:
+        suffixes +=  ['_ann_LFPartif']
+    if 'msrc' in data_modalities:
+        suffixes += ['_ann_MEGartif']
+    anns_artif, anns_artif_pri, _, _ = utsne.concatAnns(rawnames_for_PCA,Xtimes_pri, suffixes)
+    ivalis_artif = utils.ann2ivalDict(anns_artif)
+    ivalis_artif_tb, ivalis_artif_tb_indarrays = utsne.getAnnBins(ivalis_artif, Xtimes,
+                                                                nedgeBins, sfreq, skip, windowsz, dataset_bounds)
+    ivalis_artif_tb_indarrays_merged = utsne.mergeAnnBinArrays(ivalis_artif_tb_indarrays)
+
+    Xconcat_artif_nan  = utils.setArtifNaN(Xconcat, ivalis_artif_tb_indarrays_merged, feature_names_pri[0])
+    num_nans = np.sum(np.isnan(Xconcat_artif_nan), axis=0)
+    print('Max artifact NaN percentage is {:.2f}%'.format(100 * np.max(num_nans)/Xconcat_artif_nan.shape[0] ) )
+
+    from sklearn.impute import SimpleImputer
+    imp_mean = SimpleImputer(missing_values=np.nan, strategy='constant', fill_value=0.)
+    imp_mean.fit(Xconcat_artif_nan)
+    Xconcat_imputed = imp_mean.transform(Xconcat_artif_nan)
+else:
+    Xconcat_imputed = Xconcat
+
+lst =  [inds for inds in ivalis_tb_indarrays_merged.values()]
+all_interval_inds = np.hstack(lst  )
 unset_inds = np.setdiff1d(np.arange(len(Xtimes)), all_interval_inds)
+
+# this is the most bruteforce way when I join all artifacts
+lst2 =  [inds for inds in ivalis_artif_tb_indarrays_merged.values()]
+if len(lst):
+    all_interval_artif_inds = np.hstack(lst2  )
+else:
+    all_interval_artif_inds = np.array([])
+
+#sys.exit(0)
+#unset_inds = np.setdiff1d(unset_inds, all_interval_artif_inds)
 
 remove_unlabeled = 1
 if remove_unlabeled:
@@ -294,7 +339,7 @@ else:
     print('Warning not removing unlabeled before PCA')
 
 print('Outliers selection result: qvmult={:.3f}, len(out_bininds)={} of {} = {:.3f}s, discard_ratio={:.3f} %'.
-    format(qvmult, len(out_bininds), Xconcat.shape[0],
+    format(qvmult, len(out_bininds), Xconcat_imputed.shape[0],
            len(out_bininds)/sfreq,  100 * discard_ratio ) )
 
 if load_only:
@@ -302,11 +347,11 @@ if load_only:
     sys.exit(0)
 
 
-print('Input PCA dimension ', (len(good_inds),Xconcat.shape[1]) )
+print('Input PCA dimension ', (len(good_inds),Xconcat_imputed.shape[1]) )
 pca = PCA(n_components=nPCA_comp)
-Xconcat_good = Xconcat[good_inds]
+Xconcat_good = Xconcat_imputed[good_inds]
 pca.fit(Xconcat_good )   # fit to not-outlier data
-pcapts = pca.transform(Xconcat)  # transform outliers as well
+pcapts = pca.transform(Xconcat_imputed)  # transform outliers as well
 
 print('Output PCA dimension {}, total explained variance proportion {}'.
       format( pcapts.shape[1] , np.sum(pca.explained_variance_ratio_) ) )
@@ -333,7 +378,7 @@ if do_LDA:
     int_types_basic = ['trem', 'notrem', 'hold', 'move']
 
     defclass = 0
-    class_labels = np.repeat(defclass,len(Xconcat))
+    class_labels = np.repeat(defclass,len(Xconcat_imputed))
     assert defclass == 0
 
     old_ver = 0
@@ -356,12 +401,19 @@ if do_LDA:
                 #print(i,len(bininds), bininds[0], bininds[-1])
                 class_labels[ bininds ] = i + 1
 
+    revdict = {}
+    # set class label for all basic interval types
     for itb in int_types_basic:
         for side in sides_hand:
             class_name = '{}_{}'.format(itb,side)
-            for bininds in ivalis_tb_indarrays[class_name]:
+            for bininds in ivalis_tb_indarrays.get(class_name,[] ):
                 #print(i,len(bininds), bininds[0], bininds[-1])
-                class_labels[ bininds ] = class_ids[class_name]
+                cid = class_ids[class_name]
+                class_labels[ bininds ] = cid
+                if cid not in revdict:
+                    revdict[cid] = class_name
+                elif revdict[cid].find(class_name) < 0:
+                    revdict[cid] += '&{}'.format(class_name)
 
 
     class_labels_good = class_labels[good_inds]
@@ -386,16 +438,16 @@ if do_LDA:
     lda.fit(Xconcat_good, class_labels_good)
 
     print('LDA var explained = ', lda.explained_variance_ratio_)
-    print('LDA priors ', list(zip(classes,lda.priors_) ) )
+    print('LDA priors ', list(zip( [revdict[cid] for cid in lda.classes_],lda.priors_) ) )
 
-    X_LDA = lda.transform(Xconcat)  # we transform all points, even bad and ulabeled ones. Transform is done using scalings
+    X_LDA = lda.transform(Xconcat_imputed)  # we transform all points, even bad and ulabeled ones. Transform is done using scalings
 
     class_to_check = 'trem_{}'.format(mts_letter)
     if old_ver:
         class_ind = classes.index(class_to_check) + 1
     else:
         class_ind = class_ids[class_to_check]
-    sens,spec = utsne.getLDApredPower(lda,Xconcat, class_labels, class_ind)
+    sens,spec = utsne.getLDApredPower(lda,Xconcat_imputed, class_labels, class_ind)
     print('--!! LDA on training data, identifying {}: sens = {:.3f};  spec = {:.3f}'.format(class_to_check,sens,spec))
 else:
     lda = None
@@ -422,7 +474,7 @@ for i,rawname_ in enumerate(rawnames_for_PCA):
     # as well
     out_name_templ = '_{}PCA_nr{}_{}chs_nfeats{}_pcadim{}_skip{}_wsz{}'
     out_name = (out_name_templ ).\
-        format(prefix, len(rawnames_for_PCA), n_channels, Xconcat.shape[1],
+        format(prefix, len(rawnames_for_PCA), n_channels, Xconcat_imputed.shape[1],
                pcapts.shape[1], skip, windowsz)
     fname_PCA_full = os.path.join( data_dir, '{}{}.npz'.format(rawname_,out_name))
     sl = slice(indst,indend)
@@ -479,7 +531,7 @@ if show_plots:
         format(int(use_main_LFP_chan), int(use_lfp_HFO), str_mods, str_feats)
     #a = out_name_templ.\
     #    format(rn_str,n_channels, Xconcat.shape[1], pcapts.shape[1], skip, windowsz)
-    pdf= PdfPages(out_name_plot + '.pdf')
+    pdf= PdfPages(os.path.join(gv.dir_fig,out_name_plot + '.pdf' ))
     #pdf= PdfPages(   )
 
 

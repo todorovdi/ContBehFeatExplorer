@@ -453,17 +453,32 @@ for feat_name in feat_dict:
     print(feat_name, curfeat['data'].shape)
 
 
+Xtimes = (nedgeBins / sfreq) + np.arange(compl[:,nedgeBins//skip:-nedgeBins//skip].shape[1] ) * ( skip / sfreq )
+
+#anns_artif, anns_artif_pri, times2, dataset_bounds = utsne.concatArtif(rawnames,times_pri)
+#ivalis_artif = utils.ann2ivalDict(anns_artif)
+ivalis_artif_tb, ivalis_artif_tb_indarrays = utsne.getAnnBins(ivalis_artif, Xtimes,
+                                                            (nedgeBins / sfreq),
+                                                              sfreq, skip, windowsz, dataset_bounds)
+ivalis_artif_tb_indarrays_merged = utsne.mergeAnnBinArrays(ivalis_artif_tb_indarrays)
 
 
 #################################  Scale features
 for feat_name in feat_dict:
     curfeat = feat_dict[feat_name]
     inp = curfeat['data']
+
+    sfo = curfeat['names']
+    subfeats = ['{}_{}'.format(feat_name,sf) for sf in sfo]
+
+    feat_dat_artif_nan  = utils.setArtifNaN(inp.T, ivalis_artif_tb_indarrays_merged, subfeats).T
+
     centering = curfeat.get('centering', True)
     pct = curfeat['pct']
     if pct is not None:
+        # TODO: fit to out-of-artifacts, apply to all
         scaler = RobustScaler(quantile_range=pct, with_centering=centering)
-        scaler.fit(inp.T)
+        scaler.fit(feat_dat_artif_nan.T)
         outd = scaler.transform(inp.T)
         curfeat['data'] = outd.T
         cnt = scaler.center_
@@ -520,6 +535,8 @@ for feat_name in features_to_use:
     feat_order += [feat_name]
 X = np.vstack(X).T
 print(feat_order, X.shape)
+
+assert X.shape[0] == len(Xtimes)
 
 
 feature_names_all_ = []
