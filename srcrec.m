@@ -108,6 +108,7 @@ function output = srcrec(subjstr,datall,hdmf,roi,bads,S,srs,mask,use_DICS)
   %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
   fbands = [ [2 10];   [10.5 30];    [30.5 100]  ];
   fbands = [ [4 10];   [10 30];    [30 -1];  [-1 -1]  ];
+  fbands = [ [-1 -1]  ];
   %fbands = [ [2 10];  ];
   %fbands = [ [10.5 30];  ];
     
@@ -130,7 +131,7 @@ function output = srcrec(subjstr,datall,hdmf,roi,bads,S,srs,mask,use_DICS)
     cfg.pad = 'nextpow2';
 
     if do_srcrec
-      load_prev_freqdata = 1;
+      load_prev_freqdata = 0;
 
       data_dir = getenv("DATA_DUSS");
       fn = strcat(data_dir, '/tmp_freq_data.mat' ); 

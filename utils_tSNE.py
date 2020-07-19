@@ -218,7 +218,7 @@ def plotIntervalData(dat, chan_names, interval, times = None, raw=None, plot_typ
     #inds = raw.time_as_index(
     #    [start - extend, start, start+extend, end-extend, end, end+extend])
     prestarti, starti, poststarti, preendi, endi, postendi = inds
-    print('Interval {} duration is {}'.format(int_type, end-start) )
+    print('Interval {} duration is {:.2f}'.format(int_type, end-start) )
 
     if times is None:
         times = np.arange( dat.shape[1] )  / sfreq
@@ -849,7 +849,7 @@ def prepColorsMarkers(side_letter, anns, Xtimes,
 
 def plotPCA(pcapts,pca, nPCAcomponents_to_plot,feature_names_all, colors, markers,
             mrk, mrknames, color_per_int_type, task,
-            pdf=None,neutcolor='grey', nfeats_show = 50, q = 0.8):
+            pdf=None,neutcolor='grey', nfeats_show = 50, q = 0.8, title_suffix = ''):
 
 
     if hasattr(pca, 'components_'):
@@ -860,19 +860,26 @@ def plotPCA(pcapts,pca, nPCAcomponents_to_plot,feature_names_all, colors, marker
         components = pca.scalings_.T
     else:
         pt_type = 'unk'
+        components = None
 
     toshow_decide_0th_component = 0
 
     ##################  Plot PCA
     nc = min(nPCAcomponents_to_plot, pcapts.shape[1] );
+    #if nc == 1 and pcapts.shape[1] == 2:
+    #    nc == 2
     nr = 1; ww = 5; hh = 4
+    if nc == 1:
+        ww = 12
     fig,axs = plt.subplots(nrows=nr, ncols=nc, figsize=(nc*ww,nr*hh))
     if not isinstance(axs,np.ndarray):
         axs = np.array([axs])
     ii = 0
     while ii < nc:
         indx = ii
-        indy = (ii+1 ) % nc
+        indy = ii+1
+        if indy >= pcapts.shape[1]:
+            indy = 0
         ax = axs[ii];  ii+=1
         plotMultiMarker(ax, pcapts[:,indx], pcapts[:,indy], c=colors, m = markers, alpha=0.5);
         ax.set_xlabel('{} comp {}'.format(pt_type,indx) )
@@ -881,13 +888,15 @@ def plotPCA(pcapts,pca, nPCAcomponents_to_plot,feature_names_all, colors, marker
     legend_elements = prepareLegendElements(mrk,mrknames,color_per_int_type, task )
 
     plt.legend(handles=legend_elements)
-    plt.suptitle(pt_type)
+    plt.suptitle(pt_type + title_suffix)
     #plt.show()
     if pdf is not None:
         pdf.savefig()
         plt.close()
 
     ######################### Plot PCA components structure
+    if components is None:
+        return None
     dd = np.abs(components[0] )
 
     nr = min(nPCAcomponents_to_plot, pcapts.shape[1] )
@@ -1203,6 +1212,7 @@ def getAnnBins(ivalis,Xtimes_almost,nedgeBins, sfreq,totskip, windowsz, dataset_
                 bnd0 = int( min(maxind, (st * sfreq   + windowsz) // totskip -1   ) )
             if drb - end <= windowsz / sfreq:
                 bnd1 = int(drb * sfreq) // totskip
+                bnd1 = min(bnd1, maxind)     # this is important to have otherwise we have err for S04
             else:
                 bnd1 = int( min(maxind, (end *sfreq   + windowsz) // totskip -1   ))
 
@@ -1236,17 +1246,27 @@ def mergeAnnBinArrays(ivalis_tb_indarrays):
     return ivalis_tb_indarrays_merged
 
 
-def getLDApredPower(lda,X,class_labels,class_ind):
+def getLDApredPower(lda,X,class_labels,class_ind, printLog = False):
+    '''
+    LDA perf in detecting class_ind
+    - class_ind  is an interger class id
+    '''
     true_ind = class_ind
-    mask = class_labels == true_ind
+    mask = (class_labels == true_ind)
     mask_inv = np.logical_not(mask)
 
     X_P = X[mask]
     r = lda.predict(X_P)
-    sens = sum(r == true_ind) / len(r)
+    s = sum(r == true_ind)
+    sens = s / len(r)
 
     X_N = X[mask_inv]
-    r = lda.predict(X_N)
-    spec = sum(r != true_ind) / len(r)
+    rr = lda.predict(X_N)
+    ss = sum(rr != true_ind)
+    spec = ss / len(rr)
+
+    if printLog:
+        print('True pos {}, all pos {}'.format(s, len(r)) )
+        print('True neg {}, all neg {}'.format(ss, len(rr)) )
 
     return sens,spec

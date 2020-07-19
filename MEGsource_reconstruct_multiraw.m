@@ -23,11 +23,11 @@ roi = {"Brodmann area 4","Brodmann area 6"};
 roi = {"HirschPt2011"};
 %roi = {"HirschPt2011,2013direct"}
 save_srcrec          = 1;
-remove_bad_channels = 1;
 
 use_DICS = 0;
 use_data_afterICA = 1;
 
+remove_bad_channels = 1 - use_data_afterICA;
 
 if 1 ~= exist("Info")
   load(strcat(data_dir,"/Info.mat") );

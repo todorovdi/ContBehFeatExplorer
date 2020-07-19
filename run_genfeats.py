@@ -10,6 +10,7 @@ import matplotlib as mpl
 import time
 import gc;
 import scipy.signal as sig
+import getopt
 
 import numpy as np
 from sklearn.preprocessing import RobustScaler
@@ -21,7 +22,8 @@ import utils_tSNE as utsne
 from matplotlib.backends.backend_pdf import PdfPages
 import utils_preproc as upre
 
-mpl.use('Agg')
+if sys.argv[0].find('ipykernel_launcher') < 0:
+    mpl.use('Agg')
 
 ############################
 
@@ -72,17 +74,19 @@ use_LFP_to_LFP = 0
 corr_time_lagged = []
 corr_time_lagged = [0.5, 1] # in window size fractions
 
-extend = 3  # for plotting
 
+#################### Exec control params
+src_type_to_use  = 'center' # or mean_td
 
-##########################  ploting params
-
+only_load_data               = 0
+#
 load_TFR                     = 0
 save_TFR                     = 0  # maybe better no to waste space, since I change params often
-use_existing_TFR             = 1
+use_existing_TFR             = 0
 load_feat                    = 0
 save_feat                    = 1
 
+##########################  ploting params
 show_plots                   = 0
 #
 do_plot_raw_stats            = 1 * show_plots
@@ -93,11 +97,11 @@ do_plot_raw_timecourse       = 1 * show_plots
 do_plot_feat_timecourse      = 0 * show_plots
 do_plot_feat_stats           = 1 * show_plots
 do_plot_CSD                  = 0 * show_plots
+extend = 3  # for plotting, in seconds
 
 fmax_raw_psd = 45
 
 ##############################
-import sys, getopt
 
 print('sys.argv is ',sys.argv)
 effargv = sys.argv[1:]  # to skip first
@@ -182,6 +186,7 @@ raws_lfp_highres = []
 raws_srconly = []
 raws_emg_rectconv = []
 
+
 for rawname_ in rawnames:
     print('!!!!!! current rawname --- ',rawname_)
 
@@ -201,7 +206,12 @@ for rawname_ in rawnames:
         sfreq_highres = raw_lfp_highres.info['sfreq']
         sfreq_highres = int(sfreq_highres)
 
-    newsrc_fname_full = os.path.join( data_dir, 'av_' + src_fname_noext + '.fif' )
+    if src_type_to_use == 'center':
+        newsrc_fname_full = os.path.join( data_dir, 'cnt_' + src_fname_noext + '.fif' )
+    elif src_type_to_use == 'mean_td':
+        newsrc_fname_full = os.path.join( data_dir, 'av_' + src_fname_noext + '.fif' )
+    else:
+        raise ValueError('Wrong src_type_to_use {}'.format(src_type_to_use) )
     raw_srconly =  mne.io.read_raw_fif(newsrc_fname_full, None)
 
     rectconv_fname_full = os.path.join(data_dir, '{}_emg_rectconv.fif'.format(rawname_) )
@@ -256,6 +266,7 @@ if show_plots:
 with open('subj_info.json') as info_json:
     #json.dumps({'value': numpy.int64(42)}, default=convert)
     gen_subj_info = json.load(info_json)
+    gv.gen_subj_info = gen_subj_info
 
 subj,medcond,task  = utils.getParamsFromRawname(rawname_)
 maintremside = gen_subj_info[subj]['tremor_side']
@@ -269,11 +280,11 @@ int_names = ['{}_{}'.format(task,mts_letter), 'trem_{}'.format(mts_letter), 'not
 
 ###########################################################
 
-fbands = {'tremor': [3,10], 'low_beta':[11,22], 'high_beta':[22,30],
-           'low_gamma':[30,60], 'high_gamma':[60,90],
-          'HFO1':[91,200], 'HFO2':[200,300], 'HFO3':[300,400],
-          'beta':[15,30],   'gamma':[30,100], 'HFO':[91,400]}
-
+fbands = gv.fbands
+#{'tremor': [3,10], 'low_beta':[11,22], 'high_beta':[22,30],
+#           'low_gamma':[30,60], 'high_gamma':[60,90],
+#          'HFO1':[91,200], 'HFO2':[200,300], 'HFO3':[300,400],
+#          'beta':[15,30],   'gamma':[30,100], 'HFO':[91,400]}
 
 
 fband_names_crude = ['tremor', 'beta', 'gamma']
@@ -300,6 +311,8 @@ dats_lfp_highres_pri = []
 ivalis_pri = []
 
 extdat_pri = []
+anns_pri = []
+raws_permod_pri = []
 
 for rawind in range(len(rawnames) ):
     rawname_ = rawnames[rawind]
@@ -308,6 +321,7 @@ for rawind in range(len(rawnames) ):
     anns_fn = rawname_ + '_anns.txt'
     anns_fn_full = os.path.join(data_dir, anns_fn)
     anns = mne.read_annotations(anns_fn_full)
+    anns_pri += [anns]
 
     ivalis_pri += [ utils.ann2ivalDict(anns) ]
 
@@ -324,13 +338,13 @@ for rawind in range(len(rawnames) ):
     raw_srconly.load_data()
     raw_lfp_highres.load_data()
 
-    sides = ['L', 'R'] # brain sides   # this is just for construction of data, we will restrict later
+    brain_sides = ['L', 'R'] # brain sides   # this is just for construction of data, we will restrict later
     hand_sides_all = ['L', 'R']  # hand sides
 
     raws_lfp_perside = {'L': raw_lfponly.copy(), 'R': raw_lfponly.copy() }
     raws_lfp_highres_perside = {'L': raw_lfp_highres.copy(), 'R': raw_lfp_highres.copy() }
     raws_srconly_perside = {'L': raw_srconly.copy(), 'R': raw_srconly.copy() }
-    for side in sides:
+    for side in brain_sides:
         chis = mne.pick_channels_regexp(raw_lfponly.ch_names, 'LFP{}.*'.format(side))
         chnames_lfp = [raw_lfponly.ch_names[chi] for chi in chis]
         if use_main_LFP_chan and mainLFPchan in chnames_lfp:
@@ -354,7 +368,7 @@ for rawind in range(len(rawnames) ):
     ####################  Load emg
 
 
-    EMG_per_hand = {'right':['EMG061_old', 'EMG062_old'], 'left':['EMG063_old', 'EMG064_old' ] }
+    EMG_per_hand = gv.EMG_per_hand
     if use_main_tremorside:
         chnames_emg = EMG_per_hand[maintremside]
     else:
@@ -367,6 +381,8 @@ for rawind in range(len(rawnames) ):
 
     ############# Concat
     raws_permod = {'LFP' : raws_lfp_perside, 'msrc' : raws_srconly_perside }
+    if only_load_data:
+        raws_permod_pri += [raws_permod]
     if use_main_tremorside:
         hand_sides = [mts_letter ]
     else:
@@ -422,12 +438,18 @@ for rawind in range(len(rawnames) ):
     dats_lfp_highres_pri += [dat_lfp_highres]
 
 
-    f = np.load( os.path.join(data_dir, '{}_ica_ecg.npz'.format(rawname_) ) )
-    ecg = f['ecg']
-    #ecg_normalized = (ecg - np.min(ecg) )/( np.max(ecg) - np.min(ecg) )
-    ecg_normalized = (ecg - np.mean(ecg) )/( np.quantile(ecg,0.93) - np.quantile(ecg,0.01) )
+    ecg_fname = os.path.join(data_dir, '{}_ica_ecg.npz'.format(rawname_) )
+    if os.path.exists( ecg_fname ):
+        f = np.load( ecg_fname )
+        ecg = f['ecg']
+        #ecg_normalized = (ecg - np.min(ecg) )/( np.max(ecg) - np.min(ecg) )
+        ecg_normalized = (ecg - np.mean(ecg) )/( np.quantile(ecg,0.93) - np.quantile(ecg,0.01) )
+    else:
+        ecg = np.zeros( len(times) )
+        ecg_normalized = ecg
 
     extdat_pri += [ np.vstack( [ecg, ecg_normalized] ) ]
+
 
 extnames = ['ecg'] + chnames_emg
 extdat = np.hstack( extdat_pri )
@@ -484,6 +506,9 @@ dat_lfp_highres_artif_nan  = \
     utils.setArtifNaN(dat_lfp_highres.T, ivalis_artif_highres_tb_indarrays_merged,
                       subfeature_order_lfp_highres).T
 
+
+if only_load_data:
+    sys.exit(0)
 ############# scale raw data
 
 
@@ -675,7 +700,9 @@ if do_plot_feat_stats:
 extdat_resampled = [ np.convolve(extdat[i], np.ones(skip) , mode='same') for i in range(extdat.shape[0]) ]
 extdat_resampled = [ed[nedgeBins:-nedgeBins:skip] for ed in extdat_resampled]
 extdat_resampled = np.vstack(extdat_resampled)
-extdat_resampled /= np.std(extdat_resampled, axis=1)[:,None]
+s = np.std(extdat_resampled, axis=1)[:,None]
+s = np.maximum(1e-10, s)
+extdat_resampled /= s
 
 
 # Plot evolutions for subsampled data

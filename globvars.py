@@ -18,6 +18,7 @@ global data_dir
 global dir_fig
 global dir_fig_preproc
 global fbands
+global EMG_per_hand
 
 specgrams                           = None
 freqBands                           = None
@@ -57,3 +58,5 @@ fbands = {'tremor': [3,10], 'low_beta':[11,22], 'high_beta':[22,30],
            'low_gamma':[30,60], 'high_gamma':[60,90],
           'HFO1':[91,200], 'HFO2':[200,300], 'HFO3':[300,400],
           'beta':[15,30],   'gamma':[30,100], 'HFO':[91,400]}
+
+EMG_per_hand = {'right':['EMG061_old', 'EMG062_old'], 'left':['EMG063_old', 'EMG064_old' ] }

@@ -807,7 +807,9 @@ def tfr(dat, sfreq, freqs, n_cycles, decim=1, n_jobs = None):
     sfreq = int(sfreq)
 
     dat_ = dat[None,:]
-    tfrres = mne.time_frequency.tfr_array_morlet(dat_, sfreq, freqs, n_cycles,
+    #tfrres = mne.time_frequency.tfr_array_morlet(dat_, sfreq, freqs, n_cycles,
+    #                                             n_jobs=n_jobs, decim =decim)
+    tfrres = mne.time_frequency.tfr_array_multitaper(dat_, sfreq, freqs, n_cycles,
                                                  n_jobs=n_jobs, decim =decim)
     tfrres = tfrres[0]
     return tfrres
@@ -835,6 +837,9 @@ def getIntervals(bininds,width=100,thr=0.1, percentthr=0.8,inc=5, minlen=50,
     extFactor[R,L] -- we'll extend found intervals by width * extFactor (negative allowed)
     endbin -- max timebin
     '''
+
+    if len(bininds) == 0:
+        return np.array([]),[]
 
     if cvl is None:
         if np.max(bininds) == 1:
@@ -2101,9 +2106,10 @@ def findMEGartifacts(filt_raw , thr_mult = 2.5, thr_use_mean=0):
         me_s, mn_s,mx_s = utsne.robustMean(megdat_sum, axis=None, per_dim =1, ret_aux=1, pos = 1)
 
         if thr_use_mean:
-            mask= megdat_sum > me_s * thr_mult
+            megdat_sum_mod = megdat_sum/ me_s
         else:
-            mask= megdat_sum > mx_s * thr_mult
+            megdat_sum_mod = megdat_sum/ mx_s
+        mask= megdat_sum_mod > thr_mult
         cvl,ivals_meg_artif = getIntervals(np.where(mask)[0] ,\
             include_short_spikes=1, endbin=len(mask), minlen=2, thr=0.001, inc=1,\
             extFactorL=0.1, extFactorR=0.1 )
@@ -2113,7 +2119,7 @@ def findMEGartifacts(filt_raw , thr_mult = 2.5, thr_use_mean=0):
         #import ipdb; ipdb.set_trace()
 
         ax = axs[sidei]
-        ax.plot(filt_raw.times,megdat_sum)
+        ax.plot(filt_raw.times,megdat_sum_mod)
         ax.axhline( me_s , c='r', ls=':')
         ax.axhline( mx_s , c='purple', ls=':')
         ax.axhline( me_s * thr_mult , c='r', ls='--')
@@ -2315,37 +2321,84 @@ def getLFPperSide(raw_lfponly, key='letter'):
     '''
     Also filter annotations
     '''
+
+    return getRawPerSide( raw_lfponly, templ_str = 'LFP', remove_anns = 'ipsi', key=key)
+
+    #EMG_per_hand = {'right':['EMG061_old', 'EMG062_old'], 'left':['EMG063_old', 'EMG064_old' ] }
+#    import mne
+#    raw_lfponly.load_data()
+#
+#    raws_lfp_perside = {}
+#    for side in ['left', 'right' ]:
+#        sidelet = side[0].upper()
+#        if key == 'str':
+#            sidekey = side
+#        elif key == 'letter':
+#            sidekey = sidelet
+#        raws_lfp_perside[sidekey] = raw_lfponly.copy()
+#        chis = mne.pick_channels_regexp(raw_lfponly.ch_names, 'LFP{}.*'.format(sidelet))
+#        chnames_lfp = [raw_lfponly.ch_names[chi] for chi in chis]
+#        raws_lfp_perside[sidekey].pick_channels(   chnames_lfp  )
+#
+#    for sidekey in raws_lfp_perside:
+#        # first we remove tremor annotations from other side. Since it is
+#        # brain, other side means ipsilateral
+#        sidelet = sidekey[0].upper()
+#        badstr = '_' + sidelet
+#        anns_upd = removeAnnsByDescr(raws_lfp_perside[sidekey].annotations, [badstr])
+#
+#        # now we remove artifcats for other side of the brain
+#        badstr = 'LFP' + getOppositeSideStr(sidelet)
+#        anns_upd = removeAnnsByDescr(anns_upd, [badstr])
+#
+#        # set result
+#        raws_lfp_perside[sidekey].set_annotations(anns_upd)
+#
+#    return  raws_lfp_perside
+
+def getRawPerSide(raw, templ_str = 'msrc', key='letter', remove_anns = 'ipsi'):
+    '''
+    Also filter annotations
+    '''
     #EMG_per_hand = {'right':['EMG061_old', 'EMG062_old'], 'left':['EMG063_old', 'EMG064_old' ] }
     import mne
-    raw_lfponly.load_data()
+    raw.load_data()
 
-    raws_lfp_perside = {}
+    #templ_str = 'LFP'
+    #templ_str = 'msrc'
+
+    raws_perside = {}
     for side in ['left', 'right' ]:
         sidelet = side[0].upper()
         if key == 'str':
             sidekey = side
         elif key == 'letter':
             sidekey = sidelet
-        raws_lfp_perside[sidekey] = raw_lfponly.copy()
-        chis = mne.pick_channels_regexp(raw_lfponly.ch_names, 'LFP{}.*'.format(sidelet))
-        chnames_lfp = [raw_lfponly.ch_names[chi] for chi in chis]
-        raws_lfp_perside[sidekey].pick_channels(   chnames_lfp  )
+        raws_perside[sidekey] = raw.copy()
+        chis = mne.pick_channels_regexp(raw.ch_names, '{}{}.*'.format(templ_str,sidelet))
+        chnames_lfp = [raw.ch_names[chi] for chi in chis]
+        raws_perside[sidekey].pick_channels(   chnames_lfp  )
 
-    for sidekey in raws_lfp_perside:
+    for sidekey in raws_perside:
         # first we remove tremor annotations from other side. Since it is
         # brain, other side means ipsilateral
-        sidelet = sidekey[0].upper()
+        if remove_anns == 'ipsi':
+            sidelet = sidekey[0].upper()
+        elif remove_anns == 'contra':
+            sidelet = getOppositeSide(sidekey)[0].upper()
+        else:
+            continue
         badstr = '_' + sidelet
-        anns_upd = removeAnnsByDescr(raws_lfp_perside[sidekey].annotations, [badstr])
+        anns_upd = removeAnnsByDescr(raws_perside[sidekey].annotations, [badstr])
 
         # now we remove artifcats for other side of the brain
-        badstr = 'LFP' + getOppositeSideStr(sidelet)
+        badstr = templ_str + getOppositeSideStr(sidelet)
         anns_upd = removeAnnsByDescr(anns_upd, [badstr])
 
         # set result
-        raws_lfp_perside[sidekey].set_annotations(anns_upd)
+        raws_perside[sidekey].set_annotations(anns_upd)
 
-    return  raws_lfp_perside
+    return  raws_perside
 
 def extendAnns(anns,ext_left, ext_right):
     # in sec

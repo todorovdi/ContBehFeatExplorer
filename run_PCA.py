@@ -15,11 +15,14 @@ import numpy as np
 from sklearn.preprocessing import RobustScaler
 from sklearn.manifold import TSNE
 from sklearn.decomposition import PCA
+from sklearn.discriminant_analysis import LinearDiscriminantAnalysis
+from sklearn.impute import SimpleImputer
 
 import globvars as gv
 import utils
 import utils_tSNE as utsne
 import utils_preproc as upre
+
 
 
 #rawnames_for_PCA = ['S01_on_hold', 'S01_on_move']
@@ -37,6 +40,9 @@ skip = 32
 windowsz = 256
 
 nPCAcomponents_to_plot = 5
+nfeats_per_comp_LDA = 50
+nfeats_per_comp_LDA_strongred = 5
+
 show_plots = 0
 
 discard = 1e-2
@@ -306,9 +312,8 @@ if do_impute_artifacts:
 
     Xconcat_artif_nan  = utils.setArtifNaN(Xconcat, ivalis_artif_tb_indarrays_merged, feature_names_pri[0])
     num_nans = np.sum(np.isnan(Xconcat_artif_nan), axis=0)
-    print('Max artifact NaN percentage is {:.2f}%'.format(100 * np.max(num_nans)/Xconcat_artif_nan.shape[0] ) )
+    print('Max artifact NaN percentage is {:.4f}%'.format(100 * np.max(num_nans)/Xconcat_artif_nan.shape[0] ) )
 
-    from sklearn.impute import SimpleImputer
     imp_mean = SimpleImputer(missing_values=np.nan, strategy='constant', fill_value=0.)
     imp_mean.fit(Xconcat_artif_nan)
     Xconcat_imputed = imp_mean.transform(Xconcat_artif_nan)
@@ -321,7 +326,7 @@ unset_inds = np.setdiff1d(np.arange(len(Xtimes)), all_interval_inds)
 
 # this is the most bruteforce way when I join all artifacts
 lst2 =  [inds for inds in ivalis_artif_tb_indarrays_merged.values()]
-if len(lst):
+if len(lst2):
     all_interval_artif_inds = np.hstack(lst2  )
 else:
     all_interval_artif_inds = np.array([])
@@ -353,108 +358,180 @@ Xconcat_good = Xconcat_imputed[good_inds]
 pca.fit(Xconcat_good )   # fit to not-outlier data
 pcapts = pca.transform(Xconcat_imputed)  # transform outliers as well
 
-print('Output PCA dimension {}, total explained variance proportion {}'.
+print('Output PCA dimension {}, total explained variance proportion {:.4f}'.
       format( pcapts.shape[1] , np.sum(pca.explained_variance_ratio_) ) )
 print('PCA First several var ratios ',pca.explained_variance_ratio_[:5])
 
+import copy
 
 if do_LDA:
     # don't change the order!
-    int_types_L = ['trem_L', 'notrem_L', 'hold_L', 'move_L', 'undef_L', 'holdtrem_L', 'movetrem_L']
-    int_types_R = ['trem_R', 'notrem_R', 'hold_R', 'move_R', 'undef_R', 'holdtrem_R', 'movetrem_R']
+    int_types_basic = ['trem', 'notrem', 'hold', 'move']
+    int_types_aux = ['undef', 'holdtrem', 'movetrem']
+    int_types_ext = int_types_basic + int_types_aux
+    int_types_ps = {'L':[],'R':[] }
+    for side_letter in int_types_ps:
+        int_types_ps[side_letter] = ['{}_{}'.format( itcur , side_letter) for itcur in int_types_ext ]
+    #int_types_L = ['trem_L', 'notrem_L', 'hold_L', 'move_L', 'undef_L', 'holdtrem_L', 'movetrem_L']
+    #int_types_R = ['trem_R', 'notrem_R', 'hold_R', 'move_R', 'undef_R', 'holdtrem_R', 'movetrem_R']
+    # these are GLOBAL ids, they should be consistent across everything
     class_ids = {}
-    for ind, it in enumerate(int_types_L):
+    for ind, it in enumerate(int_types_ps['L'] ):
         class_ids[it] = ind+1
-    for ind, it in enumerate(int_types_R):
+    for ind, it in enumerate(int_types_ps['R'] ):
         class_ids[it] = -ind-1
 
-    merge_mvt_types = 1
-    if merge_mvt_types:
-        class_ids['hold_L'] = class_ids['move_L']
-        class_ids['hold_R'] = class_ids['move_R']
+    groupings = {'merge_movements':['hold','move'],
+                'merge_all_not_trem':['notrem','hold','move'],
+                'merge_nothing':[]}
+    # what is on '0' index is important
+    int_types_to_include = {'basic': int_types_basic,
+                            'basic+aux': int_types_ext,
+                            'trem_vs_quiet':['trem','notrem'],
+                            'trem_vs_quiet&undef':['trem','notrem','undef'],
+                            'hold_vs_quiet':['hold','notrem'],
+                            'move_vs_quiet':['move','notrem'] }
 
-    #TODO: make possible non-main side
-    sides_hand = [mts_letter]
-    int_types_basic = ['trem', 'notrem', 'hold', 'move']
+    lda_output_pg = {}
 
-    defclass = 0
-    class_labels = np.repeat(defclass,len(Xconcat_imputed))
-    assert defclass == 0
+    for grouping_key in groupings:
+        grouping = groupings[grouping_key]
 
-    old_ver = 0
-    if old_ver:
-        int_types = set()
-        for itb in int_types_basic:
-            for side in sides_hand:
-                assert len(side) == 1
-                int_types.update(['{}_{}'.format(itb,side)])
-        #int_types = ['trem_L', 'notrem_L', 'hold_L', 'move_L']
-        int_types = list(int_types)
-        #print(int_types)
+        lda_output_pit = {}
+        for int_types_key in int_types_to_include:
+            int_types_to_distinguish = int_types_to_include[int_types_key]
 
-        classes = [k for k in ivalis_tb_indarrays.keys() if k in int_types]  #need to be ordered
-        #classes
+            print('------')
+            print('LDA on training data (grp {}, its {})'.format(grouping_key, int_types_key))
 
-        for i,k in enumerate(classes):
-            #print(i,k)
-            for bininds in ivalis_tb_indarrays[k]:
-                #print(i,len(bininds), bininds[0], bininds[-1])
-                class_labels[ bininds ] = i + 1
+            # prepare class_ids (merge)
+            class_ids_loc = copy.deepcopy(class_ids)
+            if len(grouping) > 1:
+                for side_letter in ['L', 'R']:
+                    main = '{}_{}'.format(grouping[0],side_letter)
+                    for int_type_cur in grouping:
+                        cur = '{}_{}'.format(int_type_cur,side_letter)
+                        class_ids_loc[main] = class_ids[cur]
 
-    revdict = {}
-    # set class label for all basic interval types
-    for itb in int_types_basic:
-        for side in sides_hand:
-            class_name = '{}_{}'.format(itb,side)
-            for bininds in ivalis_tb_indarrays.get(class_name,[] ):
-                #print(i,len(bininds), bininds[0], bininds[-1])
-                cid = class_ids[class_name]
-                class_labels[ bininds ] = cid
-                if cid not in revdict:
-                    revdict[cid] = class_name
-                elif revdict[cid].find(class_name) < 0:
-                    revdict[cid] += '&{}'.format(class_name)
+            #TODO: make possible non-main side
+            sides_hand = [mts_letter]
+
+            defclass = 0
+            class_labels = np.repeat(defclass,len(Xconcat_imputed))
+            assert defclass == 0
+
+            old_ver = 0
+            if old_ver:
+                int_types = set()
+                for itb in int_types_to_distinguish:
+                    for side in sides_hand:
+                        assert len(side) == 1
+                        int_types.update(['{}_{}'.format(itb,side)])
+                #int_types = ['trem_L', 'notrem_L', 'hold_L', 'move_L']
+                int_types = list(int_types)
+                #print(int_types)
+
+                classes = [k for k in ivalis_tb_indarrays.keys() if k in int_types]  #need to be ordered
+                #classes
+
+                for i,k in enumerate(classes):
+                    #print(i,k)
+                    for bininds in ivalis_tb_indarrays[k]:
+                        #print(i,len(bininds), bininds[0], bininds[-1])
+                        class_labels[ bininds ] = i + 1
+
+            revdict = {}
+            # set class label for current interval types
+            for itb in int_types_to_distinguish:
+                for side in sides_hand:
+                    class_name = '{}_{}'.format(itb,side)
+                    # look at bininds of this type that were found in the given dataset
+                    for bininds in ivalis_tb_indarrays.get(class_name,[] ):
+                        #print(i,len(bininds), bininds[0], bininds[-1])
+                        cid = class_ids_loc[class_name]
+                        class_labels[ bininds ] = cid
+                        if cid not in revdict:
+                            revdict[cid] = class_name
+                        elif revdict[cid].find(class_name) < 0:
+                            revdict[cid] += '&{}'.format(class_name)
 
 
-    class_labels_good = class_labels[good_inds]
+            class_labels_good = class_labels[good_inds]
 
-    rem_neut = 1
-    if rem_neut:
-        neq = class_labels_good != defclass
-        inds = np.where( neq)[0]
-        Xconcat_good = Xconcat_good[inds]
-        class_labels_good = class_labels_good[inds]
-    else:
-        classes = ['neut'] + classes  # will fail if run more than once
+            # if I don't want to classify against points I am not sure about (that
+            # don't have a definite label)
+            rem_neut = 1
+            if rem_neut:
+                neq = class_labels_good != defclass
+                inds = np.where( neq)[0]
+                Xconcat_good_cur = Xconcat_good[inds]
+                class_labels_good = class_labels_good[inds]
+            else:
+                classes = ['neut'] + classes  # will fail if run more than once
 
-    n_components_LDA = len(set(class_labels_good)) - 1
-    print('n_components_LDA =', n_components_LDA)
+            n_components_LDA = len(set(class_labels_good)) - 1
+            print('n_components_LDA =', n_components_LDA)
+            if n_components_LDA > 0:
 
-    # first axis gives best separation, second does the second best job, etc
-    from sklearn.discriminant_analysis import LinearDiscriminantAnalysis
-    #X = np.array([[-1, -1], [-2, -1], [-3, -2], [1, 1], [2, 1], [3, 2]])
-    #y = np.array([1, 1, 1, 2, 2, 2])
-    lda = LinearDiscriminantAnalysis(n_components=n_components_LDA)
-    lda.fit(Xconcat_good, class_labels_good)
+                # first axis gives best separation, second does the second best job, etc
+                #X = np.array([[-1, -1], [-2, -1], [-3, -2], [1, 1], [2, 1], [3, 2]])
+                #y = np.array([1, 1, 1, 2, 2, 2])
+                lda = LinearDiscriminantAnalysis(n_components=n_components_LDA)
+                lda.fit(Xconcat_good_cur, class_labels_good)
 
-    print('LDA var explained = ', lda.explained_variance_ratio_)
-    print('LDA priors ', list(zip( [revdict[cid] for cid in lda.classes_],lda.priors_) ) )
+                print('LDA var explained = ', lda.explained_variance_ratio_)
+                print('LDA priors ', list(zip( [revdict[cid] for cid in lda.classes_],lda.priors_) ) )
 
-    X_LDA = lda.transform(Xconcat_imputed)  # we transform all points, even bad and ulabeled ones. Transform is done using scalings
+                X_LDA = lda.transform(Xconcat_imputed)  # we transform all points, even bad and ulabeled ones. Transform is done using scalings
 
-    class_to_check = 'trem_{}'.format(mts_letter)
-    if old_ver:
-        class_ind = classes.index(class_to_check) + 1
-    else:
-        class_ind = class_ids[class_to_check]
-    sens,spec = utsne.getLDApredPower(lda,Xconcat_imputed, class_labels, class_ind)
-    print('--!! LDA on training data, identifying {}: sens = {:.3f};  spec = {:.3f}'.format(class_to_check,sens,spec))
+                #this is a string label
+                class_to_check = '{}_{}'.format(int_types_to_distinguish[0], mts_letter)
+                if old_ver:
+                    class_ind_to_check = classes.index(class_to_check) + 1
+                else:
+                    class_ind_to_check = class_ids_loc[class_to_check]
+                sens,spec = utsne.getLDApredPower(lda,Xconcat, class_labels, class_ind_to_check)
+
+
+
+                r = utsne.getImporantCoordInds(lda.scalings_.T,
+                                            nfeats_show = nfeats_per_comp_LDA_strongred, q=0.8, printLog = 0)
+                inds_important, strong_inds_pc, strongest_inds_pc  = r
+
+                ldapts_ = Xconcat_good_cur[:,inds_important]
+                lda_red = LinearDiscriminantAnalysis(n_components=n_components_LDA )
+                lda_red.fit(ldapts_, class_labels_good)
+                sens_red,spec_red = utsne.getLDApredPower(lda_red,Xconcat[:,inds_important],
+                                                        class_labels, class_ind_to_check, printLog= 0)
+                print( ('--!! LDA on training data (grp {}, its {}) all vs {}:' +\
+                      '\n      sens={:.3f}; spec={:.3f};; sens_red={:.3f}; spec_red={:.3f}').
+                    format(grouping_key, int_types_key, class_to_check,sens,spec, sens_red,spec_red))
+
+                #---------- again, not much reduction
+                r = utsne.getImporantCoordInds(lda.scalings_.T,
+                                            nfeats_show = nfeats_per_comp_LDA, q=0.8, printLog = 0)
+                inds_important, strong_inds_pc, strongest_inds_pc  = r
+                # in strong_inds_pc, the last one in each array is the strongest
+
+                lda_output_pit[int_types_key] = {'ldaobj':lda, 'transformed_imputed':X_LDA,
+                                                'labels_good':class_labels_good,
+                                                 'perf':(sens,spec),
+                                                 'perf_red':(sens_red,spec_red),
+                                                'inds_important':inds_important,
+                                                'strong_inds_pc':strong_inds_pc,
+                                                'strongest_inds_pc':strongest_inds_pc }
+            else:
+                lda_output_pit[int_types_key] = None
+        lda_output_pg[grouping_key] = lda_output_pit
 else:
-    lda = None
-    class_labels_good = None
-    X_LDA = None
-    sens = np.nan
-    spec = np.nan
+    lda_output_pg = None
+
+    #lda = None
+    #class_labels_good = None
+    #X_LDA = None
+    #sens = np.nan
+    #spec = np.nan
+
 
 
 ###### Save result
@@ -495,13 +572,26 @@ for i,rawname_ in enumerate(rawnames_for_PCA):
     info['qvmult'] = qvmult
     info['discard_ratio'] = discard_ratio
     info['prefix'] = prefix
-    info['LDAsens'] = sens
-    info['LDAspec'] = spec
+    #info['LDAsens'] = sens
+    #info['LDAspec'] = spec
 
-    np.savez(fname_PCA_full, pcapts = pcapts[sl], pcaobj=pca, ldaobj=lda,
+
+    lda_output_pg_cur = copy.deepcopy(lda_output_pg)
+
+    # we need to restrict the LDA output to the right index range
+    for grouping_key in groupings:
+        grouping = groupings[grouping_key]
+
+        lda_output_pit = {}
+        for int_types_key in int_types_to_include:
+            r = lda_output_pg_cur[grouping_key][int_types_key]
+            if r is not None:
+                r['transformed_imputed'] = r['transformed_imputed'][sl]
+
+    np.savez(fname_PCA_full, pcapts = pcapts[sl], pcaobj=pca,
              feature_names_all = feature_names_pri[i] , good_inds = good_inds_pri[i],
              info = info, feat_info = feat_file_pri[i].get('feat_info',None),
-             Xtimes=Xtimes_pri[i] , X_LDA=X_LDA[sl], class_labels_good=class_labels_good )
+             lda_output_pg = lda_output_pg_cur, Xtimes=Xtimes_pri[i] )
     print('Saving PCA to ',fname_PCA_full)
 
     if i+1 < len(lens):
@@ -556,10 +646,26 @@ if show_plots:
                 pdf=pdf,neutcolor=neutcolor)
 
     if do_LDA:
-        n_LDA_feats_toshow = 140
-        utsne.plotPCA(X_LDA,lda, n_components_LDA,feature_names_all, colors, markers,
-                    mrk, mrknames, color_per_int_type, tasks,
-                    pdf=pdf,neutcolor=neutcolor, nfeats_show=n_LDA_feats_toshow)
+
+        for int_types_key in int_types_to_include:
+            for grouping_key in groupings:
+                grouping = groupings[grouping_key]
+                r = lda_output_pg[grouping_key][int_types_key]
+
+                if r is None:
+                    continue
+                X_LDA = r['transformed_imputed']
+                lda = r['ldaobj']
+
+                s = map( lambda x : '{:.1f}%'.format(x*100), list(r['perf'] ) + list(r['perf_red'] ) )
+                s  = list(s)
+                s = '{},{}; red {},{}'.format(s[0],s[1],s[2],s[3])
+
+                utsne.plotPCA(X_LDA,lda, 999,feature_names_all, colors, markers,
+                            mrk, mrknames, color_per_int_type, tasks,
+                            pdf=pdf,neutcolor=neutcolor, nfeats_show=nfeats_per_comp_LDA,
+                              title_suffix = '_(grp {}, its {})_{}'.
+                              format(grouping_key, int_types_key, s) )
 
     pdf.close()
 

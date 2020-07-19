@@ -1,0 +1,61 @@
+  General:
+
+sometimes at least tremor first rises than goes to maximum soon after rise, then lowers a bit and stays steady for a while until it decays
+
+----------
+
+  01 off hold, side 1
+termor from the beg for a long time, no huge variaton in size
+termor size is not very large compared to baseline, so not clear if the decay of amplitude is linear or not
+Tremor is easily distinguisehd by looking at how oscillatory (vs stationary) and high tremor convolution is
+  01 off hold, side -1
+tremor all time with varying amplitude, after 99 it is weaker than before
+
+  s01 on hold side 1 
+no tremor
+  s01 on hold side -1 
+large excursions of LFP tremor band, don't correlate with anything
+tremor starting beginning, for about 50 sec, dissapears somewhat linearly (though conv scale is bad), there is a long strange small-med activity after tremor end
+
+  s01 off move  side 1 
+large excursions of LFP tremor band
+tremor neither appears nor goes away linearly, it has smaller "bursts" first
+  s01 off move side -1
+trermor almost all time with warying amplitude, decays lienarly in the end
+
+  s01 on move side 1
+tremor in the edn appears kinda linearly, with 4sec-long bursts
+  s01 on move side -1
+2 episodes: 1st weak tremor appear/disappear lienarly, second tremor starts after a starnge unk activity episode (maybe artifact beacuse broadband in LFP) intermigled with another one like that, appears linearly
+
+-------------
+
+  S02 off hold side 1
+tremor in the beg (disappears fast linearly)
+tremor? 4-11 then
+dirty-tremor until 42, then pure tremr afterwards for a while
+  S02 off hold side -1
+tremor first half, disappears linearly, right after end there is a big excursing in LFP tremor band
+tremor
+
+  S02 on hold side 1
+large excursions LFP tremor band, they have some correlation with tremor intensity in the second tremro episode but not otherwise
+seems like we always have tremro with different intensity which sometimes goes down strongly. When it goes down it does it with different speed, but raises rather steadily and slowly always\
+linear ramb and decay for two first tremor episodes (thrid is unclear)
+  S02 on hold side -1
+sevearl tremor episodes, decays differently (not alwyas lienarly), rises lienarly, but in one episode really fast (though this episode is between others but looks clearly separate)
+
+  S02 off move 1
+large excursions LFP tremor band, uncorrel with tremro intentsity
+tremort starts in the middle (or maybe from start continues)
+linear ramp and decay (sometimes lin, sometimes nonlin)
+  S02 off move -1
+several clearly distinct tremor episodes, siappear faster than appear, all linear
+
+  S02 on move 1
+sevearl tremor episodes, linear ramp and nonlin decay, does not look like we have trem max in the beginning
+linear ramp and faster nonlin decay (first lin decay and then plato)
+  S02 on move -1
+several tremor episodes
+in the beginning as well, it ends starngely -- fist tremr per se ends, and then for 5 more secs there is some activity in the EMG
+linear ramp and nonlin decay

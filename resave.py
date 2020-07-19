@@ -48,11 +48,13 @@ do_ICA   = 1
 n_components_ICA = 0.95
 tSSS_duration = 10  # default is 10s
 frame_SSS = 'head'  # 'head'
-do_ICA_only = 1
+do_ICA_only = 0
 
 # mark few things as MEG artifacts
 MEG_thr_use_mean = 0
 MEG_artif_thr_mult = 2.25 # before I used 2.5
+
+do_plot_helmet = 0
 
 plot_ICA_prop = 1
 ICA_exclude_EOG = 0
@@ -84,6 +86,18 @@ subjinds = [4]
 #subjinds = [5,6,7,8,9,10]
 subjinds = [8]
 subjinds = range(1,11)
+
+subjinds = [1,2,3]
+tasks = ['hold' , 'move', 'rest']
+medstates = ['on','off']
+
+subjinds = [4,5,7]
+tasks = ['hold' , 'move', 'rest']
+medstates = ['on','off']
+
+subjinds = [8,9,10]
+tasks = ['hold' , 'move', 'rest']
+medstates = ['on','off']
 
 subjinds = [1,2,3]
 tasks = ['hold' , 'move', 'rest']
@@ -202,7 +216,10 @@ for subjind in subjinds:
                 gen_subj_info = json.load(info_json)
 
             #subj,medcond,task  = utils.getParamsFromRawname(rawname_)
-            badchlist_ = gen_subj_info['S'+sis]['bad_channels'][medstate][task]
+            if subjind > 7:
+                badchlist_ = gen_subj_info['S'+sis]['bad_channels'][medstate]['hold']
+            else:
+                badchlist_ = gen_subj_info['S'+sis]['bad_channels'][medstate][task]
             badchlist= []
             for chname in badchlist_:
                 if chname.find('EMG') >= 0 and ( (chname.find('_kil') < 0) and (chname.find('_old') < 0) ):
@@ -242,12 +259,14 @@ for subjind in subjinds:
                 radius, origin, _ = mne.bem.fit_sphere_to_headshape(mod_info, dig_kinds=('cardinal','hpi'))
                 sphere = mne.make_sphere_model(info=mod_info, r0=origin, head_radius=radius)
                 src = mne.setup_volume_source_space(sphere=sphere, pos=10.)
-                mne.viz.plot_alignment(
-                    mod_info, eeg='projected', bem=sphere, src=src, dig=True,
-                    surfaces=['brain', 'outer_skin'], coord_frame='meg', show_axes=True)
-                mayavi.mlab.savefig(os.path.join(dir_fig,'{}_sensor_loc_vs_head.iv'.format(fname_noext) ) )
-                mayavi.mlab.savefig(os.path.join(dir_fig,'{}_sensor_loc_vs_head.png'.format(fname_noext)) )
-                mayavi.mlab.close()
+
+                if do_plot_helmet:
+                    mne.viz.plot_alignment(
+                        mod_info, eeg='projected', bem=sphere, src=src, dig=True,
+                        surfaces=['brain', 'outer_skin'], coord_frame='meg', show_axes=True)
+                    mayavi.mlab.savefig(os.path.join(dir_fig,'{}_sensor_loc_vs_head.iv'.format(fname_noext) ) )
+                    mayavi.mlab.savefig(os.path.join(dir_fig,'{}_sensor_loc_vs_head.png'.format(fname_noext)) )
+                    mayavi.mlab.close()
 
                 f.info = mod_info
 

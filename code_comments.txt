@@ -1,0 +1,33 @@
+getStatsFromTremIntervals
+  makes datPrep and specgramPrep, glob_stats for cur rawname
+  puts args in args
+  calls stat_proxy  [in parallel when many intervals]
+
+stat_proxy
+  called only from getStatsFromTremIntervals
+  calls getStatPerChan  
+
+getStatPerChan
+  calls stat_ch_proxy [in parallel when glob_stats]
+
+stat_ch_proxy
+  calls stat_ch
+
+stat_ch
+  does actual job for a given channel
+  called from stat_ch_proxy
+
+
+
+
+
+S05_on_move for some reason first MEG artifcat is not processed
+S05_on_hold for some reason first MEG artifcat is not processed
+
+S09_off_rest tremor band in MEGsrc has wrong scale
+S08_off_rest tremor band in MEGsrc has wrong scale
+
+
+
+
+

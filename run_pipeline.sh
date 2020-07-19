@@ -1,15 +1,60 @@
 #!/bin/bash
 
-# feats pca tSNE
 do_genfeats=$1
 do_PCA=$2
 do_tSNE=$3
+shift
+shift 
+shift
 
-raw=S01_off_hold
-raw_compl=S01_off_move
+LOAD_TSNE=0  #allows to skip those that were already computed
 
-raw=S01_on_hold
-raw_compl=S01_on_move
+# parse arguments
+POSITIONAL=()
+while [[ $# -gt 0 ]]
+do
+  key="$1"
+
+  case $key in
+      --raw)
+      raw="$2"
+      shift # past argument
+      shift # past value
+      ;;
+      --raw_compl)
+      raw_compl="$2"
+      shift # past argument
+      shift # past value
+      ;;
+      --LOAD_TSNE)
+      LOAD_TSNE="$2"
+      shift # past argument
+      shift # past value
+      ;;
+      --SUBSKIP)
+      SUBSKIP="$2"
+      shift # past argument
+      shift # past value
+      ;;
+      *)    # unknown option
+      POSITIONAL+=("$1") # save it in an array for later
+      shift # past argument
+      ;;
+  esac
+done
+echo raw=$raw,raw_compl=$raw_compl
+
+# feats pca tSNE
+#do_genfeats=$1
+#do_PCA=$2
+#do_tSNE=$3
+##################
+
+#raw=S01_off_hold
+#raw_compl=S01_off_move
+#
+#raw=S01_on_hold
+#raw_compl=S01_on_move
 #
 #raw=S02_off_hold
 #raw_compl=S02_off_move
@@ -34,10 +79,9 @@ DO_TSNE_USING_COMMON_PCA=1
 #dim_inp_tSNE=80
 #dim_inp_tSNE=100
 dim_inp_tSNE=-1
-SUBSKIP=4
+SUBSKIP=1
 TSNE_PLOTS=1
 #raws=$raw,$raw_compl
-LOAD_TSNE=1  #allows to skip those that were already computed
 
 DO_RAW_BOTH_PCA=1
 DO_RAW_COMPL_PCA=0
@@ -47,7 +91,7 @@ DO_RAW=0
 DO_RAW_COMPL=0
 DO_RAW_BOTH=1
 
-PREFIXES_AUX=0
+PREFIXES_AUX=1
 
 if [ $do_genfeats -gt 0 ]; then
   ipython3 $interactive run_genfeats.py -- -r $raw,$raw_compl --bands fine
@@ -60,21 +104,25 @@ if [ $do_PCA -gt 0 ]; then
   function PCA { 
     RS="$interactive run_PCA.py -- $1"
     # use everything (from main trem side)
-    ipython3 $RS --prefix all
-    ipython3 $RS --mods LFP --prefix modLFP
+    #ipython3 $RS --prefix all
+    #ipython3 $RS --mods LFP --prefix modLFP
     if [ $PREFIXES_AUX -gt 0 ]; then
-      ipython3 $RS --prefix allnoHFO --use_HFO 0
-      ipython3 $RS --mods LFP --prefix modLFPnoHFO --use_HFO 0
-      ipython3 $RS --mods msrc  --prefix modSrc 
+      ipython3 $RS --mods msrc              --prefix modSrc 
+      ipython3 $RS --prefix allnoHFO        --use_HFO 0
+      ipython3 $RS --prefix allb_trem       --fbands tremor 
+      ipython3 $RS --prefix allb_beta       --fbands low_beta,high_beta
+      ipython3 $RS --prefix allb_gamma      --fbands low_gamma,high_gamma
+      ipython3 $RS --prefix allb_trembeta   --fbands tremor,low_gamma,high_gamma
+      ipython3 $RS --mods LFP               --prefix modLFPnoHFO --use_HFO 0
       ipython3 $RS --feat_types H_act,H_mob,H_compl,rbcorr --prefix onlyTD
-      ipython3 $RS --feat_types con,bpcorr --prefix onlyFD
+      ipython3 $RS --feat_types con,bpcorr   --prefix onlyFD
       ipython3 $RS --feat_types con,H_act,H_mob,H_compl --prefix conH
       ipython3 $RS --feat_types H_act,H_mob,H_compl --prefix onlyH
-      ipython3 $RS --feat_types bpcorr --prefix onlyBpcorr
-      ipython3 $RS --feat_types bpcorr --use_HFO 0 --prefix onlyBpcorrNoHFO
-      ipython3 $RS --feat_types rbcorr --prefix onlyRbcorr
-      ipython3 $RS --feat_types con --prefix onlyCon
-      ipython3 $RS --feat_types con --use_HFO 0 --prefix onlyConNoHFO
+      ipython3 $RS --feat_types bpcorr       --prefix onlyBpcorr
+      ipython3 $RS --feat_types bpcorr       --use_HFO 0 --prefix onlyBpcorrNoHFO
+      ipython3 $RS --feat_types rbcorr       --prefix onlyRbcorr
+      ipython3 $RS --feat_types con          --prefix onlyCon
+      ipython3 $RS --feat_types con          --use_HFO 0 --prefix onlyConNoHFO
     fi
   }
 
@@ -107,14 +155,20 @@ if [ $do_tSNE -gt 0 ]; then
     ipython3 $interactive run_tSNE.py -- $1 --prefix all             
     ipython3 $interactive run_tSNE.py -- $1 --prefix modLFP          
     if [ $PREFIXES_AUX -gt 0 ]; then
+      ipython3 $interactive run_tSNE.py -- $1 --prefix modSrc          
       ipython3 $interactive run_tSNE.py -- $1 --prefix allnoHFO             
+
+      ipython3 $interactive run_tSNE.py -- $1 --prefix allb_trem       
+      ipython3 $interactive run_tSNE.py -- $1 --prefix allb_beta       
+      ipython3 $interactive run_tSNE.py -- $1 --prefix allb_gamma      
+      ipython3 $interactive run_tSNE.py -- $1 --prefix allb_trembeta   
+
       ipython3 $interactive run_tSNE.py -- $1 --prefix onlyTD          
+      ipython3 $interactive run_tSNE.py -- $1 --prefix onlyFD          
+      ipython3 $interactive run_tSNE.py -- $1 --prefix onlyH           
+      ipython3 $interactive run_tSNE.py -- $1 --prefix conH            
       ipython3 $interactive run_tSNE.py -- $1 --prefix modLFPnoHFO          
       ipython3 $interactive run_tSNE.py -- $1 --prefix onlyRbcorr      
-      ipython3 $interactive run_tSNE.py -- $1 --prefix modSrc          
-      ipython3 $interactive run_tSNE.py -- $1 --prefix onlyH           
-      ipython3 $interactive run_tSNE.py -- $1 --prefix onlyFD          
-      ipython3 $interactive run_tSNE.py -- $1 --prefix conH            
       ipython3 $interactive run_tSNE.py -- $1 --prefix onlyCon         
       ipython3 $interactive run_tSNE.py -- $1 --prefix onlyBpcorrNoHFO 
       ipython3 $interactive run_tSNE.py -- $1 --prefix onlyConNoHFO    

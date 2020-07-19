@@ -73,22 +73,26 @@ subskip = 2
 n_feats = 609
 n_feats_PCA = 609
 dim_PCA = 329  # number
-dim_inp_tSNE = 40
+dim_inp_tSNE = 120
 
-nfeats_per_comp_LDA = 10
+nfeats_per_comp_LDA = -1
+# this is used to determine if we take data
+# from PCA fitted to single dataset or to merged dataset
 nraws_used_PCA = 2
 
 crop_time = -1
 
+n_free_cores = 0  # for the remote machine
 #######   tSNE params
 
 #perplex_values = [5, 10, 30, 40, 50]
 #seeds = range(5)
 #lrate = 200.
 
-lrate = 200.
+lrate = 200.  # for tSNE only
 #perplex_values = [10, 30, 50, 65]
 perplex_values = [10, 30, 50]
+n_neighbors_values = [5, 10, 20]
 seeds = range(0,2)
 
 #######################
@@ -98,7 +102,6 @@ seeds = range(0,2)
 load_tSNE                    = 0
 save_tSNE                    = 1
 use_existing_tSNE            = 1
-load_feat                    = 0
 use_existing_feat            = 1
 
 show_plots                   = 1
@@ -234,6 +237,8 @@ lda_pri = []
 Xtimes_almost_pri = []
 PCA_info_pri = []
 feat_info_pri = []
+lda_pg_pri = []
+
 for rawname_ in rawnames:
     subj,medcond,task  = utils.getParamsFromRawname(rawname_)
 
@@ -254,6 +259,13 @@ for rawname_ in rawnames:
             format(rawname_, prefix, regex_nrPCA, regex_nfeats, regex_pcadim)
 
         fnfound = utsne.findByPrefix(data_dir, rawname_, prefix, regex=regex)
+        if len(fnfound) > 1:
+            fnt = [0] * len(fnfound)
+            for fni in range(len(fnt) ):
+                fnfull = os.path.join(data_dir, fnfound[fni])
+                fnt[fni] = os.path.getmtime(fnfull)
+            fni_max = np.argmax(fnt)
+            fnfound = [ fnfound[fni_max] ]
         assert len(fnfound) == 1, 'For {} found not single fnames {}'.format(rawname_,fnfound)
         fname_PCA_full = os.path.join( data_dir, fnfound[0] )
     else:
@@ -268,8 +280,14 @@ for rawname_ in rawnames:
     pcapts_cur = f['pcapts']
     pca_cur = f['pcaobj'][()]
 
-    ldapts_cur = f['X_LDA']
-    lda_cur = f['ldaobj'][()]
+    lda_pg_cur = f['lda_output_pg'][()]
+    lda_pg_pri += [lda_pg_cur]
+
+    #lda_output = lda_pg_cur['merge_all_not_trem']['basic']
+    lda_output = lda_pg_cur['merge_nothing']['basic']
+
+    ldapts_cur = lda_output['transformed_imputed']
+    lda_cur    = lda_output['ldaobj']
 
     pca_pri += [pca_cur]
     lda_pri += [lda_cur]
@@ -335,11 +353,15 @@ if crop_time > 0:
 Xtimes = Xtimes_almost[::subskip]
 X = utsne.downsample(pcapts, subskip)
 
-r = utsne.getImporantCoordInds(lda_pri[0].scalings_.T, nfeats_show = nfeats_per_comp_LDA, q=0.8, printLog = 1)
-inds_toshow, strong_inds_pc, strongest_inds_pc  = r
-print('From LDA using {} features'.format( len(inds_toshow ) ) )
+if nfeats_per_comp_LDA > 0:
+    r = utsne.getImporantCoordInds(lda_pri[0].scalings_.T, nfeats_show = nfeats_per_comp_LDA, q=0.8, printLog = 1)
+    inds_toshow, strong_inds_pc, strongest_inds_pc  = r
+    print('From LDA using {} features'.format( len(inds_toshow ) ) )
+    ldapts_ = np.matmul(ldapts , lda_pri[0].scalings_.T[:,inds_toshow ] )
+else:
+    print('From LDA using ALL features' )
+    ldapts_ = ldapts
 
-ldapts_ = np.matmul(ldapts , lda_pri[0].scalings_.T[:,inds_toshow ] )
 X_LDA = utsne.downsample(ldapts_, subskip)
 print('Loaded PCAs together have shape {}'.format(pcapts.shape ) )
 assert len(Xtimes) == len(X), (len(Xtimes),len(X))
@@ -377,7 +399,7 @@ colors,markers =utsne.prepColorsMarkers(mts_letter, anns, Xtimes,
 
 
 ###############################  tSNE
-
+from umap import UMAP
 
 if do_tSNE:
 
@@ -388,36 +410,51 @@ if do_tSNE:
 
     def run_tsne(p):
         t0 = time.time()
-        pi,si, pts, seed, perplex_cur, lrate, dtype = p
-        print('Starting tSNE for {} points of shape {}'.format(dtype,pts.shape) )
+        pi,si, pts, seed, param, lrate, dtype, dim_red_alg = p
+        print('Starting {} for {} points of shape {}'.format(dim_red_alg,dtype,pts.shape) )
         #n_component is desired dim of output
-        tsne = TSNE(n_components=2, random_state=seed, perplexity=perplex_cur, learning_rate=lrate)
-        X_embedded = tsne.fit_transform(pts)
+
+        if dim_red_alg == 'UMAP':
+            reducer = UMAP(n_neighbors=param)
+        elif dim_red_alg == 'tSNE':
+            reducer = TSNE(n_components=2, random_state=seed, perplexity=param, learning_rate=lrate)
+        else:
+            raise ValueError('wrong dim_red_alg')
+        #X_embedded = tsne.fit_transform(pts)
+        #reducer.fit(pcapts[good_inds])
+        #X_embedded = reducer.transform(pcapts)
+
+        X_embedded = reducer.fit_transform(pts)
+
 
         dur = time.time() - t0
-        print('tSNE {} computed in {:.3f}s: perplexity = {};  lrate = {}; seed = {}'.
-            format(pts.shape, dur,perplex_cur, lrate, seed))
+        print('tSNE {} computed in {:.3f}s: param = {};  lrate = {}; seed = {}'.
+            format(pts.shape, dur,param, lrate, seed))
 
-        return pi,si,X_embedded, seed, perplex_cur, lrate, dtype
+        return pi,si,X_embedded, seed, param, lrate, dtype, dim_red_alg
 
 
     #perplex_values = [30]
     #seeds = [0]
 
+    params_per_alg_type = {'tSNE': perplex_values, 'UMAP': n_neighbors_values}
+    dim_red_algs = list(params_per_alg_type.keys() )
 
     res = []
     args = []
-    for pi,perplex_cur in enumerate(perplex_values):
-        subres = []
-        for si,seed in enumerate(seeds):
+    for dim_red_alg in dim_red_algs:
+        for pi in range(len(perplex_values) ):
+            param = params_per_alg_type[dim_red_alg][pi]
+            subres = []
+            for si,seed in enumerate(seeds):
 
-            if si == 0:
-                dat_to_use = X.copy()
-                dtype = 'PCA'
-            elif si == 1:
-                dat_to_use = X_LDA.copy()
-                dtype = 'LDA'
-            args += [ (pi,si, dat_to_use, seed, perplex_cur, lrate, dtype)]
+                if si == 0:
+                    dat_to_use = X.copy()
+                    dtype = 'PCA'
+                elif si == 1:
+                    dat_to_use = X_LDA.copy()
+                    dtype = 'LDA'
+                args += [ (pi,si, dat_to_use, seed, param, lrate, dtype, dim_red_alg)]
 
 
     rn_str = ','.join(rawnames)
@@ -455,7 +492,7 @@ if do_tSNE:
             feat_info_pri = ff['feat_info_pri'][()]
             PCA_info_pri = ff['PCA_info_pri'][()]
         else:
-            ncores = min(len(args) , mpr.cpu_count()-2)
+            ncores = min(len(args) , mpr.cpu_count()- n_free_cores)
             if ncores > 1:
                 pool = mpr.Pool(ncores)
                 print('tSNE:  Starting {} workers on {} cores'.format(len(args), ncores))
@@ -484,7 +521,7 @@ if show_plots and do_tSNE:
     cols = [colors]
 
     colind = 0
-    nr = len(seeds)
+    nr = len(seeds) * len(dim_red_algs )
     nc = len(perplex_values)
     ww = 8; hh=8
     fig,axs = plt.subplots(ncols =nc, nrows=nr, figsize = (nc*ww, nr*hh))
@@ -493,15 +530,17 @@ if show_plots and do_tSNE:
     # for pi,pv in enumerate(perplex_values):
     #     for si,sv in enumerate(seeds):
     for tpl in tSNE_result:
-        pi,si,X_embedded, seed, perplex_cur, lrate, dtype = tpl
-        ax = axs[si,pi]
+        #for algi in range(len(dim_red_algs)):
+        pi,si,X_embedded, seed, param, lrate, dtype, alg = tpl
+        algi = dim_red_algs.index(alg)
+        ax = axs[si + len(seeds)*algi,pi ]
         #X_embedded = res[si][pi]
         #ax.scatter(X_embedded[:,0], X_embedded[:,1], c = cols[colind], s=5)
 
         utsne.plotMultiMarker(ax,X_embedded[:,0], X_embedded[:,1], c = cols[colind], s=5,
                                 m=markers)
-        ax.set_title('from {} perplexity = {};  lrate = {}; seed = {}'.
-                     format(dtype, perplex_cur, lrate, seed))
+        ax.set_title('{} from {} param = {};\nlrate = {}; seed = {}'.
+                    format(alg, dtype, param, lrate, seed))
 
     axs[0,0].legend(handles=legend_elements)
     #figname = 'tSNE_inpdim{}_PCAdim{}_Npts{}_hside{}_skip{}_wsz{}_lrate{}.pdf'.\

@@ -378,10 +378,13 @@ def extractEMGData(raw, rawname_=None, skip_if_exist = 1, tremfreq = 9):
 
     return rectconvraw
 
-def getECGindsICAcomp(icacomp):
+def getECGindsICAcomp(icacomp, mult = 1.25, ncomp_test_for_ecg = 6):
+    '''
+    smaller mult gives stricter rule
+    '''
+    import utils
     sfreq = int(icacomp.info['sfreq'])
     normal_hr  = [55,105]  # heart rate bounds, Mayo clinic says 60 to 100
-    mult = 1.25  # smaller give stricter rule
     ecg_compinds = []
     ecg_ratio_thr = 6
     rmax = 0
@@ -405,9 +408,6 @@ def getECGindsICAcomp(icacomp):
     nstrong_ratios = len(strog_ratio_inds)
     print('nstrong_ratios = ', nstrong_ratios)
 
-    ncomp_test_for_ecg = 3
-
-    import utils
     ecg_evts_all = []
     for i in np.argsort(ratios)[::-1][:ncomp_test_for_ecg]:
         comp_ecg_test,times = icacomp[i]
