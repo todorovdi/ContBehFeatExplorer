@@ -17,3 +17,12 @@ cfg.artfctdef.eog.interactive   = 'yes';
 [cfg, artifact]  = ft_artifact_eog(cfg,data);
 
 %{'MEG2641','MEG2642'} Nx1 cell-array with selection of channels, see FT_CHANNELSELECTION for details
+
+
+
+
+
+
+delimiterIn   = ',';
+headerlinesIn = 3;
+A = importdata(filename,delimiterIn,headerlinesIn);

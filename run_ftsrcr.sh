@@ -19,7 +19,14 @@ subjstrs='["S04", "S05", "S07"]'
 subjstrs='["S01", "S02", "S03"]'
 subjstrs='["S05"]'
 subjstrs='["S04"]'
+subjstrs='["S01"]'
+subjstrs='["S02", "S03", "S04", "S05", "S07" , "S10" ]'
+subjstrs='[ "S06" , "S08", "S09" ]'
+subjstrs='["S01", "S02", "S03"]'
+subjstrs='["S01", "S02", "S03", "S04", "S05", "S07", "S09", "S10"]'
+subjstrs='[ "S06" , "S08" ]'
 vardefstr="subjstrs=$subjstrs"
+#vardefstr="subjstrs=$subjstrs;"' medconds=["off"];'' tasks=["hold"];'
 #vardefstr=""
 echo "$vardefstr"
 

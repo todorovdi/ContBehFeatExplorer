@@ -1,6 +1,8 @@
 do_genfeats=$1
 do_PCA=$2
 do_tSNE=$3
+ 
+allow_multiproc=0
 
 
 raws_off=(S01_off_hold S02_off_hold S03_off_hold S04_off_hold S05_off_hold S07_off_hold )  
@@ -23,10 +25,16 @@ raws_compl=(${raws_off_compl[@]} ${raws_on_compl[@]})
 #raws=(S04_on_hold)
 #raws_compl=(S04_on_move)
 
+#raws=(S01_off_hold S01_on_hold)
+#raws_compl=(S01_off_move S01_on_move)
+
+#raws=(S01_off_hold)
+#raws_compl=(S01_off_move)
+
 nraws=${#raws[*]}
 
 # if we run only PCA/LDA, then we can do it in parallel (because they are not parallalized within)
-if [[ $do_genfeats -eq 0 && $do_tSNE -eq 0 && $do_PCA -eq 1 ]]; then
+if [[ $do_genfeats -eq 0 && $do_tSNE -eq 0 && $do_PCA -eq 1 && $allow_multiproc -eq 1 ]]; then
   num_procs=10
   num_jobs="\j"
   for (( i=0; i<=$(( $nraws -1 )); i++ )); do

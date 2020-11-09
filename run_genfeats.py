@@ -61,24 +61,37 @@ data_modalities = ['LFP', 'msrc']
 #data_modalities = ['LFP']
 #data_modalities = ['msrc']
 
+parcels_to_use = ['Cerebellum' , 'notCerebellum']
+
 feat_types_all = [ 'con',  'H_act', 'H_mob', 'H_compl', 'bpcorr', 'rbcorr']
 #features_to_use = [ 'con',  'H_act', 'H_mob', 'H_compl']  #csd includes tfr in my implementation
 #features_to_use = [ 'con',  'H_act', 'H_mob', 'H_compl', 'bpcorr']
-features_to_use = [ 'con',  'H_act', 'H_mob', 'H_compl', 'bpcorr', 'rbcorr']
+#features_to_use = [ 'con',  'H_act', 'H_mob', 'H_compl']
+features_to_use = feat_types_all
 #features_to_use = [ 'H_act', 'H_mob', 'H_compl']  #csd includes tfr in my implementation
 #assert 'bandcorrel' not in features_to_use, 'Not implemented yet'
+cross_types = [ ('LFP.*','.?src.*') , ('.*src_((?!Cerebellum).)+', '.*src_Cerebellum.*') ]
+cross_types = [ ('LFP.*','.?src.*') ]  # only couplings of LFP to sources
 msrc_inds = np.arange(8,dtype=int)  #indices appearing in channel (sources) names, not channnel indices
 
 use_LFP_to_LFP = 0
 
-corr_time_lagged = []
-corr_time_lagged = [0.5, 1] # in window size fractions
+#corr_time_lagged = []
+#corr_time_lagged = [0.5, 1] # in window size fractions
 
 
 #################### Exec control params
-src_type_to_use  = 'center' # or mean_td
+sources_type = 'HirschPt2011'
+#sources_type = 'parcel_aal'
+#src_type_to_use  = 'center' # or mean_td
+src_type_to_use  = 'mean_td' # or mean_td
+
+# for 2nd order features
+#roi_pairs = [ ('Cerebellum_L', 'notCerebellum_L'), ('Cerebellum_R', 'notCerebellum_L'),
+#             ('Cerebellum_R', 'notCerebellum_R'), ('Cerebellum_L', 'notCerebellum_R') ]
 
 only_load_data               = 0
+exit_after_TFR               = 0
 #
 load_TFR                     = 0
 save_TFR                     = 0  # maybe better no to waste space, since I change params often
@@ -112,7 +125,7 @@ helpstr = 'Usage example\nrun_genfeats.py --rawname <rawname_naked> '
 opts, args = getopt.getopt(effargv,"hr:",
         ["mods=","msrc_inds=","feat_types=","bands=","rawname=",
             "show_plots=", "load_TFR=", "side=", "LFPchan=", "useHFO=",
-         "plot_types=", "plot_only" ])
+         "plot_types=", "plot_only", "sources_type=" ])
 print(sys.argv, opts, args)
 
 for opt, arg in opts:
@@ -132,6 +145,9 @@ for opt, arg in opts:
     elif opt == "--bands":
         bands_only = arg  #crude of fine
         assert bands_only in ['fine', 'crude']
+    elif opt == "--sources_type":
+        if len(arg):
+            sources_type = arg
     elif opt in ('-r','--rawname'):
         rawnames = arg.split(',')  #lfp of msrc
         if len(rawnames) > 1:
@@ -192,7 +208,7 @@ for rawname_ in rawnames:
 
     upre.saveRectConv(rawname_, skip_if_exist = 1)
 
-    src_fname_noext = 'srcd_{}_HirschPt2011'.format(rawname_)
+    src_fname_noext = 'srcd_{}_{}'.format(rawname_,sources_type)
 
     rawname_LFPonly = rawname_ + '_LFPonly'+ '.fif'
     rawname_LFPonly_full = os.path.join( data_dir, rawname_LFPonly )
@@ -223,6 +239,7 @@ for rawname_ in rawnames:
     raws_emg_rectconv  += [ raw_emg_rectconv   ]
 
 sfreq = int(raw_srconly.info['sfreq'])
+
 
 ####################  data processing params
 
@@ -275,6 +292,8 @@ tremfreq_Jan = gen_subj_info[subj]['tremfreq']
 print('main trem side and LFP ',maintremside, mainLFPchan)
 
 
+
+
 mts_letter = maintremside[0].upper()
 int_names = ['{}_{}'.format(task,mts_letter), 'trem_{}'.format(mts_letter), 'notrem_{}'.format(mts_letter)]
 
@@ -313,9 +332,18 @@ ivalis_pri = []
 extdat_pri = []
 anns_pri = []
 raws_permod_pri = []
+rec_info_pri = []
 
 for rawind in range(len(rawnames) ):
     rawname_ = rawnames[rawind]
+
+    src_rec_info_fn = '{}_{}_src_rec_info'.format(rawname_,sources_type)
+    src_rec_info_fn_full = os.path.join(gv.data_dir, src_rec_info_fn + '.npz')
+    rec_info = np.load(src_rec_info_fn_full, allow_pickle=True)
+    rec_info_pri += [rec_info]
+
+    roi_labels = rec_info['coord_labels_corresp_dict'][()]
+    sort_keys = rec_info['srcgroups_key_order'][()]
 
 
     anns_fn = rawname_ + '_anns.txt'
@@ -359,8 +387,13 @@ for rawind in range(len(rawnames) ):
 
 
         chis =  mne.pick_channels_regexp(raw_srconly.ch_names, 'msrc{}_all_*'.format(side)  )
+        if len(chis) == 0:
+            chis =  mne.pick_channels_regexp(raw_srconly.ch_names, 'msrc{}_[0-9]+_[0-9]+_c[0-9]+'.format(side)  )
+        assert len(chis) > 0
         chnames_src = [raw_srconly.ch_names[chi] for chi in chis]
         raws_srconly_perside[side].pick_channels(   chnames_src  )
+
+        print('{} side,  {} sources'.format(side, len(chis) ) )
 
 
     #TODO
@@ -650,8 +683,12 @@ if save_feat:
 
         assert len(Xtimes_cur ) == len(X_cur)
 
-        a = '{}_feats_{}chs_nfeats{}_skip{}_wsz{}.npz'.\
-            format(rawname_,n_channels, X.shape[1], skip, windowsz)
+        if sources_type == 'HirschPt2011':
+            st = ''
+        else:
+            st = sources_type
+        a = '{}_feats_{}_{}chs_nfeats{}_skip{}_wsz{}.npz'.\
+            format(rawname_,st,n_channels, X.shape[1], skip, windowsz)
         fname_feat_full = os.path.join( data_dir,a)
 
         info = {}

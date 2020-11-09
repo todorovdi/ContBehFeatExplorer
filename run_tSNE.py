@@ -258,6 +258,7 @@ for rawname_ in rawnames:
         regex = '{0}_{1}_PCA_nr({2})_[0-9]+chs_nfeats({3})_pcadim({4}).*'.\
             format(rawname_, prefix, regex_nrPCA, regex_nfeats, regex_pcadim)
 
+        # here prefix should be without '_' in front or after
         fnfound = utsne.findByPrefix(data_dir, rawname_, prefix, regex=regex)
         if len(fnfound) > 1:
             fnt = [0] * len(fnfound)
@@ -392,7 +393,7 @@ color_per_int_type = { 'trem':tremcolor, 'notrem':notremcolor, 'neut':neutcolor,
                       'move':movecolor, 'hold':holdcolor }
 
 
-colors,markers =utsne.prepColorsMarkers(mts_letter, anns, Xtimes,
+colors, markers =utsne.prepColorsMarkers(mts_letter, anns, Xtimes,
            nedgeBins, windowsz, sfreq, totskip, mrk,mrknames, color_per_int_type,
                                         dataset_bounds = dataset_bounds)
 

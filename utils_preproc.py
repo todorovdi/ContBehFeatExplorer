@@ -374,6 +374,7 @@ def extractEMGData(raw, rawname_=None, skip_if_exist = 1, tremfreq = 9):
     if rawname_ is not None:
         rectconv_fname_full = os.path.join(gv.data_dir, '{}_emg_rectconv.fif'.format(rawname_) )
         if not (skip_if_exist and os.path.exists(rectconv_fname_full) ):
+            print('EMG raw saved to ',rectconv_fname_full)
             rectconvraw.save(rectconv_fname_full, overwrite=1)
 
     return rectconvraw
@@ -436,6 +437,49 @@ def getECGindsICAcomp(icacomp, mult = 1.25, ncomp_test_for_ecg = 6):
             ecg_evts_all += [ecg_evts]
     return ecg_compinds, ratios, ecg_evts_all
 
+
+def concatRaws(raws,rescale=True,interval_for_stats = (0,300) ):
+    '''
+    '''
+    import copy, mne
+    import utils_tSNE as utsne
+
+    raws_ = copy.deepcopy(raws)  #otherwise it does stupid damage to the first raw
+
+    means_pri = []
+    qs_pri  = []
+    for rawi,raw in enumerate(raws):
+        means = []
+        qs    = []
+        for chi in range(len(raw.ch_names) ):
+            if interval_for_stats is not None:
+                tbs,tbe = raw.time_as_index( interval_for_stats )
+            else:
+                tbs, tbe = 0, len(raw.times)-1
+            dat, times = raw[chi,tbs:tbe]
+            me, mn,mx = utsne.robustMean(dat, axis=1, per_dim =1, ret_aux=1, q = .05)
+            #q = np.percentile(dat, [5,95] )
+            means += [ me  ]
+            qs += [ (mn,mx)  ]
+        means_pri += [means]
+        qs_pri += [qs]
+
+    for rawi,raw in enumerate(raws):
+        raws_[rawi].load_data()
+        for chi in range(len(raw.ch_names) ):
+            me0 = means_pri[0][chi]
+            me = means_pri[rawi][chi]
+
+            qs0 = qs_pri[0][chi]
+            rng0 = qs0[1]-qs0[0]
+
+            qs = qs_pri[rawi][chi]
+            rng = qs[1]-qs[0]
+            raws_[rawi].apply_function(lambda x: (x-me)/rng * rng0 + me0,  picks = [chi] )
+
+    merged = mne.concatenate_raws(raws_)
+
+    return merged
 
     #rectconvraw_perside[side] = tmp
 

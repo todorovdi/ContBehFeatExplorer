@@ -68,6 +68,11 @@ echo raw=$raw,raw_compl=$raw_compl
 interactive=""
 #interactive="-i"
 
+single_core=0
+
+#SOURCES_TYPE=""
+SOURCES_TYPE="parcel_aal"
+
 DESIRED_PCA_EXPLAIN=0.95
 DESIRED_DISCARD=0.01
 PCA_PLOTS=1
@@ -91,10 +96,13 @@ DO_RAW=0
 DO_RAW_COMPL=0
 DO_RAW_BOTH=1
 
-PREFIXES_AUX=1
+PREFIXES_AUX=0
+#FEAT_BANDS="fine"
+FEAT_BANDS="crude"
+FEAT_TYPES_TO_USE="con,H_act,H_mob,H_compl"
 
 if [ $do_genfeats -gt 0 ]; then
-  ipython3 $interactive run_genfeats.py -- -r $raw,$raw_compl --bands fine
+  ipython3 $interactive run_genfeats.py -- -r $raw,$raw_compl --bands $FEAT_BANDS --sources_type $SOURCES_TYPE --feat_types FEAT_TYPES_TO_USE
 fi
 
 if [ $do_PCA -gt 0 ]; then
@@ -102,44 +110,49 @@ if [ $do_PCA -gt 0 ]; then
   #ipython3 $interactive run_PCA.py  -- -r $raw,$raw_compl
 
   function PCA { 
-    RS="$interactive run_PCA.py -- $1"
+    RS="$interactive run_PCA.py -- $1 --single_core $single_core"
     # use everything (from main trem side)
-    #ipython3 $RS --prefix all
-    #ipython3 $RS --mods LFP --prefix modLFP
+    ipython3 $RS --prefix all                                                           
+    if [$? -ne 0 ]; then
+      exit 1
+    fi
+    ipython3 $RS --mods LFP --prefix modLFP                                           
+    ipython3 $RS --prefix allb_beta       --fbands low_beta,high_beta                 
+    ipython3 $RS --mods msrc              --prefix modSrc                             
+    ipython3 $RS --prefix allb_trem       --fbands tremor                             
+    ipython3 $RS --prefix allb_gamma      --fbands low_gamma,high_gamma               
     if [ $PREFIXES_AUX -gt 0 ]; then
-      ipython3 $RS --mods msrc              --prefix modSrc 
-      ipython3 $RS --prefix allnoHFO        --use_HFO 0
-      ipython3 $RS --prefix allb_trem       --fbands tremor 
-      ipython3 $RS --prefix allb_beta       --fbands low_beta,high_beta
-      ipython3 $RS --prefix allb_gamma      --fbands low_gamma,high_gamma
-      ipython3 $RS --prefix allb_trembeta   --fbands tremor,low_gamma,high_gamma
-      ipython3 $RS --mods LFP               --prefix modLFPnoHFO --use_HFO 0
-      ipython3 $RS --feat_types H_act,H_mob,H_compl,rbcorr --prefix onlyTD
-      ipython3 $RS --feat_types con,bpcorr   --prefix onlyFD
-      ipython3 $RS --feat_types con,H_act,H_mob,H_compl --prefix conH
-      ipython3 $RS --feat_types H_act,H_mob,H_compl --prefix onlyH
-      ipython3 $RS --feat_types bpcorr       --prefix onlyBpcorr
-      ipython3 $RS --feat_types bpcorr       --use_HFO 0 --prefix onlyBpcorrNoHFO
-      ipython3 $RS --feat_types rbcorr       --prefix onlyRbcorr
-      ipython3 $RS --feat_types con          --prefix onlyCon
-      ipython3 $RS --feat_types con          --use_HFO 0 --prefix onlyConNoHFO
+      ipython3 $RS --prefix allnoHFO        --use_HFO 0                               
+      #ipython3 $RS --prefix allb_trem       --fbands tremor                          
+      #ipython3 $RS --prefix allb_gamma      --fbands low_gamma,high_gamma            
+      ipython3 $RS --prefix allb_trembeta   --fbands tremor,low_gamma,high_gamma      
+      ipython3 $RS --mods LFP               --prefix modLFPnoHFO --use_HFO 0          
+      ipython3 $RS --feat_types H_act,H_mob,H_compl,rbcorr --prefix onlyTD            
+      ipython3 $RS --feat_types con,bpcorr   --prefix onlyFD                          
+      ipython3 $RS --feat_types con,H_act,H_mob,H_compl --prefix conH                 
+      ipython3 $RS --feat_types H_act,H_mob,H_compl --prefix onlyH                    
+      ipython3 $RS --feat_types bpcorr       --prefix onlyBpcorr                      
+      ipython3 $RS --feat_types bpcorr       --use_HFO 0 --prefix onlyBpcorrNoHFO     
+      ipython3 $RS --feat_types rbcorr       --prefix onlyRbcorr                      
+      ipython3 $RS --feat_types con          --prefix onlyCon                         
+      ipython3 $RS --feat_types con          --use_HFO 0 --prefix onlyConNoHFO        
     fi
   }
 
   if [ $DO_RAW_BOTH_PCA -gt 0 ]; then
-    COMMON_PART="-r $raw,$raw_compl --pcexpl $DESIRED_PCA_EXPLAIN --discard $DESIRED_DISCARD --show_plots $PCA_PLOTS"
+    COMMON_PART="-r $raw,$raw_compl --pcexpl $DESIRED_PCA_EXPLAIN --discard $DESIRED_DISCARD --show_plots $PCA_PLOTS --sources_type $SOURCES_TYPE"
     #./subrun_pipeline_PCA.sh
     PCA "$COMMON_PART"
   fi
 
   if [ $DO_RAW_PCA -gt 0 ]; then
-    COMMON_PART="-r $raw --pcexpl $DESIRED_PCA_EXPLAIN --discard $DESIRED_DISCARD --show_plots $PCA_PLOTS"
+    COMMON_PART="-r $raw --pcexpl $DESIRED_PCA_EXPLAIN --discard $DESIRED_DISCARD --show_plots $PCA_PLOTS --sources_type $SOURCES_TYPE"
     #./subrun_pipeline_PCA.sh
     PCA "$COMMON_PART"
   fi
 
   if [ $DO_RAW_COMPL_PCA -gt 0 ]; then
-    COMMON_PART="-r $raw_compl --pcexpl $DESIRED_PCA_EXPLAIN --discard $DESIRED_DISCARD --show_plots $PCA_PLOTS"
+    COMMON_PART="-r $raw_compl --pcexpl $DESIRED_PCA_EXPLAIN --discard $DESIRED_DISCARD --show_plots $PCA_PLOTS --sources_type $SOURCES_TYPE"
     #./subrun_pipeline_PCA.sh
     PCA "$COMMON_PART"
   fi

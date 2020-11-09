@@ -10,6 +10,8 @@ else:
 #if not have_TFR:
 #    print('OOO')
 #    sys.exit(0)
+#def computeTFR():
+#    return
 
 if not (use_existing_TFR and have_TFR):
     if load_TFR and os.path.exists( fname_tfr_full ):
@@ -76,15 +78,22 @@ if not (use_existing_TFR and have_TFR):
             np.savez(fname_tfr_full, tfrres=tfrres)
             print('TFR saved to ',fname_tfr_full)
 
-        csd, csdord = utils.tfr2csd(tfrres, sfreq, returnOrder=1)  # csdord.shape = (2, csdsize)
+        chnames_nicened = utils.nicenMEGsrc_chnames(chnames_tfr, roi_labels, sort_keys,
+                                prefix='msrc_')
+
+        ind_distr = utils.selectIndPairs(chnames_nicened, cross_types, upper_diag=False)
+        csd, csdord = utils.tfr2csd(tfrres, sfreq, returnOrder=1, ind_pairs=ind_distr)  # csdord.shape = (2, csdsize)
 
 
 gc.collect()
 ntimebins = tfrres.shape[-1]
 
+if exit_after_TFR:
+    sys.exit(0)
+
 ############################# CSD
 
-print('Averaging over freqs withing bands')
+print('Averaging over freqs within bands')
 if bands_only in ['fine', 'crude']:
     if bands_only == 'fine':
         fband_names = fband_names_fine
@@ -307,8 +316,6 @@ if 'rbcorr' in features_to_use:  #raw band corr
     else:
         fband_names = fband_names_crude
 
-
-
 #def _flt(data,sfreq,lowcut,highcut,bandpass_order = 5):
 
 
@@ -320,9 +327,12 @@ if 'rbcorr' in features_to_use:  #raw band corr
         bandPairs = [('tremor','tremor', 'corr'), ('beta','beta', 'corr'), ('gamma','gamma', 'corr') ]
 
 
+
     rbcors,rbcor_names = utsne.computeFeatOrd2(dat_flt, names=names_flt,
                                             skip=skip, windowsz = windowsz, band_pairs = bandPairs,
-                                            n_free_cores=2, positive=0, templ='{}_.*')
+                                            n_free_cores=2, positive=0, templ='{}_.*',
+                                               roi_pairs = cross_types,
+                                               roi_labels=roi_labels, sort_keys=sort_keys)
 
     # if use_lfp_HFO:  # we can compute time domain corr only between HFOs,
     # but they exist only at LFP and we don't want to compute corr of LFPs
@@ -337,6 +347,9 @@ if 'rbcorr' in features_to_use:  #raw band corr
     assert len(rbcor_names) > 0
 
     rbcors = np.vstack(rbcors)
+else:
+    rbcors = None
+    rbcor_names = None
 
 if 'bpcorr' in features_to_use:
     if bands_only == 'fine':
@@ -355,10 +368,15 @@ if 'bpcorr' in features_to_use:
     bpcors,bpcor_names = utsne.computeFeatOrd2(dat_bpow, names=names_bpow,
                                             skip=skip, windowsz = windowsz,
                                                band_pairs = bandPairs,
-                                            n_free_cores=2, positive=1, templ='{}_.*')
+                                            n_free_cores=2, positive=1, templ='{}_.*',
+                                               roi_pairs = cross_types,
+                                               roi_labels=roi_labels, sort_keys=sort_keys)
     assert len(bpcor_names) > 0
 
     bpcors = np.vstack(bpcors)
+else:
+    bpcors = None
+    bpcor_names = None
 
 
 #####################################################
@@ -392,9 +410,11 @@ feat_dict = { 'con':{'data':None, 'pct':con_scale, 'centering':center_spec_feats
                      'names':csdord_strs },
              'H_act':{'data':act, 'pct':defpct, 'names':subfeature_order},
              'H_mob':{'data':mob, 'pct':defpct, 'names':subfeature_order},
-             'H_compl':{'data':compl, 'pct':defpct, 'names':subfeature_order},
-             'rbcorr':{'data':rbcors, 'pct':defpct, 'names':rbcor_names  },
-             'bpcorr':{'data':bpcors, 'pct':defpct, 'names':bpcor_names  } }
+             'H_compl':{'data':compl, 'pct':defpct, 'names':subfeature_order} }
+if 'bpcorr' in features_to_use:
+             feat_dict['bpcorr'] = {'data':bpcors, 'pct':defpct, 'names':bpcor_names  }
+if 'rbcorr' in features_to_use:
+             feat_dict['rbcorr'] = {'data':rbcors, 'pct':defpct, 'names':rbcor_names  }
  #'tfr':{'data':None, 'pct':con_scale, 'centering':center_spec_feats },
 
 feat_dict['con']['centering'] = True

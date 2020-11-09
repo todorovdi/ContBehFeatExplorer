@@ -1,10 +1,10 @@
 %m1 = ft_read_atlas('HMAT_Right_M1.nii')  % goes deeper in the sulcus
-afni = ft_read_atlas('~/soft/fieldtrip-20190716/template/atlas/afni/TTatlas+tlrc.HEAD');  
+afni = ft_read_atlas('~/soft/fieldtrip/template/atlas/afni/TTatlas+tlrc.HEAD');  
 % pts_converted = mni2icbm_spm( pts )
 % atlas.  pts_converted = mni2icbm_spm( pts )
 atlas = ft_convert_units(afni,'cm'); % ftrop and our sourcemodels have cm units
-srsstd = load('~/soft/fieldtrip-20190716/template/sourcemodel/standard_sourcemodel3d5mm'); % 5mm spacing
-srsstd_1cm = load('~/soft/fieldtrip-20190716/template/sourcemodel/standard_sourcemodel3d10mm'); % 5mm spacing
+srsstd = load('~/soft/fieldtrip/template/sourcemodel/standard_sourcemodel3d5mm'); % 5mm spacing
+srsstd_1cm = load('~/soft/fieldtrip/template/sourcemodel/standard_sourcemodel3d10mm'); % 5mm spacing
 
 
 data_dir = getenv('DATA_DUSS');
@@ -91,6 +91,18 @@ save("head_scalemat",'scalemat');
 
 S = scalemat(subjstr);
 
+% I first find map between head-alagned grids and standards grids, 
+% then transform Jan coords from the papers to actual (head-related) coords and then add surround
+
+% Marius takes the cortical grid, runs ft_sourceanalysis with data being the cov matrix only 
+%    (output of of ft_timelockanalysis)
+% takes spatial filter (trial indep), mutliplies by hand the cleaned data
+% puts to source_time the output of it (entire 3D grid) and parcel.pos
+
+% I dont want to use their ft_parcel, so I can just take MNI coords of the parcel points that I need and then convert them using my favorite matrix probably
+% but I also want to make sure conversion works and plot the outcome
+
+%TODO: what does 'projectmom' do?
 
 % get matrix mapping MNI to my coords
 %vecinds = [1 2 3];
@@ -143,6 +155,9 @@ coords_Jan_actual_upd = projectPtOnBrainSurf(hdmf.hdm, coords_Jan_actual, 1);
 
 coords_Jan_actual = coords_Jan_actual_upd;
 
+%%%%%%%%%  take all 3D grid pts and select those that has to do with some Brodmann areas
+%%%%%%%%%  Marius's script for every cortical grid point gets which elements of the atlas it corresponds to 
+
 
 cfg = [];
 cfg.atlas = atlas;
@@ -171,8 +186,8 @@ roipts0_1cm = srsstd_1cm.sourcemodel.pos(mask_roi_1cm,:);
 
 
 mask_roi                  = repmat(srsstd.sourcemodel.inside,1,1);
-mask_roi(mask_roi==1)     = 0;
-mask_roi(mask_Brodmann_roi)            = 1;
+mask_roi(mask_roi==1)         = 0;
+mask_roi(mask_Brodmann_roi)   = 1;
 
 tmpstd = srsstd.sourcemodel.inside;
 %hdmf.mni_aligned_grid.inside -- mask of points with 0.5 spacing that are inside the head. 

@@ -1,4 +1,6 @@
-function output = srcrec(subjstr,datall,hdmf,roi,bads,S,srs,mask,use_DICS)
+function output = srcrec(subjstr,datall,data_cleaned,hdmf,roi,bads,S,srs,mask,use_DICS)
+  % roi is a string
+  % mask argument only used if roi is of special type 
   %cd 
 
   do_load_only_ifnew   = 1;
@@ -7,6 +9,52 @@ function output = srcrec(subjstr,datall,hdmf,roi,bads,S,srs,mask,use_DICS)
 
   %tstart = 300;
   %tend = 400;
+
+  ntrials = size( data_cleaned.trial, 2 );  %number of segments after separations by artifact placements
+  if ntrials > 1
+    data = [];
+    data.hdr = data_cleaned.hdr;
+    data.fsample = data_cleaned.fsample;
+    data.cfg = data_cleaned.cfg;
+    data.label = data_cleaned.label;
+    data.grad = data_cleaned.grad;
+    nbinstot = 0 ;
+    for nt = 1:ntrials
+      nbinstot = nbinstot + size(data_cleaned.trial{nt}, 2);
+    end
+
+    data_concat = zeros(size(data_cleaned.trial{nt}, 1), nbinstot );
+    time_concat = zeros(1, nbinstot );
+
+    %initialize matrix data_concat of size channels X total time points
+    %initialize matrix time_concat of size 1 X total time points
+
+    shift_bin = 1;
+    last_time = -1;
+    for nt = 1:ntrials
+      nbins_cur = size(data_cleaned.trial{nt}, 2);
+      data_concat(:,shift_bin:shift_bin+nbins_cur-1) = data_cleaned.trial{nt};
+      time_shift = 0;
+      if last_time >= 0
+        time_shift = last_time - time_concat.trial{nt};
+      end
+      time_concat(:,shift_bin:shift_bin+nbins_cur-1) = data_cleaned.time{nt} + time_shift;  % maybe I need to shift time as well
+      shift_bin = shift_bin + (nbins_cur - 1);
+    end
+
+    %loop over data.trial and data.time (have the same size)
+    %   data_concat(:,appropriate time indices) = data.trial{k}(:,:);
+    %   time_concat(1,appropriate time indices) = data.time{k}(:);
+    %end loop
+
+    data.hdr.nSamples = nbinstot;
+    data.trial = {data_concat};
+    data.time = {time_concat};
+    data.sampleinfo = [[1 nbinstot ] ];
+
+    data_cleaned = data
+  end
+
 
 
 
@@ -84,6 +132,12 @@ function output = srcrec(subjstr,datall,hdmf,roi,bads,S,srs,mask,use_DICS)
 
       srcpos = coords_Jan_actual;
       srcpos = surroundPts;
+
+    elseif strcmp(roi{1}, "parcel_aal") == 1
+      fn = strcat( subjstr, '_modcoord_parcel_aal.mat');
+      sprintf('Loading %s',fn)
+      load(fn);
+      srcpos = coords_Jan_actual;
     else
       srcpos_ = hdmf.mni_aligned_grid.pos(mask,:);
       srcpos = zeros(size(srcpos_));
@@ -206,15 +260,24 @@ function output = srcrec(subjstr,datall,hdmf,roi,bads,S,srs,mask,use_DICS)
           cfg_bp.hpfreq = fband_cur(1);
           %cfg_bp.hpfiltord
         end
+        datall_cleaned_cur = ft_preprocessing(cfg_bp, data_cleaned);
         datall_cur = ft_preprocessing(cfg_bp, datall);
       else
-        datall_cur = datall
+        datall_cleaned_cur = data_cleaned;
+        datall_cur = datall;
       end
+
+
+      cfg_tla = [];
+      cfg_tla.covariance = 'yes';
+      avg = ft_timelockanalysis(cfg_tla,datall_cleaned_cur);
+      eigval = eig(avg.cov);
+      lambda = max(eigval) * 0.001;
 
 
       cfg_srcrec=[];
       cfg_srcrec.method='lcmv';
-      cfg_srcrec.lcmv.lambda='5%';
+
       cfg_srcrec.headmodel=hdmf.hdm;
       %cfg_srcrec.grid=mni_aligned_grid;
       cfg_srcrec.sourcemodel = [];
@@ -224,11 +287,39 @@ function output = srcrec(subjstr,datall,hdmf,roi,bads,S,srs,mask,use_DICS)
 
       cfg_srcrec.supchan = bads;
 
+      %cfg_srcrec.lcmv.lambda='5%';
+      cfg_srcrec.lcmv.lamba = [num2str(lambda),'%']; %regularization value. Can be changed by inspection
+
+      cfg_srcrec.lcmv.keepfilter = 'yes';
       cfg_srcrec.lcmv.projectmom='yes';
       cfg_srcrec.lcmv.reducerank=2;  % always like that for MEG
 
       if do_srcrec
-        source_data_cur = ft_sourceanalysis(cfg_srcrec,datall_cur);  % 100 sec, 6 channels takes 37 sec on desktop
+        %source_data_cur = ft_sourceanalysis(cfg_srcrec,datall_cur);  
+
+        source_time_tmp = ft_sourceanalysis(cfg_srcrec,avg);  
+        %source_time_tmp = ft_sourceanalysis(cfg_srcrec,datall_cleaned_cur);  
+
+        spatial_filt = cell2mat(source_time_tmp.avg.filter);
+
+        if size(datall.trial{1},1) ~= size(spatial_filt,2)
+          error('Wrong sizes')
+        end
+
+        %preallocate variable that contains the source activity per trial
+        trial_source = zeros( size(spatial_filt,1), size(datall_cur.trial{1},2), length(datall_cur.trial) ); %Sources X Samples X Trials
+
+        %get the data [with all trials] projected into source space with the individual spatial filter
+        for j = 1:length(datall_cur.trial)
+            trial_source(:,:,j) = spatial_filt * datall_cur.trial{j}; %Sources X Timepoint X Trails
+        end
+        
+        %line trials up as a continuous (the parcel calculation is much faster then. Later I go back to trials)
+        trial_source = reshape( trial_source, [size(trial_source,1),size(trial_source,2) * size(trial_source,3)] );
+
+        source_data_cur = source_time_tmp;
+        source_data_cur.avg.mom = trial_source;
+
         resEntry = [];
         resEntry.source_data = source_data_cur;
         resEntry.bpfreq = fband_cur;

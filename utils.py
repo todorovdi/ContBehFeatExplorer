@@ -7,6 +7,7 @@ import scipy.signal as sig
 import matplotlib.pyplot as plt
 import globvars as gv
 import os
+import mne
 
 def getIntervalIntersection(a1,b1, a2, b2):
     assert b1 >= a1
@@ -324,9 +325,31 @@ def processJanIntervals( intervalData, intvlen, intvlenStats, loffset, roffset, 
 
     return tipr
 
-def getMEGsrc_chname_nice(chn):
+def parseMEGsrcChnameShort(chn):
+    ''' <something>srcR_1_34_c54'''
+    r = re.match('[\w_,]*src([RL])_([0-9]+)_c([0-9]+)',chn)
+    if r is not None:
+        assert len(r.groups() ) == 3
+        side = r.groups()[0]
+        ind = int(r.groups()[1])
+        subind = int(r.groups()[2])
+        srcgroup_ind = -1
+    else:
+        r = re.match('[\w_,]*src([RL])_([0-9]+)_([0-9]+)_c([0-9]+)',chn)
+        if r is None:
+            raise ValueError('wrong chn format {}'.format(chn))
+        assert len(r.groups() ) == 4
+        side = r.groups()[0]
+        srcgroup_ind = int(r.groups()[1])
+        ind = int(r.groups()[2])
+        subind = int(r.groups()[3])
+
+    return side,srcgroup_ind, ind, subind
+
+
+def getMEGsrc_chname_nice(chn, coord_labels_corresp_coord=None, keyorder=None, preserve_prefix = False):
     name = chn
-    if chn.find('HirschPt2011') >= 0:
+    if chn.find('HirschPt2011') >= 0:  # old vere
         r = re.match( ".*_([0-9]+)", chn ).groups()
         num = int( r[0] )
         nlabel = num // 2
@@ -336,9 +359,60 @@ def getMEGsrc_chname_nice(chn):
         label = gv.gparams['coord_labels'][nlabel]
 
         name = '{}_{}'.format( label,side)
+    else:
+        src_start_ind = chn.find('src')
+        if src_start_ind >= 0:
+            side, srcgroup_ind, ind, subind = parseMEGsrcChnameShort(chn)
+
+            if srcgroup_ind < 0:
+                name = '{}_c{}'.format(coord_labels_corresp_coord[ind], subind)
+            else:
+                assert isinstance(coord_labels_corresp_coord, dict) and keyorder is not None
+                key = keyorder[srcgroup_ind]
+                name = '{}_c{}'.format(coord_labels_corresp_coord[key ][ind], subind)
+
+            if preserve_prefix:
+                name = chn[:src_start_ind+5] + name
+
+
+        #if isinstance(coord_labels_corresp_coord ,list):
+        #    r = re.match('.+src._([0-9]+)_c([0-9]+)',chn)
+        #    assert len(r.groups() ) == 2
+        #    ind = int(r.groups()[0])
+        #    subind = int(r.groups()[1])
+        #    name = '{}_c{}'.format(coord_labels_corresp_coord[ind], subind)
+        #else:
+        #    assert isinstance(coord_labels_corresp_coord, dict) and keyorder is not None
+        #    r = re.match('.+src._([0-9]+)_([0-9]+)_c([0-9]+)',chn)
+        #    assert len(r.groups() ) == 3
+        #    srcgroup_ind = int(r.groups()[0])
+        #    ind = int(r.groups()[1])
+        #    subind = int(r.groups()[2])
+        #    key = keyorder[srcgroup_ind]
+        #    name = '{}_c{}'.format(coord_labels_corresp_coord[key ][ind], subind)
+
+
     return name
 
+def nicenMEGsrc_chnames(chns, coord_labels_corresp_coord=None, keyorder=None, prefix = ''):
+    # nor MEGsrc chnames left unchanged
+    if len(chns):
+        assert isinstance(chns[0],str)
+    else:
+        return []
+    chns_nicened = [0] * len(chns)
+    for i,chn in enumerate(chns):
+        fi = chn.find('src')
+        chn_nice = chn
+        if fi in [0,1]:   # we only accept .?src   kind of chnames here
+            chn_nice = getMEGsrc_chname_nice(chn, coord_labels_corresp_coord, keyorder)
+            chn_nice = prefix + chn_nice
+        chns_nicened[i] = chn_nice
+
+    return chns_nicened
+
 def getMEGsrc_contralatSide(chn):
+    assert isinstance(chn,str)
     # return no the brain side
     nicen = getMEGsrc_chname_nice(chn)
     for side in ['right', 'left']:
@@ -1652,34 +1726,93 @@ def Hjorth(dat, dt, windowsz = None):
     return activity, mobility, complexity
 
 
-def tfr2csd(dat, sfreq, returnOrder = False, skip_same = []):
+def selectIndPairs(chnames,include_pairs,upper_diag=True,inc_same=True, force_same=True):
+    '''
+    inc pairs -- pairs of regex
+    '''
+    N = len(chnames)
+    ind_pairs = [0] * N
+    # look at all upper diag combinations
+    for i in range(N):
+        chn1 = chnames[i]
+        inds = []
+        if upper_diag:
+            if inc_same:
+                sl = range(i,N)
+            else:
+                sl = range(i+1,N)
+        else:
+            sl = range(0,N)
+        for j in sl:
+            chn2 = chnames[j]
+            wasSome = False
+            if j == i and  force_same :
+                wasSome = True
+            else:
+                # check if given upper diag combination is good
+                for (s1,s2) in include_pairs:
+                    r1 = re.match(s1,chn1)
+                    r2 = re.match(s2,chn2)
+                    #if j == N - 1 and i == 1 and s1.find('LFP') < 0:
+                    #    print(r1,r2)
+                    #    print(chn1, chn2, s1, s2)
+
+                    if r1 is None or r2 is None:
+                        continue
+                    else:
+                        wasSome = True
+                        break
+            if wasSome:
+                inds += [j]
+        ind_pairs[i] = inds
+    return ind_pairs
+
+def tfr2csd(dat, sfreq, returnOrder = False, skip_same = [], ind_pairs = None):
     ''' csd has dimensions Nchan x nfreax x nbins
     returns n x (n+1) / 2  x nbins array
     skip same = indices of channels for which we won't compute i->j correl (usually LFP->LFP)
       note that it ruins getCsdVals
+    ind_paris -- list of pairs (index, list of indces)
     '''
     assert dat.ndim == 3
     n_channels = dat.shape[0]
     csds = []
-
     order  = []
-    for chi in range(n_channels):
-        if len(skip_same) > 0:
-            good_sec_inds = [chi]
-            for chi2 in range(chi+1,n_channels):
-                if not ( (chi in skip_same) and (chi2 in skip_same) ):
-                    good_sec_inds += [chi2]
-            r = np.conj ( dat[[chi]] ) *  ( dat[good_sec_inds] )    # upper diagonal elements only, same freq cross-channels
-            secarg = np.array( good_sec_inds, dtype=int )
-        else:
-            r = np.conj ( dat[[chi]] ) *  ( dat[chi:] )    # upper diagonal elements only, same freq cross-channels
-            secarg   = np.arange(chi,n_channels)
-        firstarg = np.ones(len(secarg), dtype=int ) * chi
-        curindPairs = np.vstack( [firstarg,secarg] )
-        order += [curindPairs]
 
-        #print(r.shape)
-        csds += [r  ]
+
+
+    if ind_pairs is not None:
+        assert len(ind_pairs) == n_channels
+        for chi in range(n_channels):
+            good_sec_inds = ind_pairs[chi]
+            if len(good_sec_inds):
+                r = np.conj ( dat[[chi]] ) *  ( dat[good_sec_inds] )    # upper diagonal elements only, same freq cross-channels
+                csds += [r  ]
+
+                secarg = np.array( good_sec_inds, dtype=int )
+                firstarg = np.ones(len(secarg), dtype=int ) * chi
+                curindPairs = np.vstack( [firstarg,secarg] )
+                order += [curindPairs]
+
+    else:
+        for chi in range(n_channels):
+            if len(skip_same) > 0:
+                good_sec_inds = [chi]
+                for chi2 in range(chi+1,n_channels):
+                    if not ( (chi in skip_same) and (chi2 in skip_same) ):
+                        good_sec_inds += [chi2]
+                r = np.conj ( dat[[chi]] ) *  ( dat[good_sec_inds] )    # upper diagonal elements only, same freq cross-channels
+                secarg = np.array( good_sec_inds, dtype=int )
+            else:
+                r = np.conj ( dat[[chi]] ) *  ( dat[chi:] )    # upper diagonal elements only, same freq cross-channels
+                secarg   = np.arange(chi,n_channels)
+            firstarg = np.ones(len(secarg), dtype=int ) * chi
+            curindPairs = np.vstack( [firstarg,secarg] )
+            order += [curindPairs]
+
+            #print(r.shape)
+            csds += [r  ]
+
 
     order = np.hstack(order)
 
@@ -1726,7 +1859,7 @@ def getFullCSDMat(csd, freq_index, time_index, n_channels, updiag=0):
 
 #########################
 
-def removeAnnsByDescr(anns, anns_descr_to_remove):
+def removeAnnsByDescr(anns, anns_descr_to_remove, printLog=True):
     ''' decide by using find (so can be both sides of just one)'''
     #anns_descr_to_remove = ['endseg', 'initseg', 'middle', 'incPost' ]
     assert isinstance(anns_descr_to_remove,list)
@@ -1736,6 +1869,7 @@ def removeAnnsByDescr(anns, anns_descr_to_remove):
     #anns_onset_fine = []
     #anns_dur_fine = []
     Nbads = 0
+    remtype = []
     for ind in range(len(anns.description))[::-1]:
         wasbad = 0
         cd = anns.description[ind]
@@ -1743,9 +1877,11 @@ def removeAnnsByDescr(anns, anns_descr_to_remove):
             if cd.find(ann_descr_bad) >= 0:
                 wasbad = 1
         if wasbad:
-            print('Removing ',cd)
+            if printLog:
+                print('Removing ',cd)
             anns_upd.delete(ind)
             Nbads += 1
+            remtype += [cd]
 #         if not wasbad:
 #             anns_descr_fine += [cd]
 #             anns_onset_fine += [anns.onset[ind]]
@@ -1759,7 +1895,7 @@ def removeAnnsByDescr(anns, anns_descr_to_remove):
 #                            duration = duration_upd,
 #                            description=descrs_upd,
 #                            orig_time=None)
-    print('Overall removed {} annotations'.format(Nbads) )
+    print('Overall removed {} annotations: {}'.format(Nbads, set(remtype) ) )
 
     return anns_upd
 
@@ -2295,6 +2431,11 @@ def artif2ann(art_dict, art_dict_nms, maintremside, side='main', LFPonly=1):
     return anns
 # note than maintremside should correspond to the rawname!
 
+def removeOpsideAnns(anns,main_side):
+    ms_letter = main_side[0].upper()
+    badstr = '_' + getOppositeSideStr(ms_letter)
+    anns_upd = removeAnnsByDescr(anns, [badstr],printLog=0)
+    return anns_upd
 
 def getEMGperHand(rectconvraw):
     EMG_per_hand = {'right':['EMG061_old', 'EMG062_old'], 'left':['EMG063_old', 'EMG064_old' ] }
@@ -2385,7 +2526,7 @@ def getRawPerSide(raw, templ_str = 'msrc', key='letter', remove_anns = 'ipsi'):
         if remove_anns == 'ipsi':
             sidelet = sidekey[0].upper()
         elif remove_anns == 'contra':
-            sidelet = getOppositeSide(sidekey)[0].upper()
+            sidelet = getOppositeSideStr(sidekey)[0].upper()
         else:
             continue
         badstr = '_' + sidelet
@@ -2692,3 +2833,40 @@ def setArtifNaN(X, ivalis_artif_tb_indarrays_merged, feat_names):
                 #print('fd')
 
     return Xout
+
+def indHoleToNoHole(binind, dataset_bounds_uncut_bins, nedge_bins):
+    '''
+        binind starts from zero
+        dataset_bounds_bins for data without cutting of edge bins
+    '''
+    for db_i,(dbs,dbe) in enumerate(dataset_bounds_uncut_bins):
+        if binind >= dbs - nedge_bins and binind < dbe - nedge_bins:
+            newind = binind + nedge_bins * (db_i + 1)
+            break
+
+    newind = 0
+    return newind
+
+def makeRawFromFeats(X, feat_names, skip, sfreq=256, namelen = 15):
+
+    feat_names_to_use = []  #ordered
+    pattern = '([a-zA-Z]*)_'
+    feat_types_cooresp_dict = {}
+    for fni,fn in enumerate(feat_names):
+        if len(fn) > namelen:
+            r = re.match(pattern,fn)
+            feat_type = r.groups()[0]
+            newname = '{}_{}'.format(feat_type,fni)
+        else:
+            newname = fn
+        #if feat_type not in feat_types_cooresp_dict:
+        #    feat_types_cooresp_dict[feat_type]
+        feat_types_cooresp_dict[newname] = fn
+        feat_names_to_use += [newname]
+    #feat_names_to_use = list(feat_names)
+
+    info = mne.create_info(feat_names_to_use,sfreq/skip)
+
+    print(len(feat_names_to_use))
+    r = mne.io.RawArray(X.T,info)
+    return r, feat_types_cooresp_dict

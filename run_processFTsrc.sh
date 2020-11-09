@@ -1,29 +1,34 @@
 #!/bin/bash
 interactive=""
-
-raws1=(S01_off_hold S01_off_move S01_on_hold S01_on_move S02_off_hold S02_off_move S02_on_hold S02_on_move)  
-raws2=(S03_off_hold S03_off_move S04_off_hold S04_off_move S04_on_hold S04_on_move)  
-raws3=(S05_off_hold S05_off_move S05_on_hold S05_on_move S06_off_hold S06_off_move S06_on_hold S06_on_move)  
-raws4=(S07_off_hold S07_off_move S07_on_hold S07_on_move S08_on_rest S08_off_rest S09_off_rest S10_off_move S10_off_rest)  
-raws=(${raws1[@]} ${raws2[@]} ${raws3[@]} ${raws4[@]})
+#interactive="-i"
 
 ###################################
 
-raws=(S07_off_hold)               
+raws_off=(S01_off_hold S02_off_hold S03_off_hold S04_off_hold S05_off_hold S07_off_hold )  
+raws_off_compl=(S01_off_move S02_off_move S03_off_move S04_off_move S05_off_move S07_off_move )  
+raws_on=(S01_on_hold S02_on_hold S04_on_hold S05_on_hold S07_on_hold )  
+raws_on_compl=(S01_on_move S02_on_move S04_on_move S05_on_move S07_on_move )  
 
-#raws2=(S04_off_hold S04_off_move S04_on_hold S04_on_move)  
-#raws3=(S05_off_hold S05_off_move S05_on_hold S05_on_move S06_off_hold S06_off_move S06_on_hold S06_on_move)  
-#raws4=(S07_off_hold S07_off_move S07_on_hold S07_on_move) 
-#raws=(${raws2[@]} ${raws3[@]} ${raws4[@]})
-raws=(${raws1[@]} ${raws2[@]})
+#raws_off=(S07_off_hold )  
+#raws_off_compl=(S07_off_move )  
+#raws_on=(S07_on_hold )  
+#raws_on_compl=(S07_on_move )  
 
+raws=(${raws_off[@]} ${raws_on[@]})
+raws_compl=(${raws_off_compl[@]} ${raws_on_compl[@]}) 
 
-raws=(S05_off_move)               
+#raws=(S01_off_hold)
+#raws_compl=(S01_off_move)
 
-raws=(S04_off_hold S04_off_move S04_on_hold S04_on_move)  
+nraws=${#raws[*]}
 
-for t in ${raws[@]}; do
-  ipython3 $interactive processFTsrc.py -- -r $t
+#for t in ${raws[@]}; do
+#  #ipython3 $interactive processFTsrc.py -- -r $t
+#  ipython3 $interactive run_process_FTsources.py -- -r $t
+#done
+
+for (( i=0; i<=$(( $nraws -1 )); i++ )); do
+  t=${raws[$i]}
+  t_compl=${raws_compl[$i]}
+  ipython3 $interactive run_process_FTsources.py -- -r $t,$t_compl
 done
-
-

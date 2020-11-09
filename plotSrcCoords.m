@@ -1,21 +1,34 @@
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%% Plot
 close all
-viewarrs = [ [0 -90 0]; [0 0 90] ];
+viewarrs = [ [0 -90 0]; [0 0 90]; [0 0 0]];
 nr = 4;
+hdmstdf = load('~/soft/fieldtrip/template/headmodel/standard_singleshell.mat');  % just for plotting
+
+srsstd = load('~/soft/fieldtrip/template/sourcemodel/standard_sourcemodel3d5mm'); % 5mm spacing
+
+data_dir = getenv('DATA_DUSS');
+basename_head = sprintf('/headmodel_grid_%s.mat',subjstr);
+fname_head = strcat(data_dir, basename_head );
+hdmf = load(fname_head);   %hdmf.hdm, hdmf.mni_aligned_grid
+
+if ~exist("figVis")
+  figVis = 1
+end
 
 figure('visible',figVis);
-for viewarrind = 1:2 
+for viewarrind = 1:length(viewarrs) 
   %figure(i,'visible','off');
   viewarr = viewarrs(viewarrind,:);
 %viewarr = [0 0 90];
 
-  srsstd.sourcemodel.inside    = tmpstd; % define inside locations according to the atlas based mask 
-  hdmf.mni_aligned_grid.inside = tmpstd;  % this one will be used for source reconstruction
+  if exist("tmpstd")
+    srsstd.sourcemodel.inside    = tmpstd; % define inside locations according to the atlas based mask 
+    hdmf.mni_aligned_grid.inside = tmpstd;  % this one will be used for source reconstruction
+  end
 
   subplot(nr,2,1)
   hold on     % plot all objects in one figure
   %%% Plot standard stuff
-  hdmstdf = load('~/soft/fieldtrip-20190716/template/headmodel/standard_singleshell.mat');  % just for plotting
   ft_plot_headmodel(hdmstdf.vol,  'facecolor', 'cortex', 'edgecolor', 'none');alpha 0.5; camlight;
   ft_plot_mesh(srsstd.sourcemodel.pos(srsstd.sourcemodel.inside,:)); % plot only locations inside the volume
   hold off
@@ -40,7 +53,6 @@ for viewarrind = 1:2
   %%% Plot standard stuff
   subplot(nr,2,3)
   hold on     % plot all objects in one figure
-  hdmstdf = load('~/soft/fieldtrip-20190716/template/headmodel/standard_singleshell.mat');  % just for plotting
   ft_plot_headmodel(hdmstdf.vol,  'facecolor', 'cortex', 'edgecolor', 'none');alpha 0.5; camlight;
   Q = srsstd.sourcemodel.pos(mask_roi,:);
   ft_plot_mesh(Q); % plot only locations inside the volume
