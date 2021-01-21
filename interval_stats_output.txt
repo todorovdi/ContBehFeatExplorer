@@ -1,0 +1,459 @@
+----S01_off_hold
+L is maintremside, tremfreq=4 move side=left
+^ is tremor, * is main tremor side
+Overall removed 0 annotations: set()
+*hold_L   : 328.20 = 45.021% of total 729.00s
+*nolabel_L:  26.77 =  3.672% of total 729.00s
+nolabel_R : 484.99 = 66.529% of total 729.00s
+*notrem_L : 158.13 = 21.691% of total 729.00s
+notrem_R  :  57.47 =  7.884% of total 729.00s
+*^trem_L  : 202.80 = 27.819% of total 729.00s
+^trem_R   : 149.04 = 20.444% of total 729.00s
+*undef_L  :  13.09 =  1.796% of total 729.00s
+undef_R   :  37.49 =  5.143% of total 729.00s
+
+
+----S01_off_move
+L is maintremside, tremfreq=4 move side=left
+^ is tremor, * is main tremor side
+Overall removed 0 annotations: set()
+*move_L   : 312.14 = 43.218% of total 722.25s
+*nolabel_L:  93.35 = 12.925% of total 722.25s
+nolabel_R : 174.00 = 24.091% of total 722.25s
+*notrem_L : 261.24 = 36.171% of total 722.25s
+notrem_R  :  42.08 =  5.827% of total 722.25s
+*^trem_L  :  52.61 =  7.285% of total 722.25s
+^trem_R   : 504.84 = 69.899% of total 722.25s
+*undef_L  :   2.90 =  0.402% of total 722.25s
+undef_R   :   1.32 =  0.183% of total 722.25s
+
+
+----S01_on_hold
+L is maintremside, tremfreq=4 move side=left
+^ is tremor, * is main tremor side
+Overall removed 0 annotations: set()
+*hold_L   : 312.12 = 44.415% of total 702.75s
+*nolabel_L:  31.73 =  4.515% of total 702.75s
+nolabel_R : 191.98 = 27.318% of total 702.75s
+*notrem_L : 358.90 = 51.071% of total 702.75s
+notrem_R  : 305.58 = 43.484% of total 702.75s
+^trem_R   : 135.54 = 19.287% of total 702.75s
+undef_R   :  69.65 =  9.911% of total 702.75s
+!! There is no tremor, accdording to new_me
+
+
+----S01_on_move
+L is maintremside, tremfreq=4 move side=left
+^ is tremor, * is main tremor side
+Overall removed 0 annotations: set()
+*move_L   : 316.73 = 43.270% of total 732.00s
+*nolabel_L:  87.82 = 11.998% of total 732.00s
+nolabel_R : 147.06 = 20.090% of total 732.00s
+*notrem_L : 302.40 = 41.312% of total 732.00s
+notrem_R  : 472.00 = 64.481% of total 732.00s
+*^trem_L  :  25.04 =  3.421% of total 732.00s
+^trem_R   :  76.24 = 10.415% of total 732.00s
+undef_R   :  36.70 =  5.014% of total 732.00s
+
+
+----S02_off_hold
+L is maintremside, tremfreq=3.5 move side=left
+^ is tremor, * is main tremor side
+Overall removed 0 annotations: set()
+*hold_L   : 199.33 = 22.677% of total 879.00s
+*holdtrem_L: 167.78 = 19.088% of total 879.00s
+*nolabel_L:  38.30 =  4.358% of total 879.00s
+nolabel_R :  82.64 =  9.402% of total 879.00s
+*notrem_L : 142.66 = 16.230% of total 879.00s
+notrem_R  : 149.85 = 17.048% of total 879.00s
+*^trem_L  : 328.44 = 37.365% of total 879.00s
+^trem_R   : 642.98 = 73.149% of total 879.00s
+*undef_L  :   2.48 =  0.282% of total 879.00s
+undef_R   :   3.52 =  0.401% of total 879.00s
+
+
+----S02_off_move
+L is maintremside, tremfreq=3.5 move side=left
+^ is tremor, * is main tremor side
+Overall removed 0 annotations: set()
+*move_L   : 340.30 = 35.256% of total 965.25s
+*nolabel_L:  68.16 =  7.061% of total 965.25s
+nolabel_R :  57.49 =  5.955% of total 965.25s
+*notrem_L : 341.86 = 35.417% of total 965.25s
+notrem_R  : 289.72 = 30.016% of total 965.25s
+*^trem_L  : 148.25 = 15.359% of total 965.25s
+^trem_R   : 588.29 = 60.947% of total 965.25s
+*undef_L  :  66.68 =  6.908% of total 965.25s
+undef_R   :  29.75 =  3.082% of total 965.25s
+
+
+----S02_on_hold
+L is maintremside, tremfreq=3.5 move side=left
+^ is tremor, * is main tremor side
+Overall removed 0 annotations: set()
+*hold_L   : 344.29 = 39.471% of total 872.25s
+*nolabel_L: 146.75 = 16.825% of total 872.25s
+nolabel_R : 211.49 = 24.247% of total 872.25s
+*notrem_L :  56.05 =  6.425% of total 872.25s
+notrem_R  :  83.53 =  9.576% of total 872.25s
+subtrem_R :  20.11 =  2.306% of total 872.25s
+*^trem_L  : 323.30 = 37.066% of total 872.25s
+^trem_R   : 542.30 = 62.173% of total 872.25s
+*undef_L  :   1.86 =  0.213% of total 872.25s
+undef_R   :  14.82 =  1.699% of total 872.25s
+
+
+----S02_on_move
+L is maintremside, tremfreq=3.5 move side=left
+^ is tremor, * is main tremor side
+Overall removed 0 annotations: set()
+*move_L   : 335.76 = 40.847% of total 822.00s
+*nolabel_L: 192.49 = 23.417% of total 822.00s
+nolabel_R :  92.86 = 11.297% of total 822.00s
+*notrem_L : 113.88 = 13.854% of total 822.00s
+notrem_R  : 185.72 = 22.594% of total 822.00s
+*^trem_L  :  97.01 = 11.802% of total 822.00s
+^trem_R   : 513.95 = 62.524% of total 822.00s
+*undef_L  :  82.86 = 10.080% of total 822.00s
+undef_R   :  29.46 =  3.585% of total 822.00s
+
+
+----S03_off_hold
+L is maintremside, tremfreq=3 move side=left
+^ is tremor, * is main tremor side
+Overall removed 0 annotations: set()
+*hold_L   : 402.42 = 41.756% of total 963.75s
+*nolabel_L:  95.64 =  9.924% of total 963.75s
+nolabel_R : 121.50 = 12.607% of total 963.75s
+*notrem_L : 404.00 = 41.920% of total 963.75s
+notrem_R  : 245.81 = 25.505% of total 963.75s
+*^trem_L  :  50.16 =  5.205% of total 963.75s
+^trem_R   : 514.03 = 53.337% of total 963.75s
+*undef_L  :  11.52 =  1.195% of total 963.75s
+undef_R   :  82.41 =  8.551% of total 963.75s
+
+
+----S03_off_move
+L is maintremside, tremfreq=3 move side=left
+^ is tremor, * is main tremor side
+Overall removed 0 annotations: set()
+*move_L   : 359.68 = 43.558% of total 825.75s
+*nolabel_L: 137.74 = 16.681% of total 825.75s
+nolabel_R : 162.14 = 19.635% of total 825.75s
+*notrem_L : 286.78 = 34.730% of total 825.75s
+notrem_R  :  71.09 =  8.609% of total 825.75s
+^trem_R   : 559.39 = 67.744% of total 825.75s
+*undef_L  :  41.55 =  5.032% of total 825.75s
+undef_R   :  33.13 =  4.012% of total 825.75s
+!! There is no tremor, accdording to new_me
+
+
+----S04_off_hold
+R is maintremside, tremfreq=4 move side=left
+^ is tremor, * is main tremor side
+Overall removed 0 annotations: set()
+hold_L    : 293.58 = 37.858% of total 775.50s
+nolabel_L : 180.03 = 23.214% of total 775.50s
+*nolabel_R:  58.37 =  7.526% of total 775.50s
+notrem_L  : 236.20 = 30.458% of total 775.50s
+*notrem_R : 492.40 = 63.494% of total 775.50s
+^trem_L   :  55.63 =  7.173% of total 775.50s
+*^trem_R  : 124.86 = 16.101% of total 775.50s
+undef_L   :  10.05 =  1.296% of total 775.50s
+*undef_R  :  99.88 = 12.879% of total 775.50s
+new_me has task hold_L which is opposite side to tremor hold_R
+
+
+----S04_off_move
+R is maintremside, tremfreq=4 move side=left
+^ is tremor, * is main tremor side
+Overall removed 0 annotations: set()
+move_L    : 326.52 = 43.233% of total 755.25s
+*move_R   :  54.22 =  7.179% of total 755.25s
+nolabel_L : 168.04 = 22.249% of total 755.25s
+*nolabel_R: 225.53 = 29.861% of total 755.25s
+notrem_L  : 260.69 = 34.517% of total 755.25s
+*notrem_R : 125.08 = 16.562% of total 755.25s
+*^trem_R  :  74.02 =  9.801% of total 755.25s
+*undef_R  : 276.40 = 36.597% of total 755.25s
+new_me has task move_L which is opposite side to tremor move_R
+
+
+----S04_on_hold
+R is maintremside, tremfreq=4 move side=left
+^ is tremor, * is main tremor side
+Overall removed 0 annotations: set()
+hold_L    : 326.66 = 42.369% of total 771.00s
+holdtrem_L:  10.27 =  1.332% of total 771.00s
+nolabel_L :  47.42 =  6.151% of total 771.00s
+*nolabel_R:  48.59 =  6.302% of total 771.00s
+notrem_L  : 366.59 = 47.548% of total 771.00s
+*notrem_R : 274.21 = 35.566% of total 771.00s
+*^trem_R  :  45.03 =  5.840% of total 771.00s
+undef_L   :  20.05 =  2.601% of total 771.00s
+*undef_R  : 403.17 = 52.292% of total 771.00s
+new_me has task hold_L which is opposite side to tremor hold_R
+
+
+----S04_on_move
+R is maintremside, tremfreq=4 move side=left
+^ is tremor, * is main tremor side
+Overall removed 0 annotations: set()
+move_L    : 322.37 = 44.727% of total 720.75s
+*move_R   : 293.73 = 40.753% of total 720.75s
+nolabel_L :  38.78 =  5.381% of total 720.75s
+*nolabel_R: 103.33 = 14.336% of total 720.75s
+notrem_L  : 165.06 = 22.902% of total 720.75s
+*notrem_R : 195.67 = 27.149% of total 720.75s
+^trem_L   : 104.72 = 14.529% of total 720.75s
+*^trem_R  :  31.88 =  4.423% of total 720.75s
+undef_L   :  89.81 = 12.461% of total 720.75s
+*undef_R  :  96.14 = 13.339% of total 720.75s
+new_me has task move_L which is opposite side to tremor move_R
+
+
+----S05_off_hold
+R is maintremside, tremfreq=6 move side=right
+^ is tremor, * is main tremor side
+Overall removed 0 annotations: set()
+hold_L    :  12.06 =  1.286% of total 938.25s
+*hold_R   : 138.88 = 14.802% of total 938.25s
+nolabel_L :  27.10 =  2.888% of total 938.25s
+*nolabel_R: 180.12 = 19.198% of total 938.25s
+notrem_L  : 845.44 = 90.109% of total 938.25s
+*notrem_R : 342.22 = 36.475% of total 938.25s
+*^trem_R  : 266.85 = 28.442% of total 938.25s
+undef_L   :  53.64 =  5.717% of total 938.25s
+*undef_R  :  10.16 =  1.083% of total 938.25s
+new_me has task hold_L which is opposite side to tremor hold_R
+
+
+----S05_off_move
+R is maintremside, tremfreq=6 move side=right
+^ is tremor, * is main tremor side
+Overall removed 0 annotations: set()
+*move_R   : 337.51 = 38.169% of total 884.25s
+nolabel_L : 689.06 = 77.926% of total 884.25s
+*nolabel_R: 197.48 = 22.333% of total 884.25s
+notrem_L  : 134.04 = 15.159% of total 884.25s
+*notrem_R : 213.97 = 24.198% of total 884.25s
+^trem_L   :  61.15 =  6.915% of total 884.25s
+*^trem_R  : 132.73 = 15.011% of total 884.25s
+*undef_R  :   2.56 =  0.289% of total 884.25s
+
+
+----S05_on_hold
+R is maintremside, tremfreq=6 move side=right
+^ is tremor, * is main tremor side
+Overall removed 0 annotations: set()
+*hold_R   : 348.66 = 38.074% of total 915.75s
+nolabel_L : 191.42 = 20.903% of total 915.75s
+*nolabel_R:  33.12 =  3.617% of total 915.75s
+notrem_L  :  50.45 =  5.509% of total 915.75s
+*notrem_R : 277.54 = 30.307% of total 915.75s
+^trem_L   : 444.16 = 48.503% of total 915.75s
+*^trem_R  :  83.29 =  9.096% of total 915.75s
+undef_L   : 229.72 = 25.085% of total 915.75s
+*undef_R  : 173.13 = 18.906% of total 915.75s
+
+
+----S05_on_move
+R is maintremside, tremfreq=6 move side=right
+^ is tremor, * is main tremor side
+Overall removed 0 annotations: set()
+*move_R   : 370.74 = 39.232% of total 945.00s
+nolabel_L :  70.08 =  7.416% of total 945.00s
+*nolabel_R:  72.74 =  7.698% of total 945.00s
+notrem_L  :  83.48 =  8.834% of total 945.00s
+*notrem_R : 348.85 = 36.916% of total 945.00s
+^trem_L   : 415.03 = 43.919% of total 945.00s
+undef_L   : 376.40 = 39.831% of total 945.00s
+*undef_R  : 152.66 = 16.155% of total 945.00s
+!! There is no tremor, accdording to new_me
+
+
+----S06_off_hold
+L is maintremside, tremfreq=5 move side=left
+^ is tremor, * is main tremor side
+Overall removed 0 annotations: set()
+*hold_L   : 125.29 = 11.732% of total 1068.00s
+*nolabel_L: 487.09 = 45.608% of total 1068.00s
+nolabel_R : 570.76 = 53.442% of total 1068.00s
+*notrem_L : 111.41 = 10.432% of total 1068.00s
+notrem_R  : 305.63 = 28.617% of total 1068.00s
+*^trem_L  : 111.37 = 10.428% of total 1068.00s
+^trem_R   : 163.47 = 15.306% of total 1068.00s
+*undef_L  : 232.82 = 21.800% of total 1068.00s
+undef_R   :  28.13 =  2.634% of total 1068.00s
+
+
+----S06_off_move
+L is maintremside, tremfreq=5 move side=left
+^ is tremor, * is main tremor side
+Overall removed 0 annotations: set()
+*move_L   : 288.86 = 24.132% of total 1197.00s
+*nolabel_L: 522.82 = 43.678% of total 1197.00s
+nolabel_R : 572.14 = 47.798% of total 1197.00s
+*notrem_L : 249.24 = 20.822% of total 1197.00s
+notrem_R  : 278.28 = 23.248% of total 1197.00s
+*^trem_L  :  53.62 =  4.480% of total 1197.00s
+*undef_L  :  82.46 =  6.889% of total 1197.00s
+undef_R   : 346.58 = 28.954% of total 1197.00s
+
+
+----S06_on_hold
+L is maintremside, tremfreq=5 move side=left
+^ is tremor, * is main tremor side
+Overall removed 0 annotations: set()
+*hold_L   :  40.88 =  4.885% of total 837.00s
+*nolabel_L: 525.33 = 62.764% of total 837.00s
+nolabel_R : 346.63 = 41.413% of total 837.00s
+*notrem_L : 222.15 = 26.541% of total 837.00s
+notrem_R  : 324.94 = 38.822% of total 837.00s
+*undef_L  :  48.63 =  5.811% of total 837.00s
+undef_R   : 165.43 = 19.764% of total 837.00s
+!! There is no tremor, accdording to new_me
+
+
+----S06_on_move
+L is maintremside, tremfreq=5 move side=left
+^ is tremor, * is main tremor side
+Overall removed 0 annotations: set()
+*move_L   : 332.96 = 39.639% of total 840.00s
+*nolabel_L: 288.37 = 34.330% of total 840.00s
+nolabel_R : 551.63 = 65.671% of total 840.00s
+*notrem_L : 165.13 = 19.659% of total 840.00s
+notrem_R  : 204.72 = 24.371% of total 840.00s
+*undef_L  :  53.54 =  6.373% of total 840.00s
+undef_R   :  83.65 =  9.958% of total 840.00s
+!! There is no tremor, accdording to new_me
+
+
+----S07_off_hold
+R is maintremside, tremfreq=4.5 move side=left
+^ is tremor, * is main tremor side
+Overall removed 0 annotations: set()
+hold_L    : 320.47 = 43.469% of total 737.25s
+nolabel_L : 116.93 = 15.861% of total 737.25s
+*nolabel_R: 157.39 = 21.348% of total 737.25s
+notrem_L  : 234.17 = 31.762% of total 737.25s
+*notrem_R : 194.09 = 26.327% of total 737.25s
+^trem_L   :  65.67 =  8.908% of total 737.25s
+*^trem_R  : 385.77 = 52.325% of total 737.25s
+new_me has task hold_L which is opposite side to tremor hold_R
+
+
+----S07_off_move
+R is maintremside, tremfreq=4.5 move side=left
+^ is tremor, * is main tremor side
+Overall removed 0 annotations: set()
+move_L    : 319.43 = 42.002% of total 760.50s
+nolabel_L : 135.31 = 17.792% of total 760.50s
+*nolabel_R: 401.78 = 52.831% of total 760.50s
+notrem_L  : 288.35 = 37.917% of total 760.50s
+*notrem_R : 270.04 = 35.509% of total 760.50s
+^trem_L   :  17.41 =  2.289% of total 760.50s
+*^trem_R  :  88.68 = 11.660% of total 760.50s
+new_me has task move_L which is opposite side to tremor move_R
+
+
+----S07_on_hold
+R is maintremside, tremfreq=4.5 move side=left
+^ is tremor, * is main tremor side
+Overall removed 0 annotations: set()
+hold_L    : 332.82 = 39.622% of total 840.00s
+nolabel_L :  86.64 = 10.315% of total 840.00s
+*nolabel_R: 193.24 = 23.005% of total 840.00s
+notrem_L  : 158.41 = 18.859% of total 840.00s
+*notrem_R : 276.66 = 32.936% of total 840.00s
+^trem_L   : 259.80 = 30.929% of total 840.00s
+*^trem_R  : 370.10 = 44.059% of total 840.00s
+undef_L   :   2.31 =  0.275% of total 840.00s
+new_me has task hold_L which is opposite side to tremor hold_R
+
+
+----S07_on_move
+R is maintremside, tremfreq=4.5 move side=left
+^ is tremor, * is main tremor side
+Overall removed 0 annotations: set()
+move_L    : 319.39 = 41.710% of total 765.75s
+movetrem_L:   7.54 =  0.985% of total 765.75s
+nolabel_L : 101.82 = 13.296% of total 765.75s
+*nolabel_R: 276.67 = 36.131% of total 765.75s
+notrem_L  : 163.30 = 21.325% of total 765.75s
+*notrem_R : 175.08 = 22.864% of total 765.75s
+^trem_L   : 173.70 = 22.683% of total 765.75s
+*^trem_R  : 313.99 = 41.005% of total 765.75s
+new_me has task move_L which is opposite side to tremor move_R
+
+
+----S08_off_rest
+L is maintremside, tremfreq=5 move side=UNDEF
+^ is tremor, * is main tremor side
+Overall removed 0 annotations: set()
+*nolabel_L: 118.99 =  9.842% of total 1209.00s
+nolabel_R :  33.48 =  2.769% of total 1209.00s
+*notrem_L : 764.80 = 63.259% of total 1209.00s
+notrem_R  : 846.64 = 70.028% of total 1209.00s
+*^trem_L  : 325.21 = 26.899% of total 1209.00s
+^trem_R   : 299.02 = 24.733% of total 1209.00s
+undef_R   :  29.86 =  2.470% of total 1209.00s
+
+
+----S08_on_rest
+L is maintremside, tremfreq=5 move side=UNDEF
+^ is tremor, * is main tremor side
+Overall removed 0 annotations: set()
+*nolabel_L: 427.11 = 44.421% of total 961.50s
+nolabel_R : 138.97 = 14.454% of total 961.50s
+*notrem_L : 429.15 = 44.634% of total 961.50s
+notrem_R  : 695.02 = 72.285% of total 961.50s
+*^trem_L  : 105.23 = 10.945% of total 961.50s
+^trem_R   : 110.46 = 11.489% of total 961.50s
+undef_R   :  17.04 =  1.772% of total 961.50s
+
+
+----S09_off_rest
+R is maintremside, tremfreq=5 move side=UNDEF
+^ is tremor, * is main tremor side
+Overall removed 0 annotations: set()
+nolabel_L : 105.36 = 12.131% of total 868.50s
+*nolabel_R: 100.61 = 11.585% of total 868.50s
+notrem_L  : 406.78 = 46.837% of total 868.50s
+*notrem_R : 383.31 = 44.135% of total 868.50s
+^trem_L   :  62.01 =  7.140% of total 868.50s
+*^trem_R  : 330.74 = 38.082% of total 868.50s
+undef_L   : 294.35 = 33.892% of total 868.50s
+*undef_R  :  53.83 =  6.198% of total 868.50s
+
+
+----S10_off_rest
+R is maintremside, tremfreq=4 move side=right
+^ is tremor, * is main tremor side
+Overall removed 0 annotations: set()
+nolabel_L :  31.67 = 11.664% of total 271.50s
+*nolabel_R:  28.74 = 10.584% of total 271.50s
+notrem_L  :  64.19 = 23.645% of total 271.50s
+*notrem_R : 159.13 = 58.612% of total 271.50s
+^trem_L   :  95.27 = 35.090% of total 271.50s
+*^trem_R  :  73.46 = 27.059% of total 271.50s
+undef_L   :  80.37 = 29.601% of total 271.50s
+*undef_R  :  10.17 =  3.746% of total 271.50s
+
+
+----S10_off_move
+R is maintremside, tremfreq=4 move side=right
+^ is tremor, * is main tremor side
+Overall removed 0 annotations: set()
+*move_R   : 159.32 = 57.107% of total 279.00s
+*movetrem_R:   6.23 =  2.231% of total 279.00s
+nolabel_L :  20.90 =  7.493% of total 279.00s
+*nolabel_R:  31.85 = 11.416% of total 279.00s
+notrem_L  : 102.94 = 36.898% of total 279.00s
+*notrem_R :  40.22 = 14.415% of total 279.00s
+^trem_L   :  46.68 = 16.730% of total 279.00s
+*^trem_R  :  16.73 =  5.997% of total 279.00s
+undef_L   : 108.47 = 38.879% of total 279.00s
+*undef_R  :  24.65 =  8.834% of total 279.00s
+
+

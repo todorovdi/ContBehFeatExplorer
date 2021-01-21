@@ -1,6 +1,8 @@
-function output = srcrec(subjstr,datall,data_cleaned,hdmf,roi,bads,S,srs,mask,use_DICS)
-  % roi is a string
-  % mask argument only used if roi is of special type 
+function output = srcrec(subjstr,datall,data_cleaned,hdmf,roi_type,bads,S,srs,mask,use_DICS)
+  % todo allo dataall and data_cleaned to be cell arrays that I could join to get common cov
+  % subjstr in needed to load actual coords
+  % roi_type is a string
+  % mask argument only used if roi_type is of special type 
   %cd 
 
   do_load_only_ifnew   = 1;
@@ -52,11 +54,9 @@ function output = srcrec(subjstr,datall,data_cleaned,hdmf,roi,bads,S,srs,mask,us
     data.time = {time_concat};
     data.sampleinfo = [[1 nbinstot ] ];
 
-    data_cleaned = data
+    data_cleaned = data;
   end
-
-
-
+  data_cleaned
 
   %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
@@ -74,7 +74,7 @@ function output = srcrec(subjstr,datall,data_cleaned,hdmf,roi,bads,S,srs,mask,us
     %m1 = ft_read_atlas('HMAT_Right_M1.nii')  % goes deeper in the sulcus
 
 
-    if strcmp(roi{1} , "HirschPt2011,2013direct" ) == 1 || strcmp(roi{1} , "HirschPt2011" ) == 1 
+    if strcmp(roi_type{1} , "HirschPt2011,2013direct" ) == 1 || strcmp(roi_type{1} , "HirschPt2011" ) == 1 
 
       % places where cortico-muscular coherence (at trem freq) changed during tremor
       %
@@ -133,7 +133,7 @@ function output = srcrec(subjstr,datall,data_cleaned,hdmf,roi,bads,S,srs,mask,us
       srcpos = coords_Jan_actual;
       srcpos = surroundPts;
 
-    elseif strcmp(roi{1}, "parcel_aal") == 1
+    elseif strcmp(roi_type{1}, "parcel_aal") == 1
       fn = strcat( subjstr, '_modcoord_parcel_aal.mat');
       sprintf('Loading %s',fn)
       load(fn);
@@ -292,7 +292,7 @@ function output = srcrec(subjstr,datall,data_cleaned,hdmf,roi,bads,S,srs,mask,us
 
       cfg_srcrec.lcmv.keepfilter = 'yes';
       cfg_srcrec.lcmv.projectmom='yes';
-      cfg_srcrec.lcmv.reducerank=2;  % always like that for MEG
+      cfg_srcrec.reducerank=2;  % always like that for MEG
 
       if do_srcrec
         %source_data_cur = ft_sourceanalysis(cfg_srcrec,datall_cur);  
@@ -319,10 +319,12 @@ function output = srcrec(subjstr,datall,data_cleaned,hdmf,roi,bads,S,srs,mask,us
 
         source_data_cur = source_time_tmp;
         source_data_cur.avg.mom = trial_source;
+        source_data_cur.time = datall_cur.time{1};
 
         resEntry = [];
         resEntry.source_data = source_data_cur;
         resEntry.bpfreq = fband_cur;
+        resEntry.spatial_filt = spatial_filt;
         res{fbi} = resEntry;
         %%source_data = ft_sourceanalysis(cfg_srcrec,output_of_ft_timelockanalysis);
         %

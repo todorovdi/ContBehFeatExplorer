@@ -60,22 +60,48 @@ rawname_ = 'S01_on_hold'
 #rawname_ = 'S07_on_move'
 
 
+#desired_selected_by_me = False
+
 #sources_type = 'HirschPt2011'
 sources_type = 'parcel_aal'
 
+groupings_to_use = ['all']
+do_save = 1
+
+nPCA_comp = 0.95
+algType = 'PCA+ICA' #'PCA' # 'mean'
+
 helpstr = 'Usage example\nrun_process_FTsources.py --rawname <rawname_naked> --sources_type <srct> '
 opts, args = getopt.getopt(effargv,"hr:s:",
-        ["rawnames=", 'sources_type='])
+        ["rawnames=", 'sources_type=', 'groupings=', 'alg_type=', 'do_save='])
 print(sys.argv, opts, args)
 for opt, arg in opts:
     print(opt)
     if opt == '-h':
         print (helpstr)
         sys.exit(0)
+    elif opt == '--groupings':
+        groupings_to_use = arg.split(',')
+    elif opt == '--do_save':
+        do_save = int(arg)
+    elif opt == '--alg_type':
+        algType = arg
+        assert algType in ['PCA', 'PCA+ICA', 'mean', 'all_sources']
+    #elif opt == '--desired_custom':
+    #    desired_selected_by_me = int(arg)
     elif opt in ('-r','--rawnames'):
         rawnames = arg.split(',')
+        rawnames_nonempty = []
+        for rn in rawnames:
+            if len(rn):
+                rawnames_nonempty += [rn]
+        assert len(rawnames_nonempty) > 0
+        rawnames = rawnames_nonempty
     elif opt in ('-s','--sources_type'):
         sources_type = str(arg)
+
+if groupings_to_use[0] == 'all_raw':
+    assert algType == 'all_sources'
 
 import pymatreader as pymr
 r = pymr.read_mat('cortical_grid.mat')
@@ -87,29 +113,29 @@ coords_MNI = coords_MNI_f['coords']
 
 ######
 
-with open(os.path.join('.','coord_labels.json') ) as jf:
-    coord_labels = json.load(jf)
-#    gv.gparams['coord_labels'] = coord_labels
-
-def dispGroupInfo(grps):
-    ugrps = np.unique(grps)
-    print('min {}, max {}; ulen {}, umin {}, umax {}'.
-          format(min(grps), max(grps), len(ugrps), min(ugrps), max(ugrps)) )
 
 
+
+times_pri = len(rawnames) * [0]
 custom_raws_pri = len(rawnames) * [0]
+coords_pri = len(rawnames) * [0]
 for rawni,rawname_ in enumerate(rawnames):
     sind_str,medcond,task = utils.getParamsFromRawname(rawname_)
 
-    rawname = rawname_ + '_resample_raw.fif'
+    rawname = rawname_ + '_resample_notch_highpass_raw.fif'
     fname_full = os.path.join(data_dir,rawname)
 
-    # read file -- resampled to 256 Hz,  Electa MEG, EMG, LFP, EOG channels
+    #rawname = rawname_ + '_resample_raw.fif'
+    #fname_full = os.path.join(data_dir,rawname)
+
+    ## read file -- resampled to 256 Hz,  Electa MEG, EMG, LFP, EOG channels
     raw = mne.io.read_raw_fif(fname_full, None)
 
-    reconst_name = rawname_ + '_resample_afterICA_raw.fif'
-    reconst_fname_full = os.path.join(data_dir,reconst_name)
-    reconst_raw = mne.io.read_raw_fif(reconst_fname_full, None)
+    #reconst_name = rawname_ + '_resample_afterICA_raw.fif'
+    #reconst_fname_full = os.path.join(data_dir,reconst_name)
+    #reconst_raw = mne.io.read_raw_fif(reconst_fname_full, None)
+
+    times_pri[rawni] = raw.times
 
     src_fname_noext = 'srcd_{}_{}'.format(rawname_, sources_type)
 
@@ -120,11 +146,10 @@ for rawni,rawname_ in enumerate(rawnames):
     ff = src_ft
 
 
-    #os.path.getmtime(src_fname_full)
-    timeinfo = os.stat(src_fname_full)
-    print('Last mod of src was ', time.ctime(timeinfo.st_mtime) )
-    timeinfo = os.stat(reconst_fname_full)
-    print('Last raw was        ', time.ctime(timeinfo.st_mtime) )
+    #timeinfo = os.stat(src_fname_full)
+    #print('Last mod of src was ', time.ctime(timeinfo.st_mtime) )
+    #timeinfo = os.stat(reconst_fname_full)
+    #print('Last raw was        ', time.ctime(timeinfo.st_mtime) )
 
     f = ff[ ff['source_data'][0,0] ]
 
@@ -136,37 +161,44 @@ for rawni,rawname_ in enumerate(rawnames):
 
         crdf = pymr.read_mat(srcCoords_fn)
 
-        coord_labels_corresp_coord = crdf['labels']
+        # here we do not have label 'unlabeled'
+        labels = crdf['labels']  #indices of sources - labels_corresp_coordance
         #crdf = sio.loadmat(srcCoords_fn)
         #lbls = crdf['labels'][0]
-        #coord_labels_corresp_coord = [  lbls[i][0] for i in range(len(lbls)) ]
+        #labels = [  lbls[i][0] for i in range(len(lbls)) ]
 
         coords = crdf['coords_Jan_actual']
         srcgroups_ = crdf['point_ind_corresp']
 
-        if min(srcgroups_) == 0:
-            srcgroups_ += 1
-            coord_labels_corresp_coord = ['unlabeled'] + coord_labels_corresp_coord
+        coords_pri += [coords]
 
-        print(coord_labels_corresp_coord)
+        # here we shift by 1 to add label 'unlabeled' in the beginning
+        if np.min(srcgroups_) == 0:
+            srcgroups_ #+= 1  # we don't need to add one because we have Matlab notation starting from 1
+            labels = ['unlabeled'] + labels
+
+        print(labels)
         #crdf['pointlabel']
 
     elif sources_type == 'HirschPt2011':
         #<0 left
+        with open(os.path.join('.','coord_labels.json') ) as jf:
+            coord_labels = json.load(jf)
+        #    gv.gparams['coord_labels'] = coord_labels
 
         srcCoords_fn = sind_str + '_modcoord.mat'
-        coord_labels_corresp_coord = ['']* len(coords_MNI)
-        assert len(coord_labels_corresp_coord ) == len(coord_labels) * 2
+        labels = ['']* len(coords_MNI)
+        assert len(labels ) == len(coord_labels) * 2
         for coordi in range(len(coords_MNI)):
             labeli = coordi // 2
             if coords_MNI[coordi,0] < 0:
                 side = 'L'
             else:
                 side = 'R'
-            coord_labels_corresp_coord[coordi]= coord_labels[labeli] + '_{}'.format(side)
+            labels[coordi]= coord_labels[labeli] + '_{}'.format(side)
 
         srcgroups_ = crdf['point_ind_corresp'][0]
-        print(coords_MNI,coord_labels_corresp_coord)
+        print(coords_MNI,labels)
 
 
     print(srcgroups_)
@@ -179,15 +211,14 @@ for rawni,rawname_ in enumerate(rawnames):
 
     ##########
 
-    desired_selected_by_me = False
-    if desired_selected_by_me:
-        desired = gp.areas_list_aal_my_guess
-    else:
-        desired = coord_labels_corresp_coord
+    #if desired_selected_by_me:
+    #    desired = gp.areas_list_aal_my_guess
+    #else:
+    #    desired = labels
 
     ######3
 
-    scrgroups_dict = {}
+    #scrgroups_dict = {}
     stcs = []
     fbands = {}
     custom_raws = {}
@@ -249,7 +280,10 @@ for rawni,rawname_ in enumerate(rawnames):
             #leftInds = np.where(sortedPos[:,0]<= 0)[0]
             #rightInds = np.where(sortedPos[:,0] > 0)[0]
 
-            labels_deford = np.array(coord_labels_corresp_coord)[srcgroups_[allinds ]-1 ]
+            if sources_type == 'HirschPt2011':
+                labels_deford = np.array(labels)[srcgroups_[allinds ]-1 ]
+            else:
+                labels_deford = np.array(labels)[srcgroups_[allinds ] ]  # because 0 is unlabeled
             Lchnis = [labi for labi,lab in enumerate(labels_deford) if lab.endswith('_L') ]
             #Rchnis = [labi for labi,lab in enumerate(labels_deford) if lab.endswith('_R') ]
             Rchnis = [labi for labi,lab in enumerate(labels_deford) if not lab.endswith('_L') ]
@@ -277,8 +311,10 @@ for rawni,rawname_ in enumerate(rawnames):
 
                 #srcData = srcData_[posinds]
 
-                #if sources_type == 'HirschPt2011':
-                labels_coord_ord = np.array(coord_labels_corresp_coord)[srcgroups_[allinds[concat] ]-1 ]
+                if sources_type == 'HirschPt2011':
+                    labels_coord_ord = np.array(labels)[srcgroups_[allinds[concat] ]-1 ]
+                else:
+                    labels_coord_ord = np.array(labels)[srcgroups_[allinds[concat] ] ]
                 #print(labels)
             vertices_inds_dict[indset_name] = vertices
 
@@ -304,19 +340,22 @@ for rawni,rawname_ in enumerate(rawnames):
                 ch_types=['csd'] * len(srcnames),
                 sfreq=int ( 1/tstep ))
 
-            srcgroups = srcgroups_[indsets[indset_name] ]-1
+            if sources_type == 'HirschPt2011':
+                srcgroups = srcgroups_[indsets[indset_name] ]-1
+            else:
+                srcgroups = srcgroups_[indsets[indset_name] ]
             srcgroups = srcgroups [ allinds [concat] ]
             #srcgroups = srcgroups_[posinds]-1
             assert min(srcgroups) == 0
             if sources_type == 'HirschPt2011':
                 assert max(srcgroups) == len(coords)-1, ( max(srcgroups)+1, len(coords) )
             info['srcgroups'] = srcgroups
-            scrgroups_dict[indset_name] = srcgroups
+            #scrgroups_dict[indset_name] = srcgroups
 
             custom_raw_cur = mne.io.RawArray(srcData, info)
             for chi in range(len(custom_raw_cur.info['chs']) ):
                 custom_raw_cur.info['chs'][chi]['loc'][:3] = pos[concat][chi,:3]
-
+            coords_resorted = pos[concat]
 
             rawtmp = custom_raws.get(indset_name, None)
             if rawtmp is None:
@@ -334,7 +373,7 @@ for rawni,rawname_ in enumerate(rawnames):
     chns = custom_raw_cur.ch_names
     Lchns = [chn for chn in chns if chn.find('srcL') >= 0]
     for chni,chn in enumerate(chns):
-        lab = coord_labels_corresp_coord[srcgroups[chni] ]
+        lab = labels[srcgroups[chni] ]
         loc = custom_raw_cur.info['chs'][chni]['loc']
         leftlab = lab.find('_L') >= 0
         leftside = loc[0] <= 0
@@ -351,146 +390,72 @@ for rawni,rawname_ in enumerate(rawnames):
 
         custom_raws['centers'].save(newsrc_fname_full, overwrite=1)
     else:
-        print('other sources, do nothing')
+        print("We use center-lees sources, so don't save centers")
 
     custom_raws_pri[rawni] = custom_raws
 
 
 
-nPCA_comp = 0.95
-algType = 'PCA+ICA' #'PCA' # 'mean'
+# yes I want them to be different!
+assert abs( np.linalg.norm(coords_resorted - pos, 2)  ) > 1e-20
 
 ########################### preparing groups ###################3
 
-coord_labels_corresp_coord_cb_vs_rest = ['Cerebellum_L', 'Cerebellum_R',
-                                         'notCerebellum_L', 'notCerebellum_R',
-                                         'unlabeled']
-
 srcgroups_all = custom_raws['surround'].info['srcgroups']
+label_groups_dict, srcgroups_dict  = utils.prepareSourceGroups(labels,srcgroups_all)
 
-cbinds = [i for i in range(len(coord_labels_corresp_coord) ) if
- coord_labels_corresp_coord[i].find('Cerebellum') >= 0 ]  # indices ofcb in original
+####################### Test
+#sys.exit(1)
+########################
 
-assert len(cbinds )  == 2
-
-srcgroups_cb_vs_rest = srcgroups_all.copy() # copy needed
-b = [True] * len(srcgroups_cb_vs_rest)  # first include all
-# mark those that are not cerebellum
-for i in cbinds:
-    b = np.logical_and( srcgroups_cb_vs_rest != i, b)
-
-#srcgroups_cb_vs_rest
-
-#addCBinds = True
-
-for j in range(len(srcgroups_cb_vs_rest)):
-    curi = srcgroups_cb_vs_rest[j]
-    if b[j]:  # rename not-cerebellum
-        parcel_name = coord_labels_corresp_coord[curi]
-        if parcel_name == 'unlabeled':
-            newlabi = coord_labels_corresp_coord_cb_vs_rest.index(parcel_name)
-        else:
-            sidelet = parcel_name[-1]
-            newlabi = coord_labels_corresp_coord_cb_vs_rest.index('notCerebellum_' + sidelet)
-        srcgroups_cb_vs_rest[srcgroups_all == curi] = newlabi
-#     else if srcgroups[j] in cbinds  and addCBinds:
-#         srcgroups_cb_vs_rest
-
-set_CB_unlab = False #make sense if we compute Cerbellum for other srcgroups
-for newlabi,newlab in enumerate(coord_labels_corresp_coord_cb_vs_rest[:2] ):
-    oldind = np.array(coord_labels_corresp_coord)[cbinds].tolist().index(newlab)
-    print(oldind,newlab,newlabi)
-    if set_CB_unlab:
-        newlabi = coord_labels_corresp_coord_cb_vs_rest.index('unlabeled')
-    srcgroups_cb_vs_rest[srcgroups_all == cbinds[oldind] ] = newlabi  # its on purpose that I use 'old' srcgroups
-
-dispGroupInfo(srcgroups_cb_vs_rest)
-print(srcgroups_cb_vs_rest)
-
-#-------
-
-srcgroups_cbm_vs_rest = srcgroups_cb_vs_rest.copy()
-
-lind = coord_labels_corresp_coord_cb_vs_rest.index('Cerebellum_L')
-rind = coord_labels_corresp_coord_cb_vs_rest.index('Cerebellum_R')
-srcgroups_cbm_vs_rest[srcgroups_cbm_vs_rest == rind] = lind
-srcgroups_cbm_vs_rest[srcgroups_cbm_vs_rest > 1] -= 1
-
-#-------------
-
-coord_labels_corresp_coord_cbm_vs_rest = coord_labels_corresp_coord_cb_vs_rest[:]
-del coord_labels_corresp_coord_cbm_vs_rest[0]
-coord_labels_corresp_coord_cbm_vs_rest[0] = 'Cerebellum'
-
-#srcgroups_cbm_vs_rest
-
-unlabi = coord_labels_corresp_coord_cbm_vs_rest.index('unlabeled'); unlabi
-srcgroups_merged = srcgroups_cbm_vs_rest.copy()
-srcgroups_merged[srcgroups_merged != unlabi] = 0
-srcgroups_merged[srcgroups_merged == unlabi] = 1
-coord_labels_corresp_coord_merged = ['cortex', 'unlabeled']
-
-coord_labels_corresp_coord_merged_by_side = ['left_hemisphere',
-                                             'right_hemisphere', 'unlabeled']
-srcgroups_merged_by_side = srcgroups_all.copy()
-for labi, label in enumerate(coord_labels_corresp_coord):
-    if label.endswith('_L'):
-        srcgroups_merged_by_side[srcgroups_all == labi] = 0
-    elif label.endswith('_R'):
-        srcgroups_merged_by_side[srcgroups_all == labi] = 1
-    else:
-        srcgroups_merged_by_side[srcgroups_all == labi] = 2
-
-
-#------------------
-
-srcgroups_dict = {}
-srcgroups_dict['all'] = srcgroups_all
-srcgroups_dict['CB_vs_rest'] = srcgroups_cb_vs_rest
-srcgroups_dict['CBmerged_vs_rest'] = srcgroups_cbm_vs_rest
-srcgroups_dict['merged'] = srcgroups_merged
-srcgroups_dict['merged_by_side'] = srcgroups_merged_by_side
-
-
-
-#coord_labels_corresp_coord
-
-coord_labels_corresp_dict = {}
-coord_labels_corresp_dict['all'] = coord_labels_corresp_coord
-coord_labels_corresp_dict['CB_vs_rest'] = coord_labels_corresp_coord_cb_vs_rest
-coord_labels_corresp_dict['CBmerged_vs_rest'] = coord_labels_corresp_coord_cbm_vs_rest
-coord_labels_corresp_dict['merged'] = coord_labels_corresp_coord_merged
-coord_labels_corresp_dict['merged_by_side'] = coord_labels_corresp_coord_merged_by_side
-
-
-if 'Cerebellum' not in desired:
-    desired += ['Cerebellum']
+#if 'Cerebellum_B' not in desired:
+#    desired += ['Cerebellum_B']
 
 ###############################################
 
-#del srcgroups_dict['all']
-del srcgroups_dict['CB_vs_rest']
-del srcgroups_dict['CBmerged_vs_rest']
-del srcgroups_dict['merged']
-del srcgroups_dict['merged_by_side']
-#----------------
+kks = list(srcgroups_dict.keys())
+for k in kks:
+    if k not in groupings_to_use:
+        del srcgroups_dict[k]
+        del label_groups_dict[k]
 
+assert len(srcgroups_dict) > 0
 
 ################################### Copmute
+import utils_tSNE as utsne
+windowsz_for_artifacts = 1
+skip = 1
+sfreq = raw.info['sfreq']
+nedgeBins = 0
+
+
+
+suffixes = ['_ann_MEGartif']
+anns_artif, anns_artif_pri, Xtimes, dataset_bounds = utsne.concatAnns(rawnames,times_pri, suffixes)
+ivalis_artif = utils.ann2ivalDict(anns_artif)
+ivalis_artif_tb, ivalis_artif_tb_indarrays = \
+    utsne.getAnnBins(ivalis_artif, Xtimes, nedgeBins, sfreq, skip, windowsz_for_artifacts, dataset_bounds)
+ivalis_artif_tb_indarrays_merged = utsne.mergeAnnBinArrays(ivalis_artif_tb_indarrays)
+
+nbinstot = len(Xtimes) #sum( [len(times) for times in times_pri] )
+num_nans = sum( [ len(ar) for ar in ivalis_artif_tb_indarrays_merged.values() ] )
+print('Artifact NaN percentage is {:.4f}%'.format(100 * num_nans/ nbinstot  ) )
+
+#Xconcat_artif_nan  = utils.setArtifNaN(Xconcat, ivalis_artif_tb_indarrays_merged, feature_names_pri[0])
 
 
 #srcgroups_list += [custom_raws['surround'].info['srcgroups']]
-skip_ulabeled = True
+skip_unlabeled = True
 duplicate_merged_across_sides = True # applies to 'merged' and 'CBmerged_vs_rest'
 newchnames = []
 newdatas = []
 avpos = []
 pcas = []
 icas = []
-sort_keys = list( sorted(srcgroups_dict.keys()) )
-#sort_keys = ['CBmerged_vs_rest']
+srcgroups_keys_ordered = list( sorted(srcgroups_dict.keys()) )
+#srcgroups_keys_ordered = ['CBmerged_vs_rest']
 # cycle over parcellations
-for srcgi,srcgroups_key in enumerate(sort_keys):
+for srcgi,srcgroups_key in enumerate(srcgroups_keys_ordered):
     print('   Starting working wtih grouping ',srcgroups_key)
     srcgroups = srcgroups_dict[srcgroups_key]
     if srcgroups_key == 'all':
@@ -498,21 +463,23 @@ for srcgi,srcgroups_key in enumerate(sort_keys):
     if sources_type == 'HirschPt2011':
         assert max(srcgroups) == len(coords)-1, ( max(srcgroups)+1, len(coords) )
 
+    labels_list = label_groups_dict[srcgroups_key]
+
     # cycle over parcel indices
-    for i in range( max(srcgroups)+1 ):
+    for i in range( np.max(srcgroups)+1 ):
         merge_needed = False
         # get the (orderd) list of parcels in the current parcellation
-        coord_labels_corresp = coord_labels_corresp_dict[srcgroups_key]
-        cur_parcel = coord_labels_corresp[i]
+        cur_parcel = labels_list[i]
         desired_ind = False  # whether we desire this index or not
-        for des in desired:
-            desired_ind = desired_ind or (cur_parcel.find(des) >= 0)
-        if not desired_ind or (skip_ulabeled and cur_parcel.find('unlabeled') >= 0):
+        #for des in desired:
+        #    desired_ind = desired_ind or (cur_parcel.find(des) >= 0)
+        #if not desired_ind or (skip_unlabeled and cur_parcel.find('unlabeled') >= 0):
+        if (skip_unlabeled and cur_parcel.find('unlabeled') >= 0):
             continue
 
         inds = np.where(srcgroups == i)[0]
         #srcData[inds]
-        if cur_parcel == 'Cerebellum':  # NOT 'Cerebellum_L' or 'Cerebellum_R':
+        if cur_parcel.endswith('_B'):  # NOT 'Cerebellum_L' or 'Cerebellum_R':
             if duplicate_merged_across_sides:
                 merge_needed = True
             brainside = 'B'
@@ -524,7 +491,7 @@ for srcgi,srcgroups_key in enumerate(sort_keys):
                     brainside = 'R'
             else:
                 #L or R?
-                if coords[i][0] <= 0:
+                if coords_resorted[i][0] <= 0:
                     brainside = 'L'
                 else:
                     brainside = 'R'
@@ -545,26 +512,46 @@ for srcgi,srcgroups_key in enumerate(sort_keys):
                 chdata_cur, times_cur = custom_raws_cur['surround'][chnames]
                 chdatas += [chdata_cur]
             chdata = np.hstack(chdatas)
+            assert not ( np.any(np.isnan(chdata) ) and np.any(np.isinf(chdata) ) )
+
+            chdata_wnans = utils.setArtifNaN(chdata.T,ivalis_artif_tb_indarrays_merged, None)
+            isnan = np.isnan( chdata_wnans)
+            if np.sum(isnan):
+                artif_bininds = np.where( isnan )[0] # note that it is transposed
+            else:
+                artif_bininds = []
+            bininds_noartif = np.setdiff1d( np.arange(len(isnan) ) , artif_bininds)
+
 
             if algType.startswith('PCA'):
                 pca = PCA(n_components=nPCA_comp)
-                pca.fit(chdata.T)
-                newdata = pca.transform(chdata.T).T
+                pca_succeed = False
+                try:
+                    pca.fit(chdata.T)
+                    pca_succeed = True
+                    newdata = pca.transform(chdata.T[bininds_noartif] ).T
+                except np.linalg.LinAlgError as e:
+                    print('PCA calc exception ',e)
+                    newdata = chdata
+                    pca = None
+
                 #newchnames += ['msrc{}_{}_{}_c{}'.format(brainside,bandname,i,ci) \
                 #               for ci in range(newdata.shape[0])]
 
                 pcas += [pca]
-                if algType.find('ICA') >= 0:
+                if algType.find('ICA') >= 0 and pca_succeed:
                     max_iter = 500
                     ica = FastICA(n_components=len(newdata),
                                   random_state=0, max_iter=max_iter)
-                    ica.fit(newdata.T)
+                    ica.fit(newdata.T[bininds_noartif])
                     if ica.n_iter_ < max_iter:
                         newdata = ica.transform(newdata.T).T
                     else:
                         # newdata does not change in this case
                         print('Did not converge')
 
+                    icas += [ica]
+                else:
                     icas += [ica]
 
                 if merge_needed:
@@ -586,10 +573,38 @@ for srcgi,srcgroups_key in enumerate(sort_keys):
 
             elif algType == 'mean':
                 newdata = np.mean(chdata,axis=0)[None,:]
-                newchnames += ['msrc{}_{}_{}'.format(brainside,bandname,i)]
+                if merge_needed:
+                    cur_newchnames = ['msrc{}_{}_{}_{}_c{}'.
+                                    format('L',bandname,srcgi,i,0) ]
+                    cur_newchnames += ['msrc{}_{}_{}_{}_c{}'.
+                                    format('R',bandname,srcgi,i,0) ]
+                else:
+                    cur_newchnames = ['msrc{}_{}_{}_{}_c{}'.
+                                    format(brainside,bandname,srcgi,i,0) ]
+                    #newchnames += ['msrc{}_{}_{}'.format(brainside,bandname,i)]
+                newchnames += cur_newchnames
+            elif algType == 'all_sources':
+                newdata = chdata
+                #TODO in this case I may want to put brainside differently
+                if merge_needed:
+                    cur_newchnames = ['msrc{}_{}_{}_{}_c{}'.
+                                    format('L',bandname,srcgi,i,ci) \
+                                    for ci in range(newdata.shape[0])]
+                    cur_newchnames += ['msrc{}_{}_{}_{}_c{}'.
+                                    format('R',bandname,srcgi,i,ci) \
+                                    for ci in range(newdata.shape[0])]
+                else:
+                    cur_newchnames = ['msrc{}_{}_{}_{}_c{}'.
+                                    format(brainside,bandname,srcgi,i,ci) \
+                                    for ci in range(newdata.shape[0])]
+                newchnames += cur_newchnames
+            else:
+                raise ValueError('Wrong algType')
+
+
             #print(chnames)
             print('{}={}: {} over {}, newdata shape {}'.
-                  format(i,coord_labels_corresp[i], algType,
+                  format(i,labels_list[i], algType,
                          chdata.shape[0],newdata.shape))
 
             newdatas    += [newdata]
@@ -621,19 +636,27 @@ scrgroups_per_indset = {}
 for crt in custom_raws:
     scrgroups_per_indset[crt] = custom_raws[crt].info['srcgroups']
 
+sl = sorted([ gp.src_grouping_names_order.index(k) for k in srcgroups_dict.keys() ])
+assert len(sl) == 1  # just for now, I don't want to code extra in gen_features
+grp_id_str = ','.join(map(str,sl) )
 
-for rawname_ in rawnames:
-    src_rec_info_fn = '{}_{}_src_rec_info'.format(rawname_,sources_type)
-    src_rec_info_fn_full = os.path.join(gv.data_dir, src_rec_info_fn + '.npz')
-    print(src_rec_info_fn_full)
-    np.savez(src_rec_info_fn_full, scrgroups_dict=scrgroups_dict,
-            scrgroups_per_indset = scrgroups_per_indset,
-            coords_Jan_actual=coords,
-            coord_labels_corresp_dict = coord_labels_corresp_dict,
-            srcgroups_key_order = sort_keys,
-            coords_MNI=coords_MNI,
-            pcas=pcas, icas=icas,
-            avpos=avpos, algType=algType, vertices_inds_dict=vertices_inds_dict)
+
+if do_save:
+    for rawname_ in rawnames:
+        src_rec_info_fn = '{}_{}_grp{}_src_rec_info'.\
+            format(rawname_,sources_type,  grp_id_str  )
+        src_rec_info_fn_full = os.path.join(gv.data_dir, src_rec_info_fn + '.npz')
+        print(src_rec_info_fn_full)
+        np.savez(src_rec_info_fn_full,
+                 srcgroups_dict=srcgroups_dict,
+                scrgroups_per_indset = scrgroups_per_indset,
+                coords_Jan_actual=coords_resorted,
+                label_groups_dict = label_groups_dict,
+                srcgroups_key_order = srcgroups_keys_ordered,
+                coords_MNI=coords_MNI,
+                pcas=pcas, icas=icas,
+                avpos=avpos, algType=algType, vertices_inds_dict=vertices_inds_dict)
+        # coords_Jan_actual -- indeed actual coords (not MNI)
 
 
 #------------------
@@ -672,11 +695,11 @@ if onlyCB_and_notCB:
     newchnames_filtered = []
     newdatas_filtered = []
     for chni,chn in enumerate(newchnames):
-        nn = utils.getMEGsrc_chname_nice(chn,coord_labels_corresp_dict, sort_keys)
+        nn = utils.getMEGsrc_chname_nice(chn,label_groups_dict, srcgroups_keys_ordered)
         srcgroup_ind, ind, subind = utils.parseMEGsrcChnameShort(chn)
         #print(nn)
         # computed CB twice, so we don't want to save it twice
-        if nn.find('Cerebellum') >= 0 and sort_keys[srcgroup_ind] in sort_keys:
+        if nn.find('Cerebellum') >= 0 and srcgroups_keys_ordered[srcgroup_ind] in srcgroups_keys_ordered:
 
             print(chni,nn, srcgroup_ind, ind, subind)
             inds += [chni]
@@ -687,7 +710,7 @@ if onlyCB_and_notCB:
 else:
     newchnames_filtered = newchnames
     newdatas_filtered = newdatas
-#------------
+#---------------
 dd = np.vstack(newdatas_filtered)
 rawdata_flt = dd
 
@@ -709,20 +732,22 @@ srcgroups_backup = custom_raws['surround'].info['srcgroups']
 
 newraw = mne.io.RawArray(dd, info)
 
-curstart = 0
-for rawni,rawname_ in enumerate(rawnames):
-    if sources_type == 'HirschPt2011':
-        newraw_cur = custom_raws['surround'].copy()
-    else:
-        newraw_cur = newraw.copy()
-    tt = custom_raws_pri[rawni]['surround'].times
-    newraw_cur.crop( curstart + tt[0], curstart + tt[-1], include_tmax = True )
-    curstart += tt[-1] + tstep
+if do_save:
+    curstart = 0
+    for rawni,rawname_ in enumerate(rawnames):
+        if sources_type == 'HirschPt2011':
+            newraw_cur = custom_raws['surround'].copy()
+        else:
+            newraw_cur = newraw.copy()
+        tt = custom_raws_pri[rawni]['surround'].times
+        newraw_cur.crop( curstart + tt[0], curstart + tt[-1], include_tmax = True )
+        curstart += tt[-1] + tstep
 
-    src_fname_noext = 'srcd_{}_{}'.format(rawname_, sources_type)
+        src_fname_noext = 'srcd_{}_{}_grp{}'.format(rawname_, sources_type, grp_id_str)
 
-    #  Save
-    newsrc_fname_full = os.path.join( data_dir, 'av_' + src_fname_noext + '.fif' )
-    print( newsrc_fname_full )
+        #  Save
+        #newsrc_fname_full = os.path.join( data_dir, 'av_' + src_fname_noext + '.fif' )
+        newsrc_fname_full = os.path.join( data_dir, 'pcica_' + src_fname_noext + '.fif' )
+        print( newsrc_fname_full )
 
-    newraw_cur.save(newsrc_fname_full, overwrite=1)
+        newraw_cur.save(newsrc_fname_full, overwrite=1)

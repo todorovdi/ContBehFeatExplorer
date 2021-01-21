@@ -2,6 +2,21 @@ import mne
 import os
 import numpy as np
 import gc
+import utils
+
+def getFileAge(fname_full, ret_hours=True):
+    import os, datetime
+    if not os.path.exists(fname_full):
+        return np.inf
+    created = os.stat( fname_full ).st_ctime
+    dt = datetime.datetime.fromtimestamp(created)
+    today = datetime.datetime.today()
+    tdelta = (today - dt)
+    r = tdelta
+    if ret_hours:
+        nh = tdelta.seconds / ( 60 * 60 )
+        r = nh
+    return nh
 
 def getRaw(rawname_naked, rawname = None ):
     if os.environ.get('DATA_DUSS') is not None:
@@ -18,6 +33,11 @@ def getRaw(rawname_naked, rawname = None ):
     return raw
 
 def getSubRaw(rawname_naked, picks = ['EMG.*old'], raw=None, rawname = None):
+    '''
+    no preproc is done, just load
+    picks -- list of regexes
+    creates a copy, so no damaging input
+    '''
     if isinstance(picks, str):
         picks = [picks]
     assert isinstance(picks,list) and isinstance(picks[0],str)
@@ -39,55 +59,680 @@ def getSubRaw(rawname_naked, picks = ['EMG.*old'], raw=None, rawname = None):
 
     return subraw
 
-def saveLFP_nonresampled(rawname_naked, f_highpass = 2, skip_if_exist = 1,
-                         n_free_cores = 2, ret_if_exist = 0 ):
-    if os.environ.get('DATA_DUSS') is not None:
-        data_dir = os.path.expandvars('$DATA_DUSS')
+def loadBadChannelList(rawname_,ch_names):
+    import json
+    import utils
+    sind_str,medstate,task = utils.getParamsFromRawname(rawname_)
+    # get info about bad MEG channels (from separate file)
+    with open('subj_info.json') as info_json:
+        #raise TypeError
+
+        #json.dumps({'value': numpy.int64(42)}, default=convert)
+        gen_subj_info = json.load(info_json)
+
+    #subj,medcond,task  = utils.getParamsFromRawname(rawname_)
+    subjind = int(sind_str[1:])
+    if subjind > 7:
+        badchlist_ = gen_subj_info[sind_str]['bad_channels'][medstate]['hold']
     else:
-        data_dir = '/home/demitau/data'
+        badchlist_ = gen_subj_info[sind_str]['bad_channels'][medstate][task]
+    badchlist= []
+    for chname in badchlist_:
+        if chname.find('EMG') >= 0 and ( (chname.find('_kil') < 0) and (chname.find('_old') < 0) ):
+            badchlist += [chname + '_old', chname + '_kil']
+        else:
+            if chname not in ch_names:
+                print('Warning: channel {} not found in {}'.format(chname,rawname_) )
+                continue
+            else:
+                badchlist += [chname]
+    return badchlist
+def getRawnameListStructure(rawnames):
+    subjs_analyzed = {}  # keys -- subjs,  vals -- arrays of keys in raws
+    '''
+    subj
+        datasets
+        medconds
+        tasks
+        medcond1 [on or off]
+            task 1    --> rawname
+            ...
+            task n_1  --> rawname
+        medcond2 [on or off]
+            task 1    --> rawname
+            ...
+            task n_2  --> rawname
+    '''
+
+    # I use that medcond, tasks don't intersect with keys I use
+    for ki,k in enumerate(rawnames):
+        #f = raws[k]
+        sind_str,medcond,task = utils.getParamsFromRawname(k)
+
+        cursubj = {}
+        if sind_str in subjs_analyzed:
+            cursubj = subjs_analyzed[sind_str]
+
+        if 'datasets' not in cursubj:
+            cursubj['datasets'] = []
+        cursubj['datasets'] += [k]
+
+        if 'medconds' in cursubj:
+            if medcond not in cursubj['medconds']:
+                cursubj['medconds'] += [medcond]
+        else:
+            cursubj['medconds'] = [medcond]
+
+        if 'tasks' in cursubj:
+            if task not in cursubj['tasks']:
+                cursubj['tasks'] += [task]
+        else:
+            cursubj['tasks'] = [task]
+
+        if medcond in cursubj:
+            m = cursubj[medcond]
+            if task in m:
+                raise ValueError('Duplicate raw key!')
+            else:
+                m[task] = k
+                if 'datasets' not in cursubj[medcond]:
+                    cursubj[medcond]['datasets'] = [k]
+                else:
+                    cursubj[medcond]['datasets'] += [k]
+        else:
+            cursubj[medcond] = { task: k}
+            if 'datasets' not in cursubj[medcond]:
+                cursubj[medcond]['datasets'] = [k]
+            else:
+                cursubj[medcond]['datasets'] += [k]
+
+        subjs_analyzed[sind_str] =  cursubj
+    return subjs_analyzed
+
+def rescaleFeats(rawnames, X_pri, featnames, wbd_pri,
+                 sfreq, times_pri, int_type_pri, main_side_pri=None,
+                 minlen_bins = 5 * 256 / 32, combine_within='no'):
+    '''
+    usually notrem_<sidelet>
+    modifies raws in place. Rescales to zero mean, unit std
+    '''
+    if int_type_pri is None:
+        int_type_pri = [ 'entire' ] * len(rawnames)
+    for int_type in int_type_pri:
+        assert int_type.find('{}') < 0  # it should not be a template
+
+
+    assert len(featnames) == X_pri[0].shape[1],  ( len(featnames),  X_pri[0].shape[0] )
+    assert len(rawnames) == len(X_pri)
+    assert len(rawnames) == len(wbd_pri)
+    assert len(rawnames) == len(times_pri)
+    assert len(rawnames) == len(int_type_pri)
+    assert combine_within in ['subject', 'medcond', 'no']
+    mods = ['msrc' , 'LFP']
+
+    if main_side_pri is None:
+        main_side_pri = [ it[-1].upper() for it in int_type_pri ]
+
+    #print('Start raws rescaling for modality {} based on interval type {}'.format(mod,int_type_templ) )
+    import utils_tSNE as utsne
+    rwnstr = ','.join(rawnames)
+
+    #if mod == 'src':
+    #    chn_name_side_ind = 4
+    #if mod in ['LFP', 'LFP_hires']:
+    #    chn_name_side_ind = 3
+
+    if combine_within == 'no':
+        indsets = [ np.arange(len(rawnames) ) ]
+    else:
+        subjs_analyzed = getRawnameListStructure(rawnames)
+        if combine_within == 'subj':
+            indsets = []
+            for subj in subjs_analyzed:
+                subj_sub = subjs_analyzed[subj]
+                indset_cur = []
+                dsets = subj_sub['datasets']
+                for rn in dsets:
+                    indset_cur += [rawnames.index(rn) ]
+                indsets += [indset_cur]
+            indsets += [ np.arange(len(rawnames) ) ]
+        elif combine_within == 'medcond':
+            indsets = []
+            for subj in subjs_analyzed:
+                subj_sub = subjs_analyzed[subj]
+                for medcond in subj_sub['medconds']:
+                    indset_cur = []
+                    dsets = subj_sub['medconds']['datasets']
+                    for rn in dsets:
+                        indset_cur += [rawnames.index(rn) ]
+                    indsets += [indset_cur]
+            indsets += [ np.arange(len(rawnames) ) ]
+    #for
+
+    ib_MEG_perit_perraw = {}
+    ib_LFP_perit_perraw = {}
+    ib_mvt_perit_perraw = {}
+    for rawi,rn in enumerate(rawnames):
+        #ib_MEG_perit = getCleanIntervalBins(rn,sfreq, times,['_ann_MEGartif'] )
+        #ib_LFP_perit = getCleanIntervalBins(rn,sfreq, times,['_ann_LFPartif'] )
+        main_side = main_side_pri[rawi]
+        wrong_brain_sidelet = main_side[0].upper()
+
+        wbd = wbd_pri[rawi]
+        times = times_pri[rawi]
+
+        anns_mvt, anns_artif_pri, times2, dataset_bounds = \
+        utsne.concatAnns([rn],[times] )
+        #ivalis_mvt = utils.ann2ivalDict(anns_mvt)
+        ib_mvt_perit_merged = \
+        utils.getWindowIndicesFromIntervals(wbd,utils.ann2ivalDict(anns_mvt) ,
+                                            sfreq,ret_type='bins_contig',
+                                            wbd_type='contig',
+                                            ret_indices_type =
+                                                'window_inds', nbins_total=len(times) )
+
+        anns_MEGartif, anns_artif_pri, times2, dataset_bounds = \
+            utsne.concatAnns([rn],[times],['_ann_MEGartif'] )
+        # here I don't want to remove artifacts from "wrong" brain side because
+        # we use ipsilateral CB
+        ib_MEG_perit_merged = \
+            utils.getWindowIndicesFromIntervals(wbd,utils.ann2ivalDict(anns_MEGartif) ,
+                                            sfreq,ret_type='bins_contig',
+                                            wbd_type='contig',
+                                            ret_indices_type =
+                                                'window_inds', nbins_total=len(times) )
+
+        anns_LFPartif, anns_artif_pri, times2, dataset_bounds = \
+            utsne.concatAnns([rn],[times],['_ann_LFPartif'] )
+        anns_LFPartif = utils.removeAnnsByDescr(anns_LFPartif, ['artif_LFP{}'.format(wrong_brain_sidelet) ])
+        ib_LFP_perit_merged = \
+            utils.getWindowIndicesFromIntervals(wbd,utils.ann2ivalDict(anns_LFPartif) ,
+                                            sfreq,ret_type='bins_contig',
+                                            wbd_type='contig',
+                                            ret_indices_type =
+                                                'window_inds', nbins_total=len(times) )
+
+        #import pdb; pdb.set_trace()
+
+        ib_MEG_perit_perraw[rn] = ib_MEG_perit_merged
+        ib_LFP_perit_perraw[rn] = ib_LFP_perit_merged
+        ib_mvt_perit_perraw[rn] = ib_mvt_perit_merged
+
+        it = int_type_pri[rawi]
+        print('rescaleFeats: Rescaling features for raw {} accodring to data in interval {}'.format(rn,it ) )
+
+    rescale_separately = True
+
+    for rawindseti_cur,indset_cur in enumerate(indsets):
+        stat_perchan = {}
+        for feati,featn in enumerate(featnames):
+            dats_forstat = []
+            # for each dataset separtely we rescale features accodring to an
+            # interval
+            for rawi in indset_cur:
+                #if mod == 'src':
+                #    chnames_nicened = utils.nicenMEGsrc_chnames(chnames, roi_labels, srcgrouping_names_sorted,
+                #                                    prefix='msrc_')
+                rn = rawnames[rawi]
+                ib_MEG_perit =  ib_MEG_perit_perraw[rn]
+                ib_LFP_perit =  ib_LFP_perit_perraw[rn]
+                ib_mvt_perit =  ib_mvt_perit_perraw[rn]
+
+                dat =  X_pri[rawi][:,feati]
+                l = len(dat)
+
+                it = int_type_pri[rawi]
+                if it == 'entire':
+                    dat_forstat = dat
+                else:
+                    #ib_MEG = ib_MEG_perit[it]
+                    #ib_LFP = ib_LFP_perit[it]
+                    ib_mvt = ib_mvt_perit[it]
+
+                    mask = np.zeros(l, dtype=bool)
+                    mask[ib_mvt] = 1
+
+                    if featn.find('LFP' ) >= 0:
+                        for bins in ib_LFP_perit.values():
+                            #print('LFP artif nbins ',len(bins))
+                            mask[bins] = 0
+                    if featn.find('msrc' ) >= 0:
+                        for bins in ib_MEG_perit.values():
+                            #print('MEG artif nbins ',len(bins))
+                            mask[bins] = 0
+
+                    n = np.sum(mask)
+                    assert n  > minlen_bins, (n, n/ mask.size)
+
+                    dat_forstat = dat[mask]
+                    dats_forstat += [dat_forstat]
+
+                mn,std = utsne.robustMean(dat_forstat,ret_std=1)
+                assert abs(std) > 1e-20
+
+                if rescale_separately:
+                    X_pri[rawi][:,feati] -= mn
+                    X_pri[rawi][:,feati] /= std
+
+
+            # here I would for normalization stats gather from all
+            # participating datasets from the group
+            if not rescale_separately:
+                dats_forstat = np.hstack(dats_forstat)
+                mn,std = utsne.robustMean(dats_forstat,ret_std=1)
+                assert abs(std) > 1e-20
+                stat_perchan[featn] = (mn,std)
+
+                for rawi in indset_cur:
+                    X_pri[rawi][:,feati] -= mn
+                    X_pri[rawi][:,feati] /= std
+
+    return X_pri
+    #fname_stats = rwnstr + '_stats.npz'
+    #np.savez(fname_stats, dat_forstat_perchan=dat_forstat_perchan,
+    #         combine_within_medcond=combine_within_medcond,
+    #         subjs_analyzed=subjs_analyzed)
+
+def rescaleRaws(raws_permod_both_sides, mod='LFP',
+                int_type_templ = 'notrem_{}', minlen_sec = 5, combine_within_medcond=True,
+                roi_labels=None, srcgrouping_names_sorted = None, src_labels_ipsi = ['Cerebellum']):
+    '''
+    modifies raws in place. Rescales to zero mean, unit std
+    roi_labels are there only for ipsilateral cerebellum essentially
+    '''
+    if mod == 'src':
+        assert roi_labels is not None
+        assert srcgrouping_names_sorted is not None
+# intbins_per_raw = {}
+
+#     for rawname_ in raws_permod_both_sides:
+#         raw = raws_permod_both_sides[rawname_][mod]
+#         ib = upre.getCleanIntervalBins(rn,raws_permod_both_sides[rn]['LFP'])
+
+#     #     side = None
+#     #     if side_to_use == 'main_trem':
+#     #         side = gv.gen_subj_info[subj]['tremor_side']
+#     #     elif side_to_use == 'main_move':
+#     #         side = gv.gen_subj_info[subj].get('move_side',None)
+#     #     if side is None:
+#     #         print('{}: {} is None'.format(rawname_, side_to_use))
+#     #     side_letter = side[0].upper()
+
+#     #     sidelet_per_raw[rawname_] = side_letter
+
+#         for sidelets in ['R', 'L']:
+#             it = int_type_templ.format(side_letter)
+#             assert len(ib[it]) / sfreq > minlen_sec
+
+#         intbins_per_raw[rawname_] = ib
+
+    # defrn = rawnames[0]
+    # defraw = raws_permod_both_sides[defrn][mod]
+    # defchn = 'LFPL01'
+    # defdat,_ = defraw[defchn]
+    # ib = intbins_per_raw[defrn][int_type_templ.format('L')]
+    # defdat_forstat = defdat[0,ib]
+    # def_mn,def_std = utsne.robustMean(defdat_forstat,ret_std=1)
+    print('Start raws rescaling for modality {} based on interval type {}'.format(mod,int_type_templ) )
+    import utils_tSNE as utsne
+    rawnames = list( sorted(raws_permod_both_sides.keys() ) )
+    rwnstr = ','.join(rawnames)
+
+    if mod == 'src':
+        chn_name_side_ind = 4
+    if mod in ['LFP', 'LFP_hires']:
+        chn_name_side_ind = 3
+
+
+    subjs_analyzed = getRawnameListStructure(rawnames)
+    dat_forstat_perchan = {}
+    if combine_within_medcond:
+        #print('subjs_analyzed = ',subjs_analyzed)
+        for subj in subjs_analyzed:
+            subj_sub = subjs_analyzed[subj]
+            tasks = subj_sub['tasks']
+            for medcond in subj_sub['medconds']:
+                rn0 = subj_sub[medcond][tasks[0]]
+                chnames = raws_permod_both_sides[rn0][mod].ch_names
+
+                if mod == 'src':
+                    chnames_nicened = utils.nicenMEGsrc_chnames(chnames, roi_labels, srcgrouping_names_sorted,
+                                                    prefix='msrc_')
+                for chni,chn in enumerate(chnames):
+                    dats_forstat = []
+                    sidelet = chn[chn_name_side_ind]
+                    opsidelet = utils.getOppositeSideStr(sidelet)
+                    for task in subj_sub[medcond]:
+                        rn = subj_sub[medcond][task]
+
+
+                        raw = raws_permod_both_sides[rn][mod]
+                        sfreq = raw.info['sfreq']
+
+                        if mod in ['LFP', 'LFP_hires']:
+                            suffixes = ['_ann_LFPartif']
+                        elif mod == 'src':
+                            suffixes = ['_ann_MEGartif']
+                        ib_perit = getCleanIntervalBins(rn, raw.info['sfreq'], raw.times,suffixes)
+
+                        dat,_ = raw[chn]
+
+                        if mod == 'src' and chnames_nicened[chni].find('Cerebellum') >= 0:
+                            it = int_type_templ.format(sidelet)
+                        else:
+                            it = int_type_templ.format(opsidelet)
+                        assert len(ib_perit[it]) / sfreq > minlen_sec
+
+                        ib = ib_perit[it]
+                        dat_forstat = dat[0,ib]
+                        dats_forstat += [dat_forstat]
+
+                    dats_forstat = np.hstack(dats_forstat)
+
+                    mn,std = utsne.robustMean(dats_forstat,ret_std=1)
+                    assert abs(std) > 1e-20
+
+                    dat_forstat_perchan[chn] = (mn,std)
+
+                    # rescale each raw individually based on common stats
+                    fun = lambda x: (x-mn) /std
+                    for task in subj_sub[medcond]:
+                        rn = subj_sub[medcond][task]
+                        raw = raws_permod_both_sides[rn][mod]
+                        raw.load_data()
+                        raw.apply_function(fun,picks=[chn])
+    else:
+        for rawname_ in raws_permod_both_sides:
+            raw = raws_permod_both_sides[rawname_][mod]
+            sfreq = raw.info['sfreq']
+
+            if mod in ['LFP', 'LFP_hires']:
+                suffixes = ['_ann_LFPartif']
+            elif mod == 'src':
+                suffixes = ['_ann_MEGartif']
+            ib_perit = getCleanIntervalBins(rawname_, raw.info['sfreq'], raw.times,suffixes)
+
+            if mod == 'src':
+                chnames_nicened = utils.nicenMEGsrc_chnames(raw.ch_names, roi_labels,
+                                                            srcgrouping_names_sorted, prefix='msrc_')
+            for chni,chn in enumerate(raw.ch_names):
+                sidelet = chn[chn_name_side_ind]
+                opsidelet = utils.getOppositeSideStr(sidelet)
+                #if rawname_ == defrn and chn == defchn:
+                #    continue
+                dat,_ = raw[chn]
+
+                if mod == 'src' and chnames_nicened[chni].find('Cerebellum') >= 0:
+                    it = int_type_templ.format(sidelet)
+                else:
+                    it = int_type_templ.format(opsidelet)
+                assert len(ib_perit[it]) / sfreq > minlen_sec
+
+                ib = ib_perit[it]
+                dat_forstat = dat[0,ib]
+                mn,std = utsne.robustMean(dat_forstat,ret_std=1)
+                assert abs(std) > 1e-20
+                #fun = lambda x: (x-mn) * (def_std/std) + def_mn
+                fun = lambda x: (x-mn) /std
+                raw.load_data()
+                raw.apply_function(fun,picks=[chn])
+
+                # to check
+                dat,_ = raw[chn]
+                dat_forstat = dat[0,ib]
+                mn,std = utsne.robustMean(dat_forstat,ret_std=1)
+                dat_forstat_perchan[chn] = (mn,std)
+
+                #print(mn,std)
+                assert abs(mn-0) < 1e-10
+                assert abs(std-1) < 1e-10
+
+    fname_stats = rwnstr + '_stats.npz'
+    np.savez(fname_stats, dat_forstat_perchan=dat_forstat_perchan,
+             combine_within_medcond=combine_within_medcond,
+             subjs_analyzed=subjs_analyzed)
+
+
+def getCleanIntervalBins(rawname_,sfreq, times, suffixes = ['_ann_LFPartif'],verbose=False):
+    #returns bins belonging to annotations, without ANY artifacs
+    #from given suffix (regardless of channel name), as boolean array
+    import utils_tSNE as utsne
+    import utils
+    sfreq = int(sfreq)
+
+    anns_mvt, anns_artif_pri, times2, dataset_bounds = \
+    utsne.concatAnns([rawname_],[times] )
+    ivalis_mvt = utils.ann2ivalDict(anns_mvt)
+    ivalis_mvt_tb, ivalis_mvt_tb_indarrays = utsne.getAnnBins(ivalis_mvt, times,
+                                                                0, sfreq, 1, 1,
+                                                                  dataset_bounds)
+    ivalis_mvt_tb_indarrays_merged = utsne.mergeAnnBinArrays(ivalis_mvt_tb_indarrays)
+
+
+    anns_artif, anns_artif_pri, times2, dataset_bounds = \
+    utsne.concatAnns([rawname_],[times],suffixes )
+    ivalis_artif = utils.ann2ivalDict(anns_artif)
+    ivalis_artif_tb, ivalis_artif_tb_indarrays = utsne.getAnnBins(ivalis_artif, times,
+                                                                0, sfreq, 1, 1,
+                                                                  dataset_bounds)
+    ivalis_artif_tb_indarrays_merged = utsne.mergeAnnBinArrays(ivalis_artif_tb_indarrays)
+
+    for it in ivalis_mvt_tb_indarrays_merged:
+        ivalbins = ivalis_mvt_tb_indarrays_merged[it]
+        mask = np.zeros( len(times), dtype=bool)
+        mask[ivalbins] = True
+
+        for artif_type in ivalis_artif_tb_indarrays_merged:
+            artif_bins_cur = ivalis_artif_tb_indarrays_merged[artif_type]
+            mbefore = np.sum(mask)
+            mask[artif_bins_cur] = False
+            mafter = np.sum(mask)
+            ndiscard = mbefore - mafter
+            if ndiscard > 0 and verbose:
+                print('{}:{}, {} in {} artifact bins (={:5.2f}s) discarded'.\
+                      format(rawname_,it,artif_type,ndiscard,ndiscard/sfreq))
+
+        ivalbins = np.where(mask)[0]
+        ivalis_mvt_tb_indarrays_merged[it] = ivalbins
+        if len(ivalbins) == 0:
+            print('getCleanIntervalBins:  Warning: len(ivalbins) == 0')
+    return ivalis_mvt_tb_indarrays_merged
+
+
+def loadRaws(rawnames,mods_to_load, sources_type = None, src_type_to_use=None,
+             src_file_grouping_ind=None, use_saved = True, highpass_lfreq = None):
+    '''
+    use_saved means using previously done preproc
+    '''
+    import globvars as gv
+    data_dir = gv.data_dir
+
+    raws_permod_both_sides = {}
+    for rawname_ in rawnames:
+        raw_permod_both_sides_cur = {}
+        print('!!!--Loading raws--!!! current rawname --- ',rawname_)
+
+
+        if 'FTraw' in mods_to_load:
+            rawname_FT = rawname_ + '.mat'
+            rawname_FT_full = os.path.join( data_dir, rawname_FT )
+            f = read_raw_fieldtrip(rawname_FT_full, None)
+
+            badchlist = loadBadChannelList(rawname_,f.ch_names)
+            f.info['bads'] = badchlist
+
+            for i,chn in enumerate(f.ch_names):
+                #chn = f.ch_names[chi]
+                show = 0
+                if chn.find('_old') >= 0:
+                    f.set_channel_types({chn:'emg'}); show = 1
+                elif chn.find('_kil') >= 0:
+                    f.set_channel_types({chn:'misc'}); show = 1
+                elif chn.find('LFP') >= 0:
+                    f.set_channel_types({chn:'bio'}); show = 1  # or stim, ecog, eeg
+
+                if show:
+                    print(i, chn )
+
+            raw_permod_both_sides_cur['FTraw'] = f
+
+        if 'resample' in mods_to_load or (not use_saved and 'EMG' in mods_to_load or "MEG" in mods_to_load):
+            rawname_resample = rawname_ + '_resample_raw.fif'
+            rawname_resample_full = os.path.join(data_dir, rawname_resample)
+            raw_resample = mne.io.read_raw_fif(rawname_resample_full)
+            if 'resample' in mods_to_load:
+                raw_permod_both_sides_cur['resample'] = raw_resample
+
+        if 'LFP' in mods_to_load:
+            if use_saved:
+                rawname_LFPonly = rawname_ + '_LFPonly'+ '.fif'
+                rawname_LFPonly_full = os.path.join( data_dir, rawname_LFPonly )
+                raw_lfponly = mne.io.read_raw_fif(rawname_LFPonly_full, None)
+            else:
+                raw_lfponly = getSubRaw(rawname_, raw=raw_resample, picks = ['LFP.*'])
+
+            raw_permod_both_sides_cur['LFP'] = raw_lfponly
+        if 'LFP_hires' in mods_to_load:
+            raw_lfp_highres = saveLFP(rawname_, skip_if_exist = 1, sfreq=1024)
+            if raw_lfp_highres is None:
+                lfp_fname_full = os.path.join(data_dir, '{}_LFP_1kHz.fif'.format(rawname_) )
+                raw_lfp_highres = mne.io.read_raw_fif(lfp_fname_full)
+            raw_permod_both_sides_cur['LFP_hires'] = raw_lfp_highres
+
+        if 'src' in mods_to_load:
+            assert sources_type is not None
+            assert src_type_to_use is not None
+            assert src_file_grouping_ind is not None
+            src_fname_noext = 'srcd_{}_{}_grp{}'.format(rawname_,sources_type,src_file_grouping_ind)
+            if src_type_to_use == 'center':
+                newsrc_fname_full = os.path.join( data_dir, 'cnt_' + src_fname_noext + '.fif' )
+            elif src_type_to_use == 'mean_td':
+                newsrc_fname_full = os.path.join( data_dir, 'av_' + src_fname_noext + '.fif' )
+            elif src_type_to_use == 'parcel_ICA':
+                newsrc_fname_full = os.path.join( data_dir, 'pcica_' + src_fname_noext + '.fif' )
+            else:
+                raise ValueError('Wrong src_type_to_use {}'.format(src_type_to_use) )
+            raw_srconly =  mne.io.read_raw_fif(newsrc_fname_full, None)
+            raw_permod_both_sides_cur['src'] = raw_srconly
+
+        if 'EMG' in mods_to_load:
+            if use_saved:
+                saveRectConv(rawname_, skip_if_exist = 1)
+                rectconv_fname_full = os.path.join(data_dir, '{}_emg_rectconv.fif'.format(rawname_) )
+                raw_emg = mne.io.read_raw_fif(rectconv_fname_full)
+                assert 4 == len(raw_emg.ch_names), rawname_
+            else:
+                raw_emg = getSubRaw(rawname_, raw=raw_resample, picks = ['EMG.*old'])
+            raw_permod_both_sides_cur['EMG'] = raw_emg
+
+        if 'MEG' in mods_to_load:
+            if use_saved:
+                raise ValueError('not possible')
+            else:
+                raw_meg = getSubRaw(rawname_, raw=raw_resample, picks = ['MEG.*'])
+            raw_permod_both_sides_cur['MEG'] = raw_meg
+
+        if 'afterICA' in mods_to_load:
+            rawname_afterICA = rawname_ + '_resample_afterICA_raw.fif'
+            rawname_afterICA_full = os.path.join(data_dir, rawname_afterICA)
+            raw_afterICA = mne.io.read_raw_fif(rawname_afterICA_full)
+            raw_permod_both_sides_cur['afterICA'] = raw_afterICA
+
+        if 'SSS' in mods_to_load:
+            rawname_SSS = rawname_ + '_notch_SSS_raw.fif'
+            rawname_SSS_full = os.path.join(data_dir, rawname_SSS)
+            raw_SSS = mne.io.read_raw_fif(rawname_SSS_full)
+            raw_permod_both_sides_cur['SSS'] = raw_SSS
+
+        if highpass_lfreq is not None:
+            for mod in raw_permod_both_sides_cur:
+                raw_permod_both_sides_cur[mod].\
+                filter(l_freq=highpass_lfreq, h_freq=None,picks='all',
+                       n_jobs = 6)
+
+
+        #raw_permod_both_sides_cur['afterICA']
+
+        raws_permod_both_sides[rawname_] = raw_permod_both_sides_cur
+    return raws_permod_both_sides
+
+
+def saveLFP(rawname_naked, f_highpass = 2, skip_if_exist = 1,
+                         n_free_cores = 2, ret_if_exist = 0, notch=1, highpass=1,
+            raw_FT=None, sfreq=1024, filter_artif_care=1, save_with_anns = 0):
+    import globvars as gv
+    import multiprocessing as mpr
+    lowest_freq_to_preserve = 1.
+
+    data_dir = gv.data_dir
 
     lfp_fname_full = os.path.join(data_dir, '{}_LFP_1kHz.fif'.format(rawname_naked) )
-    if os.path.exists(lfp_fname_full):
+    if os.path.exists(lfp_fname_full) :
         #subraw = mne.io.read_raw_fif(lfp_fname_full, None)
         #return subraw
         print('{} already exists!'.format(lfp_fname_full) )
         if ret_if_exist:
-            return mne.io.read_raw_fif(lfp_fname_full, None)
-        else:
+            raw =  mne.io.read_raw_fif(lfp_fname_full, None)
+            if int(raw.info['sfreq'] ) == int(sfreq):
+                return raw
+            else:
+                print('Existing has differe sfreq {} recomputing'.format(raw.info['sfreq'] ) )
+        elif skip_if_exist:
             return None
+        else:
+            print('saveLFP: starting to prepare new LFP file sfreq={}'.format(sfreq) )
 
-    fname = rawname_naked + '.mat'
-    fname_full = os.path.join(data_dir,fname)
-    if not os.path.exists(fname_full):
-        raise ValueError('wrong naked name' + rawname_naked )
-    #raw = mne.io.read_raw_fieldtrip(fname_full, None)
-    raw = read_raw_fieldtrip(fname_full, None)
-    print('Orig sfreq is {}'.format(raw.info['sfreq'] ) )
+    if raw_FT is not None:
+        assert raw_FT.info['sfreq'] > 1500
+        raw = raw_FT
+    else:
+        fname = rawname_naked + '.mat'
+        fname_full = os.path.join(data_dir,fname)
+        if not os.path.exists(fname_full):
+            raise ValueError('wrong naked name' + rawname_naked )
+        #raw = mne.io.read_raw_fieldtrip(fname_full, None)
+        raw = read_raw_fieldtrip(fname_full, None)
+        print('Orig sfreq is {}'.format(raw.info['sfreq'] ) )
+
 
     subraw = getSubRaw(rawname_naked, picks = ['LFP.*'], raw=raw )
     del raw
     import gc; gc.collect()
+
 
     y = {}
     for chname in subraw.ch_names:
         y[chname] = 'eeg'
     subraw.set_channel_types(y)
 
-    sfreq_to_use = 1024
 
-    import multiprocessing as mpr
     num_cores = mpr.cpu_count() - 1
-    subraw.resample(sfreq_to_use, n_jobs= max(1, num_cores-n_free_cores) )
+    nj = max(1, num_cores-n_free_cores)
+    subraw.resample(sfreq, n_jobs= nj )
 
-    subraw.filter(l_freq=1, h_freq=None)
+    artif_fname = os.path.join(data_dir , '{}_ann_LFPartif.txt')
+    if os.path.exists(artif_fname ) and filter_artif_care:
+        anns = mne.read_annotations(artif_fname)
+        subraw.set_annotations(artif_fname)
+    else:
+        print('saveLFP: {} does not exist'.format(artif_fname) )
 
-    freqsToKill = np.arange(50, sfreq_to_use//2, 50)  # harmonics of 50
-    subraw.notch_filter(freqsToKill)
+    if notch:
+        freqsToKill = np.arange(50, sfreq//2, 50)  # harmonics of 50
+        subraw.notch_filter(freqsToKill,  n_jobs= nj)
+
+    if highpass:
+        subraw.filter(l_freq=lowest_freq_to_preserve, h_freq=None,skip_by_annotation='BAD_LFP', n_jobs= nj,
+                      pad='symmetric')
+
+    if not save_with_anns:
+        subraw.set_annotations(mne.Annotations([],[],[]) )
 
     subraw.save(lfp_fname_full, overwrite=1)
     return subraw
 
-def saveRectConv(rawname_naked, raw=None, rawname = None, maxtremfreq=9, skip_if_exist = 0):
+def saveRectConv(rawname_naked, raw=None, rawname = None, maxtremfreq=9, skip_if_exist = 0,
+                 lowfreq=10):
     if os.environ.get('DATA_DUSS') is not None:
         data_dir = os.path.expandvars('$DATA_DUSS')
     else:
@@ -109,6 +754,7 @@ def saveRectConv(rawname_naked, raw=None, rawname = None, maxtremfreq=9, skip_if
     #chis = mne.pick_channels_regexp(emgonly.ch_names, 'EMG.*old')
     emgonly = getSubRaw(rawname_naked, picks = ['EMG.*old'], raw=raw,
                         rawname = rawname)
+    assert len(emgonly.ch_names) == 4
     chdata = emgonly.get_data()
 
     y = {}
@@ -116,7 +762,7 @@ def saveRectConv(rawname_naked, raw=None, rawname = None, maxtremfreq=9, skip_if
         y[chname] = 'eeg'
     emgonly.set_channel_types(y)
 
-    emgonly.filter(l_freq=10, h_freq=None)
+    emgonly.filter(l_freq=lowfreq, h_freq=None, pad='symmetric')
 
     windowsz = int(emgonly.info['sfreq'] / maxtremfreq)
     print('wind size is {} s = {} bins'.
@@ -235,10 +881,8 @@ def getCompInfl(ica,sources, comp_inds = None):
     return infl #np.vstack( infl )
 
 def readInfo(rawname, raw, sis=[1,2], check_info_diff = 1, bandpass_info=0 ):
-    if os.environ.get('DATA_DUSS') is not None:
-        data_dir = os.path.expandvars('$DATA_DUSS')
-    else:
-        data_dir = '/home/demitau/data'
+    import globvars as gv
+    data_dir = gv.data_dir
 
     import pymatreader
     infos = {}
@@ -270,7 +914,7 @@ def readInfo(rawname, raw, sis=[1,2], check_info_diff = 1, bandpass_info=0 ):
     mod_info  = copy.deepcopy(unmod_info)
     fields = ['loc', 'coord_frame', 'unit', 'unit_mul', 'range',
               'scanno', 'cal', 'logno', 'coil_type', 'kind' ]
-    fields += ['coil_trans']
+    #fields += ['coil_trans']  #first I had it then I had to remove it becuse of MNE complaints
     for ch in mod_info['chs']:
         chn = ch['ch_name']
         if chn.find('MEG') < 0:
@@ -338,6 +982,7 @@ def readInfo(rawname, raw, sis=[1,2], check_info_diff = 1, bandpass_info=0 ):
     return mod_info, infos
 
 def extractEMGData(raw, rawname_=None, skip_if_exist = 1, tremfreq = 9):
+    # highpass and convolve
     import globvars as gv
     raw.info['bads'] = []
 
@@ -356,7 +1001,7 @@ def extractEMGData(raw, rawname_=None, skip_if_exist = 1, tremfreq = 9):
         y[chname] = 'eeg'
     emgonly.set_channel_types(y)
 
-    emgonly.filter(l_freq=10, h_freq=None, picks='all')
+    emgonly.filter(l_freq=10, h_freq=None, picks='all',pad='symmetric')
 
     sfreq = raw.info['sfreq']
     windowsz = int( sfreq / tremfreq )
@@ -438,8 +1083,17 @@ def getECGindsICAcomp(icacomp, mult = 1.25, ncomp_test_for_ecg = 6):
     return ecg_compinds, ratios, ecg_evts_all
 
 
+def checkStatsSimilarity(raws):
+    '''
+    compute some measures (e.g. means and stds), put them in a vector for each
+    dataset and then see how large the dispersion is around mean. If it's
+    comparable to the mean, then there is a problem
+    '''
+    return
+
 def concatRaws(raws,rescale=True,interval_for_stats = (0,300) ):
     '''
+    concat with rescaling
     '''
     import copy, mne
     import utils_tSNE as utsne
@@ -451,6 +1105,7 @@ def concatRaws(raws,rescale=True,interval_for_stats = (0,300) ):
     for rawi,raw in enumerate(raws):
         means = []
         qs    = []
+        # TODO: treat all channels at once to boost speed
         for chi in range(len(raw.ch_names) ):
             if interval_for_stats is not None:
                 tbs,tbe = raw.time_as_index( interval_for_stats )
@@ -464,24 +1119,138 @@ def concatRaws(raws,rescale=True,interval_for_stats = (0,300) ):
         means_pri += [means]
         qs_pri += [qs]
 
-    for rawi,raw in enumerate(raws):
-        raws_[rawi].load_data()
-        for chi in range(len(raw.ch_names) ):
-            me0 = means_pri[0][chi]
-            me = means_pri[rawi][chi]
+    if rescale:
+        for rawi,raw in enumerate(raws):
+            raws_[rawi].load_data()
+            for chi in range(len(raw.ch_names) ):
+                me0 = means_pri[0][chi]
+                me = means_pri[rawi][chi]
 
-            qs0 = qs_pri[0][chi]
-            rng0 = qs0[1]-qs0[0]
+                qs0 = qs_pri[0][chi]
+                rng0 = qs0[1]-qs0[0]
 
-            qs = qs_pri[rawi][chi]
-            rng = qs[1]-qs[0]
-            raws_[rawi].apply_function(lambda x: (x-me)/rng * rng0 + me0,  picks = [chi] )
+                qs = qs_pri[rawi][chi]
+                rng = qs[1]-qs[0]
+                raws_[rawi].apply_function(lambda x: (x-me)/rng * rng0 + me0,  picks = [chi] )
 
     merged = mne.concatenate_raws(raws_)
 
     return merged
 
     #rectconvraw_perside[side] = tmp
+
+
+def getGenIntervalInfoFromRawname(rawname_, interval=None):
+    import utils
+    import globvars as gv
+
+    subj,medcond,task  = utils.getParamsFromRawname(rawname_)
+
+    maintremside = gv.gen_subj_info[subj]['tremor_side']
+    moveside = gv.gen_subj_info[subj].get('move_side','UNDEF')
+    tremfreq = gv.gen_subj_info[subj]['tremfreq']
+
+
+    nonmaintremside = utils.getOppositeSideStr(maintremside)
+    mts_letter = maintremside[0].upper()
+    #print(rawname_,'Main trem side ' ,maintremside,mts_letter)
+    print('----{}\n{} is maintremside, tremfreq={} move side={}'.format(rawname_, mts_letter,tremfreq,
+                                                                          moveside) )
+    print(r'^ is tremor, * is main tremor side')
+
+    rawname = rawname_ + '_resample_raw.fif'
+    fname_full = os.path.join(gv.data_dir,rawname)
+
+    # read file -- resampled to 256 Hz,  Electa MEG, EMG, LFP, EOG channels
+    raw = mne.io.read_raw_fif(fname_full, None, verbose=0)
+
+    times = raw.times
+    if interval is None:
+        interval = (times[0],times[-1])
+    else:
+        assert len(interval) == 2 and max(interval) <= times[-1] \
+        and min(interval)>=0 and interval[1] > interval[0]
+
+    begtime = max(times[0], interval[0] )
+    endtime = min(times[-1], interval[1] )
+    ##########
+
+    ots_letter = utils.getOppositeSideStr(mts_letter)
+    mts_trem_str = 'trem_{}'.format(mts_letter)
+    mts_notrem_str = 'notrem_{}'.format(mts_letter)
+    mts_task_str = '{}_{}'.format(task,mts_letter)
+    ots_task_str = '{}_{}'.format(task,ots_letter)
+
+    ########
+
+    anns_fn = rawname_ + '_anns.txt'
+    anns_fn_full = os.path.join(gv.data_dir, anns_fn)
+    if os.path.exists(anns_fn_full):
+        anns = mne.read_annotations(anns_fn_full)
+        #raw.set_annotations(anns)
+        anns_descr_to_remove = ['endseg', 'initseg', 'middle', 'incPost' ]
+        anns_upd = utils.removeAnnsByDescr(anns, anns_descr_to_remove)
+        anns_upd = utils.renameAnnDescr(anns, {'mvt':'hold', 'no_tremor':'notrem'})
+    else:
+        print(anns_fn_full, ' does not exist')
+        anns_upd = None
+
+
+
+    #ann_dict = {'Jan':anns_cnv_Jan, 'prev_me':anns_cnv, 'new_me':anns_upd}
+    ann_dict = { 'new_me':anns_upd}
+
+
+
+    ann_len_dict = {}
+    meaningful_totlens = {}
+    for ann_name in ann_dict:
+        #print('{} interval lengths'.format(ann_name))
+        #display(anns_cnv_Jan.description)
+        anns = ann_dict[ann_name]
+        if anns is None:
+            continue
+        lens = utils.getIntervalsTotalLens(anns, True, times=raw.times,
+                                           interval=interval)
+
+        lens_keys = list(sorted(lens.keys()) )
+        for lk in lens_keys:
+            lcur = lens[lk]
+            lk_toshow = lk
+            if lk.find('trem') == 0:  #lk, not lk_toshow!
+                lk_toshow = '^' + lk_toshow
+            if lk.find('_' + mts_letter) >= 0:
+                lk_toshow = '*' + lk_toshow
+            print('{:10}: {:6.2f} = {:6.3f}% of total {:.2f}s'.
+                  format(lk_toshow, lcur,  lcur/(endtime-begtime) * 100, endtime-begtime))
+        #display(lens  )
+        #lens_cnv_Jan = utils.getIntervalsTotalLens(anns_cnv_Jan, True, times=raw.times)
+        #display(lens_cnv_Jan  )
+        if mts_trem_str not in anns.description:
+            print('!! There is no tremor, accdording to {}'.format(ann_name))
+
+        meaningul_label_totlen = lens.get(mts_trem_str,0) + lens.get(mts_task_str,0)
+        meaningful_totlens[ann_name] = meaningul_label_totlen
+        if meaningul_label_totlen < 10:
+            print('Too few meaningful labels {}'.format(ann_name))
+
+        for it in lens:
+            if it.find(mts_task_str) < 0 and it.find(ots_task_str) >= 0:
+                print('{} has task {} which is opposite side to tremor {}'.format(
+                    ann_name, ots_task_str, mts_task_str) )
+            assert not( it.find(mts_task_str) >= 0 and it.find(ots_task_str) >= 0),\
+                'task marked on both sides :('
+
+
+        print('\n')
+
+    return lens
+    # print('\nmy prev interval lengths')
+    # lens_cnv = utils.getIntervalsTotalLens(anns_cnv, True, times=raw.times)
+    # display(lens_cnv )
+    # #display(anns_cnv.description)
+    # if mts_trem_str not in anns_cnv.description:
+    #     print('!! There is no tremor, accdording to prev me')
 
 #Coord frames:  1  -- device , 4 -- head,
 

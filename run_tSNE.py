@@ -22,6 +22,8 @@ import globvars as gv
 from matplotlib.backends.backend_pdf import PdfPages
 import utils_preproc as upre
 
+from globvars import gp
+
 mpl.use('Agg')
 
 ############################
@@ -82,7 +84,6 @@ nraws_used_PCA = 2
 
 crop_time = -1
 
-n_free_cores = 0  # for the remote machine
 #######   tSNE params
 
 #perplex_values = [5, 10, 30, 40, 50]
@@ -122,6 +123,8 @@ set_explicit_nraws_used_PCA = 0
 ####################  data processing params
 windowsz  =  1 * 256
 
+src_file_grouping_ind = 9  # motor-related_vs_CB_vs_rest
+src_grouping = 0  # src_grouping is used to get info from the file
 ##############################
 import sys, getopt
 
@@ -130,6 +133,9 @@ if sys.argv[0].find('ipykernel_launcher') >= 0:
     effargv = sys.argv[3:]  # to skip first three
 
 print(effargv)
+sources_type = ''
+
+use_avCV_LDA = 1
 
 helpstr = 'Usage example\nrun_tSNE.py --rawnames <rawname_naked1,rawnames_naked2> '
 opts, args = getopt.getopt(effargv,"hr:n:s:w:p:",
@@ -137,7 +143,8 @@ opts, args = getopt.getopt(effargv,"hr:n:s:w:p:",
          "show_plots=", 'subskip=', 'n_feats=', 'n_feats_PCA=', 'dim_PCA=',
          'dim_inp_tSNE=', 'perplex_values=', 'seeds_tSNE=', 'lrate_tSNE=',
          'use_existing_tSNE=', 'load_tSNE=', 'prefix=', 'crop=', 'nrPCA=',
-         'nfeats_per_comp_LDA='])
+         'nfeats_per_comp_LDA=', 'sources_type=', 'skip_calc=',
+         "src_grouping=", "src_grouping_fn=" ])
 print(sys.argv, opts, args)
 
 for opt, arg in opts:
@@ -145,18 +152,26 @@ for opt, arg in opts:
     if opt == '-h':
         print (helpstr)
         sys.exit(0)
+    elif opt == '--skip_calc':
+        do_tSNE = not bool(int(arg))
     elif opt in ('-r','--rawnames'):
         rawnames = arg.split(',')
     elif opt == "--n_channels":
         n_channels = int(arg)
     elif opt == '--prefix':
         prefix = arg
+    elif opt == "--src_grouping":
+        src_grouping = int(arg)
+    elif opt == "--src_grouping_fn":
+        src_file_grouping_ind = int(arg)
     elif opt == "--skip_feat":
         skip_feat = int(arg)
     elif opt == "--subskip":
         subskip = int(arg)
     elif opt == '--show_plots':
         show_plots = int(arg)
+    elif opt == '--sources_type':
+        sources_type = arg
     elif opt == "--windowsz":
         windowsz = int(arg)
     elif opt == "--n_feats":
@@ -234,10 +249,12 @@ pcapts_pri = []
 ldapts_pri = []
 pca_pri = []
 lda_pri = []
+lda_avCV_pri = []
 Xtimes_almost_pri = []
 PCA_info_pri = []
 feat_info_pri = []
 lda_pg_pri = []
+rawtimes_pri = []
 
 for rawname_ in rawnames:
     subj,medcond,task  = utils.getParamsFromRawname(rawname_)
@@ -255,8 +272,9 @@ for rawname_ in rawnames:
             regex_pcadim = str(dim_PCA)
         else:
             regex_pcadim = '[0-9]+'
-        regex = '{0}_{1}_PCA_nr({2})_[0-9]+chs_nfeats({3})_pcadim({4}).*'.\
-            format(rawname_, prefix, regex_nrPCA, regex_nfeats, regex_pcadim)
+        regex = '{}_{}_grp{}-{}_{}_PCA_nr({})_[0-9]+chs_nfeats({})_pcadim({}).*'.\
+            format(rawname_, sources_type, src_file_grouping_ind, src_grouping,
+                   prefix, regex_nrPCA, regex_nfeats, regex_pcadim)
 
         # here prefix should be without '_' in front or after
         fnfound = utsne.findByPrefix(data_dir, rawname_, prefix, regex=regex)
@@ -267,13 +285,13 @@ for rawname_ in rawnames:
                 fnt[fni] = os.path.getmtime(fnfull)
             fni_max = np.argmax(fnt)
             fnfound = [ fnfound[fni_max] ]
-        assert len(fnfound) == 1, 'For {} found not single fnames {}'.format(rawname_,fnfound)
+        assert len(fnfound) == 1, 'For {} with regex {} found not single fnames {}'.format(rawname_,regex,fnfound)
         fname_PCA_full = os.path.join( data_dir, fnfound[0] )
     else:
         prefix += '_'
-        out_name_templ = '_{}PCA_nr{}_{}chs_nfeats{}_pcadim{}_skip{}_wsz{}'
+        out_name_templ = '{}_{}PCA_nr{}_{}chs_nfeats{}_pcadim{}_skip{}_wsz{}'
         out_name = (out_name_templ ).\
-            format(prefix, nraws_used_PCA, n_channels, n_feats_PCA, dim_PCA, skip_PCA, windowsz)
+            format(sources_type,prefix, nraws_used_PCA, n_channels, n_feats_PCA, dim_PCA, skip_PCA, windowsz)
         fname_PCA_full = os.path.join( data_dir, '{}{}.npz'.format(rawname_,out_name))
 
     print('run_tSNE: Loading PCA from {}'.format(fname_PCA_full) )
@@ -287,11 +305,13 @@ for rawname_ in rawnames:
     #lda_output = lda_pg_cur['merge_all_not_trem']['basic']
     lda_output = lda_pg_cur['merge_nothing']['basic']
 
-    ldapts_cur = lda_output['transformed_imputed']
+    #ldapts_cur = lda_output['transformed_imputed']
+    ldapts_cur = lda_output['transformed_imputed_CV']
     lda_cur    = lda_output['ldaobj']
 
     pca_pri += [pca_cur]
     lda_pri += [lda_cur]
+    lda_avCV_pri += [lda_output['ldaobj_avCV'] ]
 
     pcapts_pri += [pcapts_cur]
     ldapts_pri += [ldapts_cur]
@@ -299,6 +319,8 @@ for rawname_ in rawnames:
     feature_names_all = f['feature_names_all']
     feat_info = f['feat_info'][()]
     nedgeBins = feat_info['nedgeBins']
+
+    rawtimes_pri += [ f['rawtimes'] ]
 
     #TODO: set dim_PCA and   n_feats_PCA from data here
     dim_PCA = pcapts_cur.shape[1]
@@ -341,8 +363,15 @@ ldapts = np.vstack(ldapts_pri)
 #    anns = anns_pri[0]
 #    Xtimes_almost = Xtimes_almost_pri[0]
 
+side_switch_happened_pri = [ fi['side_switched'] for fi in feat_info_pri ]
 
-anns, anns_pri, Xtimes_almost, dataset_bounds = utsne.concatAnns(rawnames, Xtimes_almost_pri)
+
+anns, anns_pri, Xtimes_almost, dataset_bounds = utsne.concatAnns(rawnames, Xtimes_almost_pri,
+                                                                 side_rev_pri=side_switch_happened_pri)
+
+# TODO: uncomment when I fix prepColorMarkers
+#anns, anns_pri, times_pri, dataset_bounds = utsne.concatAnns(rawnames, rawtimes_pri,
+#                                                                 side_rev_pri=side_switch_happened_pri)
 
 
 if crop_time > 0:
@@ -354,11 +383,15 @@ if crop_time > 0:
 Xtimes = Xtimes_almost[::subskip]
 X = utsne.downsample(pcapts, subskip)
 
+#lda_to_use = lda_pri[0]
+lda_to_use = lda_avCV_pri[0]
+#if not:
+
 if nfeats_per_comp_LDA > 0:
-    r = utsne.getImporantCoordInds(lda_pri[0].scalings_.T, nfeats_show = nfeats_per_comp_LDA, q=0.8, printLog = 1)
+    r = utsne.getImporantCoordInds(lda_to_use.coef_, nfeats_show = nfeats_per_comp_LDA, q=0.8, printLog = 1)
     inds_toshow, strong_inds_pc, strongest_inds_pc  = r
     print('From LDA using {} features'.format( len(inds_toshow ) ) )
-    ldapts_ = np.matmul(ldapts , lda_pri[0].scalings_.T[:,inds_toshow ] )
+    ldapts_ = np.matmul(ldapts , lda_to_use.coef_[:,inds_toshow ].T  ) + lda_to_use.intercept_
 else:
     print('From LDA using ALL features' )
     ldapts_ = ldapts
@@ -437,8 +470,14 @@ if do_tSNE:
 
     #perplex_values = [30]
     #seeds = [0]
+    use_tSNE = 0
+    use_UMAP = 1
 
-    params_per_alg_type = {'tSNE': perplex_values, 'UMAP': n_neighbors_values}
+    params_per_alg_type = {}
+    if use_tSNE:
+        params_per_alg_type['tSNE'] = perplex_values
+    if use_UMAP:
+        params_per_alg_type['UMAP'] = n_neighbors_values
     dim_red_algs = list(params_per_alg_type.keys() )
 
     res = []
@@ -493,7 +532,7 @@ if do_tSNE:
             feat_info_pri = ff['feat_info_pri'][()]
             PCA_info_pri = ff['PCA_info_pri'][()]
         else:
-            ncores = min(len(args) , mpr.cpu_count()- n_free_cores)
+            ncores = min(len(args) , mpr.cpu_count()- gp.n_free_cores)
             if ncores > 1:
                 pool = mpr.Pool(ncores)
                 print('tSNE:  Starting {} workers on {} cores'.format(len(args), ncores))

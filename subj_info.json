@@ -34,6 +34,7 @@
         },
         "dbs_system": "medtronic",
         "lfpchan_used_in_paper": "LFPR12",
+        "lfpchan_selected_by_pipeline": "LFPR12",
         "move_side": "left",
         "tremfreq": 4,
         "tremor_side": "left"
@@ -68,6 +69,7 @@
         "dbs_system": "medtronic",
         "lfpchan_used_in_paper": "LFPR12",
         "lfpchan_used_in_paper2": "LFPL12",
+        "lfpchan_selected_by_pipeline": "LFPR23",
         "move_side": "left",
         "tremfreq": 3.5,
         "tremor_side": "left"
@@ -184,6 +186,7 @@
         ],
         "dbs_system": "medtronic",
         "lfpchan_used_in_paper": "LFPL12",
+        "lfpchan_selected_by_pipeline": "LFPR01",
         "move_side": "left",
         "tremfreq": 4,
         "tremor_side": "right"
@@ -311,6 +314,7 @@
         },
         "dbs_system": "medtronic",
         "lfpchan_used_in_paper": "LFPL23",
+        "lfpchan_selected_by_pipeline": "LFPR12",
         "move_side": "left",
         "tremfreq": 4.5,
         "tremor_side": "right"
@@ -391,5 +395,42 @@
         "move_side": "right",
         "tremfreq": 4,
         "tremor_side": "right"
+    },
+    "S98": {
+        "bad_channels": {
+            "off": {
+                "hold": [ ], 
+                "move": [ ]
+            },
+            "on": {
+                "hold": [ ],
+                "move": [ ]
+            }
+        },
+        "dbs_system": "medtronic",
+        "lfpchan_used_in_paper": "LFPR01",
+        "lfpchan_selected_by_pipeline": "LFPR12", 
+        "move_side": "left",
+        "tremfreq": 6,
+        "tremor_side": "left",
+        "descr": "same as S99"
+    },
+    "S99": {
+        "bad_channels": {
+            "off": {
+                "hold": [ ], 
+                "move": [ ]
+            },
+            "on": {
+                "hold": [ ],
+                "move": [ ]
+            }
+        },
+        "dbs_system": "medtronic",
+        "lfpchan_used_in_paper": "LFPR01",
+        "lfpchan_selected_by_pipeline": "LFPR01", 
+        "move_side": "left",
+        "tremfreq": 6,
+        "tremor_side": "left"
     }
 }
