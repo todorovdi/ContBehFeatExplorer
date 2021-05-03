@@ -1,6 +1,16 @@
 import os
 import json
 import socket
+import numpy as np
+
+try:
+    import ConfigParser
+except ImportError:
+    import configparser as ConfigParser
+try:
+    import StringIO
+except ImportError:
+    import io as StringIO
 
 global specgrams
 global freqBands
@@ -64,16 +74,63 @@ dir_fig_preproc = os.path.join(dir_fig,'preproc')
 fbands = {'tremor': [3,10], 'low_beta':[11,22], 'high_beta':[22,30],
            'low_gamma':[30,60], 'high_gamma':[60,90],
           'HFO1':[91,200], 'HFO2':[200,300], 'HFO3':[300,400],
-          'beta':[15,30],   'gamma':[30,100], 'HFO':[91,400]}
+          'beta':[11,30],   'gamma':[30,90], 'HFO':[91,400]}
+
+fband_names_crude = ['tremor', 'beta', 'gamma']
+fband_names_fine = ['tremor', 'low_beta', 'high_beta', 'low_gamma', 'high_gamma' ]
+fband_names_HFO_crude = ['HFO']
+fband_names_HFO_fine =  ['HFO1', 'HFO2', 'HFO3']
+fband_names_HFO_all = fband_names_HFO_crude + fband_names_HFO_fine
+fband_names_crude_inc_HFO = fband_names_crude + fband_names_HFO_crude
+fband_names_fine_inc_HFO = fband_names_fine + fband_names_HFO_fine
 
 EMG_per_hand = {'right':['EMG061_old', 'EMG062_old'], 'left':['EMG063_old', 'EMG064_old' ] }
 EMG_per_hand_base = {'right':['EMG061', 'EMG062'], 'left':['EMG063', 'EMG064' ] }
+
+rawnames_combine_types = ['no', 'subj', 'medcond', 'task', 'across_everything',
+                          'medcond_across_subj', 'task_across_subj']
+# we cannot combine across subjects beacause we may have different channel
+# numbers in different subjects
+rawnames_combine_types_rawdata = ['no', 'subj', 'medcond', 'task']
+
+data_coupling_types_all = ['self', 'LFP_vs_all', 'CB_vs_all', 'motorlike_vs_motorlike']
+
+def paramFileRead(fname,recursive=True):
+    print('--Log: reading paramFile {0}'.format(fname) )
+
+    file = open(fname, 'r')
+    ini_str = '[root]\n' + file.read()
+    file.close()
+    ini_fp = StringIO.StringIO(ini_str)
+    preparams = ConfigParser.RawConfigParser(allow_no_value=True)
+    preparams.optionxform = str
+    preparams.readfp(ini_fp)
+    #sect = paramsEnv_pre.sections()
+    items= preparams.items('root')
+    params = dict(items)
+
+    if(recursive):
+        addParamKeys = sorted( [ k for k in params.keys() if 'iniAdd' in k ] )
+        l = len(addParamKeys)
+        if(l ):
+            print('---Log: found {0} iniAdd\'s, reading them'.format(l) )
+        for pkey in addParamKeys:
+            paramFileName = paramFileRead(params[pkey])
+            params.update(paramFileName)
+
+        # we actually want to overwrite some of the params from the added inis
+        if(l):
+            paramsAgain = paramFileRead(fname,recursive=False)
+            params.update(paramsAgain)
+
+    return params
 
 class globparams:
     def __init__(self):
 
         self.hostname = socket.gethostname()
-        print('Hostname = ',self.hostname)
+        if not self.hostname.startswith('jsfc'):
+            print('Hostname = ',self.hostname)
 
         self.hostname_home = 'demitau-ZBook'
         if self.hostname == self.hostname_home:

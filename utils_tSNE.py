@@ -470,6 +470,8 @@ def getIntervalSurround(start,end, extend, raw=None, times=None, verbose = False
         dt = mxdt
         wbd_sec = np.vstack( [times, times] )
         wbd_sec[1] += dt
+    else:
+        assert wbd_sec.dtype == np.float
 
     assert wbd_sec.shape[1] == len(times)
 
@@ -503,11 +505,15 @@ def getIntervalSurround(start,end, extend, raw=None, times=None, verbose = False
         tsis = raw.time_as_index(ts)
     else:
         # return window indices where intervals start
-        ts = np.array(ts)
-        mask = np.logical_and(ts >= wbd_sec[0],ts < wbd_sec[1])
-        tsis = np.where(mask)
+        tsis = []
+        for tcur in ts:
+            #ts = np.array(ts)
+            mask = np.logical_and( tcur >= wbd_sec[0], tcur < wbd_sec[1] )
+            tsis_cur = np.where(mask)[0]
+            assert len(tsis_cur) > 0
+            tsis += [tsis_cur[0] ]
         assert len(tsis) == len(ts)
-        assert np.diff(tsis) >= 0
+        assert np.all(np.diff(tsis) >= 0), np.diff(tsis)
 
         #allbins = ( times / dt  ).astype(int)
         #ts_ =  ( ts /    dt  ).astype(int)
@@ -673,419 +679,6 @@ def _feat_correl(arg):
 
     return rr,bn_from,bn_to,fromi,toi,window_starts,name,oper,pos
 
-def _feat_correl3(arg):
-    resname,bn_from,bn_to,pc,fromi,toi,windowsz,skip,dfrom,dto,mfrom,mto,oper,pos = arg
-
-    q = 0.05
-    if mfrom is None:
-        if pos:
-            mfrom = robustMeanPos(dfrom, q=q)    # global mean
-        else:
-            mfrom = robustMean(dfrom, q=q)    # global mean
-    if mto is None:
-        if pos:
-            mto   = robustMeanPos(dto, q=q)
-        else:
-            mto   = robustMean(dto, q=q  )
-
-    import utils
-
-    assert dfrom.size == dto.size, (dfrom.shape, dto.shape, bn_from,bn_to,fromi,toi,resname)
-    assert dfrom.ndim == 1
-
-    # to agree with Hjorth
-    ndb = len(dfrom)
-    padlen = windowsz-skip
-    #if  int(ndb / windowsz) * windowsz - ndb == 0:  # dirty hack to agree with pandas version
-    #    padlen += 1
-    dfrom = np.pad(dfrom, [(0), (padlen) ], mode='edge' )
-    dto = np.pad(dto, [(0), (padlen) ], mode='edge' )
-
-    win = (windowsz,)
-    step = (skip,)
-    stride_view_dfrom = utils.stride(dfrom, win=win, stepby=step )
-    stride_view_dto   = utils.stride(dto, win=win, stepby=step )
-    if oper == 'corr':
-        rr = np.mean( (stride_view_dfrom - mfrom ) * (stride_view_dto - mto ) , axis=-1)
-    elif oper == 'div':
-        rr = stride_view_dfrom / stride_view_dto
-    else:
-        raise ValueError('wrong oper {}'.format(oper) )
-    #import ipdb; ipdb.set_trace()
-
-    # removing invalid due to padding
-    #rr = rr[0:-windowsz//skip]
-    sl = slice(windowsz//skip - 1,None,None)
-    rr = rr[sl]
-
-    #ndb = len(dfrom)
-    #padlen = windowsz-skip
-    #if  int(ndb / windowsz) * windowsz - ndb == 0:  # dirty hack to agree with pandas version
-    #    padlen += 1
-
-    del stride_view_dfrom
-    del stride_view_dto
-    del dfrom
-    del dto
-
-    wbd = None  # to save memory
-    #pred = np.arange(ndb + padlen)
-    #wnds = utils.stride(pred, (windowsz,), (skip,) )
-    #wbd = np.vstack( [ wnds[:,0], wnds[:,-1] + 1 ] )
-    #wbd = wbd[:,sl] - padlen
-
-    #window_boundaries_st =  np.arange(0,ndb - windowsz, skip ) # use before padding
-    #window_boundaries_end = window_boundaries_st + windowsz
-    #wbd = np.vstack( [ window_boundaries_st, window_boundaries_end] )
-    #print(dfrom.shape, stride_view_dto.shape)
-
-    return rr,resname,bn_from,bn_to,pc,fromi,toi,wbd,oper,pos
-
-def computeFeatOrd3(raws, names, defnames, skip, windowsz, band_pairs,
-                    parcel_couplings, LFP2parcel_couplings, LFP2LFP_couplings,
-                    res_group_id = 9, n_jobs=None, positive=1, templ = None,
-                    roi_labels = None, sort_keys=None, printLog=False, means=None):
-    '''
-    dat is chans x timebins
-    windowz is in bins of Xtimes_full
-    returns lists
-    '''
-    #e.g  bandPairs = [('tremor','beta'), ('tremor','gamma'), ('beta','gamma') ]
-    # compute Pearson corr coef between different band powers all chan-chan
-
-    #TODO: the names I receive here are not pure channel names so it won't work. Or maybe I don't need it
-    #sides_,groupis_,parcelis_,compis_ = utils.parseMEGsrcChnamesShortList(names)
-
-    # this is if we want to really compute second order features. I don't use
-    # it this way
-    if templ is None:
-        templ = r'con_{}.*:\s(.*),\1'
-
-    cors = []
-    cor_names = []
-    args = []
-    ctr = 0
-    for bn_from,bn_to,oper in band_pairs:
-        templ_from = templ.format(bn_from)
-        templ_to   = templ.format(bn_to)
-
-        #datsel_from,namesel_from = selFeatsRegex(dat, names, templ_from)
-        #datsel_to,namesel_to = selFeatsRegex(dat, names, templ_to)
-
-        # note that these names CAN be different if we couple LFP HFO to src
-        # normal freqs
-        names_from = names[bn_from]
-        names_to   = names[bn_to]
-
-        if bn_from.find('HFO') < 0 and bn_to.find('HFO') < 0:
-            for pc in parcel_couplings:
-                (pi1,pi2) = pc
-                ind_pairs = parcel_couplings[pc]  # ind_pairs won't work because it is indices not in band array
-                for (i,j) in ind_pairs:
-                    rev = (pi1 != pi2) and (bn_from != bn_to)
-
-                    dfrom = raws[bn_from][i][0][0]
-                    dto   = raws[bn_to][j][0][0]
-                    assert dfrom.size > 1
-                    assert dto.size > 1
-
-                    chn1 = names_from[i]
-                    chn2 = names_to[j]
-                    side1, gi1, parcel_ind1, si1  = utils.parseMEGsrcChnameShort(chn1)
-                    side2, gi2, parcel_ind2, si2  = utils.parseMEGsrcChnameShort(chn2)
-
-                    newchn1 = '{}_msrc{}_{}_{}_c{}'.format(bn_from,side1,res_group_id,pi1,0)
-                    newchn2 = '{}_msrc{}_{}_{}_c{}'.format(bn_to,  side2,res_group_id,pi2,0)
-
-                    resname = '{}_{},{}'.format(oper,newchn1,newchn2)
-                    # we won't have final name before averaging
-                    if means is not None:
-                        #m1 = means[bn_from][chn1]
-                        #m2 = means[bn_to][chn2]
-                        m1 = means[bn_from][i]
-                        m2 = means[bn_to][j]
-                    else:
-                        m1,m2=None,None
-                    arg = resname,bn_from,bn_to,pc,i,j,windowsz,skip,dfrom,dto,m1,m2,oper,positive
-                    args += [arg]
-
-                    if rev: # reversal of bands, not indices (they are symmetric except when division)
-                        # change bands. So I need same channels (names and
-                        # data) but with exchanged bands
-                        dfrom = raws[bn_to][i][0][0]
-                        dto   = raws[bn_from][j][0][0]
-
-                        # change bands
-                        chn1 = names_to[i]
-                        chn2 = names_from[j]
-                        side1, gi1, parcel_ind1, si1  = utils.parseMEGsrcChnameShort(chn1)
-                        side2, gi2, parcel_ind2, si2  = utils.parseMEGsrcChnameShort(chn2)
-
-                        # change bands
-                        newchn1 = '{}_msrc{}_{}_{}_c{}'.format(bn_to,side1,res_group_id,pi1,0)
-                        newchn2 = '{}_msrc{}_{}_{}_c{}'.format(bn_from,  side2,res_group_id,pi2,0)
-
-                        resname = '{}_{},{}'.format(oper,newchn1,newchn2)
-                        # we won't have final name before averaging
-                        if means is not None:
-                            #m1 = means[bn_to][chn1]
-                            #m2 = means[bn_from][chn2]
-                            m1 = means[bn_to][i]
-                            m2 = means[bn_from][j]
-                        else:
-                            m1,m2=None,None
-                        arg = resname,bn_to,bn_from,pc,i,j,windowsz,skip,dfrom,dto,m1,m2,oper,positive
-                        args += [arg]
-
-                #newchn1 = '{}_msrc{}_{}_{}_c{}'.format(bn_from,side1,res_group_id,pi1,0)
-                #newchn2 = '{}_msrc{}_{}_{}_c{}'.format(bn_to,  side2,res_group_id,pi2,0)
-
-        #XOR instead of AND, allow one to has HFO
-        #if bool(bn_from.find('HFO') < 0) ^ bool(bn_to.find('HFO') <= 0):
-        for pc in LFP2parcel_couplings:
-            (chn1,pi2) = pc
-            ind_pairs = LFP2parcel_couplings[pc]
-
-            # do I need beta LFP vs tremor src AND  beta src vs tremor LFP ?
-            # maybe yes because if I duplicate paris in the input I'd have to
-            # filter out it in LFP2LFP
-            for (i,j) in ind_pairs:
-                rev = False
-                ind_lfp = i
-                ind_src = j
-                # I cannot reverse then
-                # i -- always LFP, j -- alwyas src
-                if bn_from.find('HFO') >= 0:
-                    # effind_from index we'll use to access raws[bn_from]
-                    effind_from = names_from.index( defnames[ind_lfp] )
-                    effind_to   = ind_src
-
-                    chn_src = names_to[ind_src]
-                    side1, gi1, parcel_ind1, si1  = utils.parseMEGsrcChnameShort(chn_src)
-                    newchn1 = '{}_msrc{}_{}_{}_c{}'.format(bn_to,side1,res_group_id,parcel_ind1,0)
-
-                    chn = names_from[effind_from]
-                    newchn2 = '{}_{}'.format(bn_from, chn )
-                # I cannot reverse then
-                elif bn_to.find('HFO') >= 0:
-                    effind_from = ind_src
-                    effind_to   = names_to.index( defnames[ind_lfp] )
-
-                    chn_src = names_from[ind_src]
-                    side1, gi1, parcel_ind1, si1  = utils.parseMEGsrcChnameShort(chn_src)
-                    newchn1 = '{}_msrc{}_{}_{}_c{}'.format(bn_from,side1,res_group_id,parcel_ind1,0)
-
-                    chn = names_to[effind_to]
-                    newchn2 = '{}_{}'.format(bn_to, chn )
-                elif bn_to.find('HFO') < 0 and  bn_to.find('HFO') < 0 :
-                    effind_from = ind_src
-                    effind_to   = ind_lfp
-
-                    chn_src = names_from[ind_src]
-                    side1, gi1, parcel_ind1, si1  = utils.parseMEGsrcChnameShort(chn_src)
-                    newchn1 = '{}_msrc{}_{}_{}_c{}'.format(bn_from,side1,res_group_id,parcel_ind1,0)
-
-                    chn = names_to[effind_to]
-                    newchn2 = '{}_{}'.format(bn_to, chn )
-
-                    rev = bn_from != bn_to  # if bands are the same, no need to reverse
-                else:
-                    raise ValueError('smoething is wrong {},{}'.format(bn_from,bn_to) )
-
-                resname = '{}_{},{}'.format(oper,newchn1,newchn2)
-                # we won't have final name before averaging
-
-                dfrom = raws[bn_from][effind_from][0][0]
-                dto   = raws[bn_to][effind_to][0][0]
-                assert dfrom.size > 1
-                assert dto.size > 1
-
-                #name = '{}_{},{}'.format(oper,nfrom,nto)
-                # we won't have final name before averaging
-                if means is not None:
-                    #m1 = means[bn_from][names_from[effind_from] ]
-                    #m2 = means[bn_to][names_to[effind_to]]
-                    m1 = means[bn_from][effind_from ]
-                    m2 = means[bn_to][effind_to]
-                else:
-                    m1,m2=None,None
-                arg = resname,bn_from,bn_to,pc,effind_from,effind_to,windowsz,skip,dfrom,dto,m1,m2,oper,positive
-                args += [arg]
-
-                ######################3
-                if rev:
-                    # change order
-                    effind_from = ind_lfp
-                    effind_to   = ind_src
-
-                    chn_src = names_from[ind_src]  # we still need source index
-                    side1, gi1, parcel_ind1, si1  = utils.parseMEGsrcChnameShort(chn_src)
-                    newchn1 = '{}_msrc{}_{}_{}_c{}'.format(bn_to,side1,res_group_id,pi1,0)
-
-                    chn = names_to[effind_to]
-                    newchn2 = '{}_{}'.format(bn_from, chn )
-
-                    resname = '{}_{},{}'.format(oper,newchn1,newchn2)
-
-                    # not that we exchanged effinds
-                    d1   = raws[bn_to][effind_from][0][0]
-                    d2   = raws[bn_from] [effind_to][0][0]
-                    #d1 = raws[bn_to][effind_from][0][0]
-                    #d2   = raws[bn_from][effind_to][0][0]
-                    assert d1.size > 1
-                    assert d2.size > 1
-
-                    #name = '{}_{},{}'.format(oper,nfrom,nto)
-                    # we won't have final name before averaging
-                    if means is not None:
-                        #m1 = means[bn_to][names_to[effind_from] ]
-                        #m2 = means[bn_from][names_from[effind_to]]
-                        m1 = means[bn_to][effind_from ]
-                        m2 = means[bn_from][effind_to]
-                    else:
-                        m1,m2=None
-                    arg = resname,bn_to,bn_from,pc,effind_from,effind_to,windowsz,skip,d1,d2,m1,m2,oper,positive
-                    args += [arg]
-
-        for pc in LFP2LFP_couplings:
-            (chn1,chn2) = pc
-            if oper == 'div' and chn1 == chn2 and bn_from == bn_to:
-                continue
-            ind_pairs = LFP2LFP_couplings[pc]
-            for (i,j) in ind_pairs:
-                rev = (i != j)  # here it makes sense only if I compute cross-LFP (which I usually don't)
-                # I cannot reverse then
-                if bn_from.find('HFO') >= 0:
-                    effind_from = names_from.index( defnames[i] )
-                    effind_to   = j
-                # I cannot reverse then
-                elif bn_to.find('HFO') >= 0:
-                    effind_from = i
-                    effind_to   = names_to.index( defnames[j] )
-                elif bn_to.find('HFO') < 0 and  bn_to.find('HFO') < 0 :
-                    effind_from = i
-                    effind_to   = j
-                elif bn_to.find('HFO') >= 0 and bn_to.find('HFO') >= 0:
-                    effind_from = names_from.index( defnames[i] )
-                    effind_to   = names_to.index( defnames[j] )
-                else:
-                    raise ValueError('smoething is wrong {},{}'.format(bn_from,bn_to) )
-
-                newchn1 = '{}_{}'.format(bn_from, names_from[effind_from] )
-                newchn2 = '{}_{}'.format(bn_to, names_to[effind_to] )
-
-                resname = '{}_{},{}'.format(oper,newchn1,newchn2)
-
-                dfrom = raws[bn_from][effind_from][0][0]
-                dto   = raws[bn_to][effind_to][0][0]
-                assert dfrom.size > 1
-                assert dto.size > 1
-
-                #name = '{}_{},{}'.format(oper,nfrom,nto)
-                # we won't have final name before averaging
-                if means is not None:
-                    #m1 = means[names_from[effind_from] ]
-                    #m2 = means[names_to[effind_to]]
-                    m1 = means[bn_from][effind_from ]
-                    m2 = means[bn_to][effind_to]
-                else:
-                    m1,m2=None,None
-                arg = resname,bn_from,bn_to,pc,effind_from,effind_to,windowsz,skip,dfrom,dto,m1,m2,oper,positive
-                args += [arg]
-
-                if rev:
-                    newchn1 = '{}_{}'.format(bn_to,   names_from[effind_from] )
-                    newchn2 = '{}_{}'.format(bn_from, names_to[effind_to] )
-                    resname = '{}_{},{}'.format(oper,newchn1,newchn2)
-
-                    d1 = raws[bn_to][effind_from][0][0]
-                    d2 = raws[bn_from][effind_to][0][0]
-                    assert d1.size > 1
-                    assert d2.size > 1
-
-                    if means is not None:
-                        #m1 = means[bn_to][names_to[effind_to] ]
-                        #m2 = means[bn_from][names_from[effind_to]]
-                        m1 = means[bn_to][effind_from ]
-                        m2 = means[bn_from][effind_to]
-                    else:
-                        m1,m2=None
-                    #name = '{}_{},{}'.format(oper,nfrom,nto)
-                    # we won't have final name before averaging
-                    arg = resname,bn_to,bn_from,pc,effind_from,effind_to,windowsz,skip,d1,d2,m1,m2,oper,positive
-                    args += [arg]
-
-        # then I need to do within parcel averaging
-
-    # for debug which names get included only
-    #return None, sorted(set([arg[0] for arg in args] ))
-
-    if n_jobs is None:
-        from globvars import gp
-        ncores = max(1, min(len(args) , mpr.cpu_count()-gp.n_free_cores) )
-    elif n_jobs == -1:
-        ncores = mpr.cpu_count()
-    else:
-        ncores = n_jobs
-    if ncores > 1:
-        #if ncores > 1:
-        pool = mpr.Pool(ncores)
-        print('high ord feats:  Sending {} tasks to {} cores'.format(len(args), ncores))
-        res = pool.map(_feat_correl3, args)
-
-        pool.close()
-        pool.join()
-    else:
-        res = []
-        for arg in args:
-            res += [ _feat_correl3(arg) ]
-
-    dct = {}
-    dct_nums = {}
-    # wbd is same for all
-    for r in res:
-        rr,resname,bn_from,bn_to,pc,fromi,toi,wbd,oper,pos  = r
-        # make averages
-
-        #nfrom = pc[0]
-        #nto = pc[1]
-        #name = '{}_{},{}'.format(oper,nfrom,nto)
-        dct_key = resname
-        if dct_key not in  dct:
-            dct[dct_key] = rr
-            dct_nums[dct_key] = 1
-        else:
-            dct[dct_key] += rr
-            dct_nums[dct_key] += 1
-
-    min_num = np.inf
-    resname_min_num = ''
-    for dct_key in dct:
-        rr = dct[dct_key]
-        num =dct_nums[dct_key]
-        if num < min_num:
-            min_num = num
-            resname_min_num = dct_key
-        cors += [  rr / num  ]
-        cor_names += [ dct_key ]
-
-    ############
-    ndb = len(dfrom)
-    padlen = windowsz-skip
-    #if  int(ndb / windowsz) * windowsz - ndb == 0:  # dirty hack to agree with pandas version
-    #    padlen += 1
-
-    sl = slice(windowsz//skip - 1,None,None)
-    pred = np.arange(ndb + padlen)
-    wnds = utils.stride(pred, (windowsz,), (skip,) )
-    wbd = np.vstack( [ wnds[:,0], wnds[:,-1] + 1 ] )
-    wbd = wbd[:,sl] - padlen
-
-    #print( dct_nums )
-    #print(resname_min_num, num)
-
-    return cors,cor_names, dct_nums, wbd
-
 
 def computeFeatOrd2(dat, names, skip, windowsz, band_pairs,
                       n_free_cores=2, positive=1, templ = None,
@@ -1189,7 +782,8 @@ def computeFeatOrd2(dat, names, skip, windowsz, band_pairs,
                 dto = datsel_to[toi]
                 assert dfrom.size > 1
                 assert dto.size > 1
-                arg = bn_from,bn_to,fromi,toi,name,window_starts,windowsz,skip,dfrom,dto,oper,positive
+                arg = bn_from,bn_to,fromi,toi,name,\
+                    window_starts,windowsz,skip,dfrom,dto,oper,positive
                 args += [arg]
 
                 #corr_window = []
@@ -1304,10 +898,11 @@ def getImporantCoordInds(components, nfeats_show = 140, q=0.8, printLog = 1):
 
     return inds_toshow, strong_inds_pc, strongest_inds_pc
 
-def prepColorsMarkers(side_letter, anns, Xtimes,
+def prepColorsMarkers(anns, Xtimes,
                nedgeBins, windowsz, sfreq, totskip, mrk,mrknames,
                color_per_int_type, extend = 3, defmarker='o', neutcolor='grey',
-                     convert_to_rgb = False, dataset_bounds = None, wbd=None ):
+                     convert_to_rgb = False, dataset_bounds = None, wbd=None,
+                     side_letter=None  ):
     # Xtimes are in seconds, dataset_bounds too
     # Xtimes are window starts
     # wbd is 2 x len(Xtimes)
@@ -1318,12 +913,13 @@ def prepColorsMarkers(side_letter, anns, Xtimes,
         mrknames not used
         output length = len(Xtimes)
     '''
-    hsfc = side_letter
-
     if not (isinstance(extend, list) ):
         extend = 4*[extend]
     else:
         assert len(extend) == 4
+
+    if side_letter is None:
+        side_letter = ['R', 'L']
 
     extendInL  = extend[0]
     extendOutL = extend[1]
@@ -1331,8 +927,11 @@ def prepColorsMarkers(side_letter, anns, Xtimes,
     extendOutR = extend[3]
 
     if wbd is None:
-        wbd = np.vstack( [Xtimes, Xtimes] )
+        wbd = np.vstack( [Xtimes*sfreq, Xtimes*sfreq] ).astype(int)
         wbd[1] += windowsz
+
+    assert wbd.dtype == np.int
+    wbd_sec = (wbd / sfreq).astype(float)
 
     if convert_to_rgb:
         import matplotlib.colors as mcolors
@@ -1342,12 +941,23 @@ def prepColorsMarkers(side_letter, anns, Xtimes,
                 color_per_int_type[k] = mcolors.to_rgb(cname)
 
 
-    #hsfc = 'L'; print('Using not hand side (perhabs) for coloring')
+    #side_letter = 'L'; print('Using not hand side (perhabs) for coloring')
     annot_color_perit = {}
     for k in color_per_int_type:
-        annot_color_perit[ '{}_{}'.format(k,hsfc)   ] = color_per_int_type[k]
+        if isinstance(side_letter,str):
+            let = side_letter
+            assert len(let) == 1
+            it_lab = '{}_{}'.format(k,side_letter)
+            annot_color_perit[ it_lab   ] = color_per_int_type[k]
+        elif isinstance(side_letter,list) and isinstance(side_letter[0],str):
+            for let in side_letter:
+                assert len(let) == 1
+                it_lab = '{}_{}'.format(k,side_letter)
+                annot_color_perit[ it_lab   ] = color_per_int_type[k]
+        else:
+            raise ValueError('Wrong side_letter {}'.format(side_letter) )
     #for task in tasks:
-    #    annot_color_perit[ '{}_{}'.format(task, hsfc) ] = color_per_int_type[task]
+    #    annot_color_perit[ '{}_{}'.format(task, side_letter) ] = color_per_int_type[task]
 
     assert Xtimes[0] <= 1e-10
 
@@ -1393,7 +1003,7 @@ def prepColorsMarkers(side_letter, anns, Xtimes,
             # TODO: give original times here
             # not it based on window starts only
             timesBnds, indsBnd, sliceNames = getIntervalSurround( start,end, extend,
-                                                                times=Xtimes)
+                                                                times=Xtimes, wbd_sec=wbd_sec)
 
             #cycle over surround intervals
             for ii in range(len(indsBnd)-1 ):
@@ -1678,7 +1288,7 @@ def downsample(X, skip, axis=0, mean=True, printLog = 1):
         res /= skip
 
     if printLog:
-        print('_X and res shapes ',X.shape,res.shape)
+        print('downsample: _X and res shapes ',X.shape,res.shape)
 
     dif = len(X) - len(res) * skip
     if dif >0 :
@@ -1690,19 +1300,20 @@ def downsample(X, skip, axis=0, mean=True, printLog = 1):
 
 
     if printLog:
-        print('X and res shapes ',X.shape,res.shape)
+        print('downsample:X and res shapes ',X.shape,res.shape)
 
     if axis != 0:
         res = np.swapaxes(res, axis,0)
 
     return res
 
-def findByPrefix(data_dir, rawname, prefix, ftype='PCA',regex=None):
+def findByPrefix(data_dir, rawname, prefix, ftype='PCA',regex=None, ret_aux=0):
     #returns relative path
     import os, re
     if regex is None:
         regex = '{}_{}_{}_[0-9]+chs_nfeats([0-9]+)_pcadim([0-9]+).*'.format(rawname, prefix,ftype)
     fnfound = []
+    match_infos = []
     for fn in os.listdir(data_dir):
         r = re.match(regex,fn)
         if r is not None:
@@ -1710,7 +1321,11 @@ def findByPrefix(data_dir, rawname, prefix, ftype='PCA',regex=None):
             if prefix in ['move', 'hold', 'rest']:
                 continue
             #print(fn,r.groups())
+            if ret_aux:
+                match_infos += [r]
             fnfound += [fn]
+    if ret_aux:
+        return fnfound, match_infos
     return fnfound
 
 
@@ -1765,14 +1380,18 @@ def _rev_descr_side(descr):
         newdescr = 'BAD_LFPL'
     elif descr.startswith('BAD_LFPL'):
         newdescr = 'BAD_LFPR'
-    if descr.startswith('BAD_MEGR'):
+    elif descr.startswith('BAD_MEGR'):
         newdescr = 'BAD_MEGL'
     elif descr.startswith('BAD_MEGL'):
         newdescr = 'BAD_MEGR'
     elif descr.endswith('_L'):
-        newdescr = descr[-1] + 'R'
+        tmp = list(descr)
+        tmp[-1] = 'R'
+        newdescr = ''.join(tmp)
     elif descr.endswith('_R'):
-        newdescr = descr[-1] + 'L'
+        tmp = list(descr)
+        tmp[-1] = 'L'
+        newdescr = ''.join(tmp)
     else:
         raise ValueError('wrong descr {} !'.format(descr) )
 
@@ -1784,17 +1403,18 @@ def revAnnSides(anns):
     for de in descr_old:
         revde = _rev_descr_side(de)
         descr_new += [revde]
-    newann = mne.annotations(anns.onset,anns.duration,descr_new)
+    newann = mne.Annotations(anns.onset,anns.duration,descr_new)
     return newann
 
 def concatAnns(rawnames, Xtimes_pri, suffixes=['_anns'], crop=(None,None),
                allow_short_intervals = False, allow_missing=False, dt_sec=None,
-               side_rev_pri=None, sfreq=None, wbd_pri=None):
+               side_rev_pri=None, sfreq=None, wbd_pri=None,
+               remove_gaps_between_datasets = False, ret_wbd_merged=False):
     '''
     Xtimes_pri can have gaps (usually by endge bins removal) and start not from zero
      althogh much better use them without gaps and then use smarter window bounds
     output Xtimes will not have gaps (thus there are will be some shifts in ann times as well)
-        and start from zero
+        and start from zero IF remove_gaps_between_datasets
     dataset_bounds -- times (not bins)
     allow_short_intervals -- what to do if interval is
     shorter than dt (can happen if we have short artifacts and spaced windows)
@@ -1815,15 +1435,18 @@ def concatAnns(rawnames, Xtimes_pri, suffixes=['_anns'], crop=(None,None),
         rawnames = [rawnames]
     if isinstance(Xtimes_pri,np.ndarray):
         Xtimes_pri = [Xtimes_pri]
+
+    assert Xtimes_pri[0].dtype == float
     if wbd_pri is not None:
         if isinstance(wbd_pri,np.ndarray):
             wbd_pri = [wbd_pri]
         assert len(wbd_pri) == len(Xtimes_pri)
+        assert wbd_pri[0].dtype == int
 
     if side_rev_pri is None:
         side_rev_pri = [0] * len(rawnames)
     elif isinstance(side_rev_pri,int) or isinstance(side_rev_pri,bool):
-        side_rev_pri = [side_rev_pri]
+        side_rev_pri = [side_rev_pri] * len(rawnames)
 
     if dt_sec is None and sfreq is not None:
         dt_sec = 1/sfreq
@@ -1864,27 +1487,46 @@ def concatAnns(rawnames, Xtimes_pri, suffixes=['_anns'], crop=(None,None),
 
     assert np.max(dt_pri) - np.min(dt_pri) < 1e-10
 
+
+    cur_zeroth_bin = 0
+    wbds = []
+
     anns = mne.Annotations([],[],[])
 
     dataset_bounds = []
     Xtimes_almost = []
     timeshift = 0    # in seconds
     for xti in range(len(Xtimes_pri)):
-
         Xtimes_cur = Xtimes_pri[xti]
-        # since we had shifted by nedgeBins, we have to correct for it
-        timeshift += -Xtimes_cur[0]  # in case if we start not from zero
-
         #print(timeshift)
+        # only keep Xtimes that are inside wbd (i.e. remove edge bins outside
+        # windows)
         if wbd_pri is not None:
-            wbdcur = wbd_pri[xti]
-            lastwnd_end = wbdcur[1,-1] / sfreq
+            wbdcur = wbd_pri[xti].copy()
 
-            inds = np.where(Xtimes_cur < lastwnd_end)[0] # strong ineq is important here
+            if remove_gaps_between_datasets:
+                sh = wbdcur[0,0]
+                wbdcur -= sh
+                timeshift -= sh / sfreq
+
+            firstwind_start = wbdcur[0,0] / sfreq  # convert bins to times
+            lastwnd_end     = wbdcur[1,-1] / sfreq # convert bins to times
+
+            cnd0 = Xtimes_cur >= firstwind_start
+            cnd1 = Xtimes_cur < lastwnd_end
+            cnd = np.logical_and(cnd0, cnd1)
+            inds = np.where(cnd)[0] # strong ineq is important here
+            assert len(inds) > 0
             assert np.max(np.diff(inds) ) == 1, np.min(np.diff(inds) ) == 1
             Xtimes_cur = Xtimes_cur[inds]   # crop to the last window border
-        #else:
-        #    lastwnd_end = np.max(Xtimes_cur + dt)
+
+            wbd = wbd_pri [xti]
+            wbds += [wbd + cur_zeroth_bin]
+            skip = wbd[0,1] - wbd[0,0]
+        elif remove_gaps_between_datasets:
+            timeshift += -Xtimes_cur[0]  # in case if we start not from zero
+
+
 
         Xtimes_shifted = Xtimes_cur + timeshift
         Xtimes_almost += [Xtimes_shifted]
@@ -1901,18 +1543,32 @@ def concatAnns(rawnames, Xtimes_pri, suffixes=['_anns'], crop=(None,None),
                 assert np.all(duration_ > dt_sec )
             anns.append(onset_ , duration_,ann_cur.description)
 
+        if wbd_pri is not None:
+            cur_zeroth_bin += wbd[1,-1] + skip
+            timeshift = cur_zeroth_bin/sfreq
+        else:
+            timeshift += Xtimes_cur[-1] + dt   #Xtimes mean actually start of the time bin
+
         #print(Xtimes_shifted[0],timeshift,Xtimes_cur[-1], Xtimes_cur[-1] -Xtimes_cur[0])
         dataset_bounds += [ (Xtimes_shifted[0], Xtimes_shifted[-1] ) ]
 
-        timeshift += Xtimes_cur[-1] + dt
 
     #print('fd',Xtimes_almost[0][0],Xtimes_almost[0][-1],Xtimes_almost[1][0],Xtimes_almost[1][-1] )
     Xtimes_almost = np.hstack(Xtimes_almost)
     df = np.diff(Xtimes_almost)
-    assert abs( np.max(df) - np.min(df) ) <= 1e-10,  (np.max(df), np.min(df))
+    if remove_gaps_between_datasets:
+        assert abs( np.max(df) - np.min(df) ) <= 1e-10,  (np.max(df), np.min(df))
     assert np.all( anns.onset >= 0 ), anns.onset
 
-    return anns, anns_pri, Xtimes_almost, dataset_bounds
+    if wbd_pri is not None:
+        wbd_merged = np.hstack(wbds)
+        d = np.diff(wbd_merged, axis=1)
+        assert np.min(d)  > 0, d   # make sure there are no zero-sized gaps
+
+    if ret_wbd_merged and wbd_pri is not None:
+        return anns, anns_pri, Xtimes_almost, dataset_bounds, wbd_merged
+    else:
+        return anns, anns_pri, Xtimes_almost, dataset_bounds
 
 def getAnnBins(ivalis,Xtimes_almost,nedgeBins, sfreq,totskip, windowsz, dataset_bounds,
                set_empty_arrays = 0, force_all_arrays_nonzero=1):
@@ -2022,11 +1678,15 @@ def sprintfPerfs(perfs):
     perfs_str = '{:.2f}%,{:.2f}%,{:.2f}%'.format(p[0], p[1], p[2])
     return perfs_str
 
-from sklearn.feature_selection import mutual_info_classif
 
 def _MI(arg):
+    from sklearn.feature_selection import mutual_info_classif
     inds,X,y = arg
-    r = mutual_info_classif(X,y, discrete_features = False)
+    try:
+        r = mutual_info_classif(X,y, discrete_features = False)
+    except ZeroDivisionError as e:
+        print(e)
+        r = -1
     return inds,r
 
 def getMIs(X,class_labels,class_ind,n_jobs = None):
@@ -2044,13 +1704,14 @@ def getMIs(X,class_labels,class_ind,n_jobs = None):
     if n_jobs is not None:
         max_cores = n_jobs
     else:
-        max_cores = mpr.cpu_count()-gp.n_free_cores
+        max_cores = max(1, mpr.cpu_count()-gp.n_free_cores )
 
+    assert max_cores > 0
     if max_cores == 1:
         arg = np.arange(nfeats),X,class_labels
         args += [arg]
     else:
-        bnds = np.arange(0, nfeats, nfeats//max_cores )
+        bnds = np.arange(0, nfeats, max(1,nfeats//max_cores) )
         for bndi,bnd in enumerate(bnds):
             if bndi < len(bnds) - 1:
                 right = bnds[bndi+1]
@@ -2061,13 +1722,15 @@ def getMIs(X,class_labels,class_ind,n_jobs = None):
             args += [arg]
 
     n_jobs = max_cores
+    print('getMI:  Sending {} tasks to {} cores'.format(len(args), n_jobs))
+    #pool = mpr.Pool(n_jobs)
+    #res = pool.map(_MI, args)
+    ##if printLog:
+    #pool.close()
+    #pool.join()
 
-    pool = mpr.Pool(n_jobs)
-    res = pool.map(_MI, args)
-    #if printLog:
-    #    print('getPredPowersCV:  Sending {} tasks to {} cores'.format(len(args), n_jobs))
-    pool.close()
-    pool.join()
+    from joblib import Parallel, delayed
+    res = Parallel(n_jobs=n_jobs)(delayed(_MI)(arg) for arg in args)
 
     mic = np.zeros(nfeats)
     for r in res:
@@ -2075,7 +1738,7 @@ def getMIs(X,class_labels,class_ind,n_jobs = None):
         mic[inds] = mic_cur
     return mic
 
-def getLDApredPower(clf,X,class_labels,class_ind, printLog = False):
+def getClfPredPower(clf,X,class_labels,class_ind, printLog = False):
     '''
     LDA perf in detecting class_ind
     - class_ind  is an interger class id
@@ -2086,7 +1749,7 @@ def getLDApredPower(clf,X,class_labels,class_ind, printLog = False):
 
     if np.sum(mask) == 0 or np.sum(mask_inv) == 0:
         s = 'one of masks is bad '.format(np.sum(mask), np.sum(mask_inv) )
-        print('getLDApredPower: WARNING {}'.format(s) )
+        print('getClfPredPower: WARNING {}'.format(s) )
         #raise ValueError(s)
         return np.nan, np.nan, np.nan
 
@@ -2108,8 +1771,8 @@ def getLDApredPower(clf,X,class_labels,class_ind, printLog = False):
     F1 =  TP / (TP + 0.5 * ( FP + FN ) )
 
     if printLog:
-        print('getLDApredPower: True pos {} ({:.3f}), all pos {} ({:.3f})'.format(TP, TP/ntot, len(Pos), len(Pos)/ntot ) )
-        print('getLDApredPower: True neg {} ({:.3f}), all neg {} ({:.3f})'.format(TN, TN/ntot, len(Neg), len(Neg)/ntot ) )
+        print('getClfPredPower: True pos {} ({:.3f}), all pos {} ({:.3f})'.format(TP, TP/ntot, len(Pos), len(Pos)/ntot ) )
+        print('getClfPredPower: True neg {} ({:.3f}), all neg {} ({:.3f})'.format(TN, TN/ntot, len(Neg), len(Neg)/ntot ) )
 
     #if n_KFold_splits is not None:
     #    from sklearn.model_selection import KFold
@@ -2127,7 +1790,7 @@ def _getPredPower_singleFold(arg):
     model_cur = type(clf)(**add_clf_creopts)  # I need num LDA compnents I guess
     try:
         model_cur.fit(X_train, y_train, **add_fitopts)
-        perf_cur = getLDApredPower(model_cur,X_test,y_test,
+        perf_cur = getClfPredPower(model_cur,X_test,y_test,
                                     class_ind, printLog=printLog)
         if printLog:
             #print('getPredPowersCV: CV {}/{} pred powers {}'.format(-1,n_splits,cur) )
@@ -2140,9 +1803,9 @@ def _getPredPower_singleFold(arg):
 
 
 def getPredPowersCV(clf,X,class_labels,class_ind, printLog = False, n_splits=None,
-                    return_clf_obj=False, skip_noCV =False, add_fitopts={},
+                    ret_clf_obj=False, skip_noCV =False, add_fitopts={},
                    add_clf_creopts ={} ):
-    # clf is assumed to be already fitted here
+    # clf is assumed to be already fitted on entire training data here
     # TODO: maybe I need to adapt for other classifiers
     # ret = [perf_nocv, perfs_CV, perf_aver ] and maybe list of classif objects
     # obtained during CV
@@ -2151,7 +1814,7 @@ def getPredPowersCV(clf,X,class_labels,class_ind, printLog = False, n_splits=Non
         assert n_splits is not None
         perf_nocv = None
     else:
-        perf_nocv = getLDApredPower(clf,X,class_labels,class_ind, printLog=printLog)
+        perf_nocv = getClfPredPower(clf,X,class_labels,class_ind, printLog=printLog)
         if printLog:
             print('getPredPowersCV: perf_nocv ',perf_nocv, X.shape)
 
@@ -2191,12 +1854,16 @@ def getPredPowersCV(clf,X,class_labels,class_ind, printLog = False, n_splits=Non
         else:
             n_jobs = max(1, min(len(args) , mpr.cpu_count()-gp.n_free_cores) )
 
-            pool = mpr.Pool(n_jobs)
             if printLog:
                 print('getPredPowersCV:  Sending {} tasks to {} cores'.format(len(args), n_jobs))
-            res = pool.map(_getPredPower_singleFold, args)
-            pool.close()
-            pool.join()
+            #pool = mpr.Pool(n_jobs)
+            #res = pool.map(_getPredPower_singleFold, args)
+            #pool.close()
+            #pool.join()
+
+            from joblib import Parallel, delayed
+            res = Parallel(n_jobs=n_jobs)(delayed(_getPredPower_singleFold)(arg) for arg in args)
+
             for r in res:
                 model_cur,perfs_cur = r
                 if (model_cur is not None) and (perfs_cur is not None):
@@ -2209,11 +1876,11 @@ def getPredPowersCV(clf,X,class_labels,class_ind, printLog = False, n_splits=Non
         assert len(not_nan_fold_inds) > 0
         perf_aver = np.mean(perfarr[not_nan_fold_inds] , axis = 0)
         ret = [perf_nocv, perfs_CV, perf_aver ]
-        if return_clf_obj:
+        if ret_clf_obj:
             ret += [models]
     else:
         ret = perf_nocv, [perf_nocv] , perf_nocv
-        if return_clf_obj:
+        if ret_clf_obj:
             ret += [ [clf] ]
 
     return tuple(ret)
@@ -2234,21 +1901,42 @@ def calcLDAVersions(X_to_fit, X_to_transform, class_labels,n_components_LDA,
 
     X_LDA = lda.transform(X_to_transform)  # we transform all points, even bad and ulabeled ones. Transform is done using scalings
 
+    #classification_report(y_true, y_pred, target_names=target_names)
 
-    # Compute training on training (separability)
-    sens,spec,F1 = getLDApredPower(lda,X_to_fit, class_labels, class_ind_to_check)
-    print('-- LDA on train sens {:.2f} spec {:.2f} F1 {:.2f}'.format(sens,spec,F1) )
+    # Compute prediction on training (separability)
+    sens_train,spec_train,F1_train = getClfPredPower(lda,X_to_fit, class_labels, class_ind_to_check)
+    print('-- LDA on train sens {:.2f} spec {:.2f} F1 {:.2f}'.format(sens_train,spec_train,F1_train) )
 
     subres = {}
     subres['ldaobj'] = lda
     subres['X_transformed'] = X_LDA
-    subres['perfs'] = sens,spec,F1
+    subres['perfs'] = sens_train,spec_train,F1_train
     res['fit_to_all_data'] = subres
+
+    # Compute prediction on training, shuffled labels
+    class_labels_shuffled = class_labels.copy()
+    np.random.shuffle(class_labels_shuffled)
+    sens,spec,F1 = getClfPredPower(lda,X_to_fit, class_labels_shuffled, class_ind_to_check)
+    print('-- LDA check_on_shuffle sens {:.2f} spec {:.2f} F1 {:.2f}'.format(sens,spec,F1) )
+
+    subres = {}
+    subres['perfs'] = sens,spec,F1
+    res['fit_to_all_data_check_on_shuffle'] = subres
+
+    ##################
+    lda_shuffled = type(lda)()
+    lda_shuffled.fit(X_to_fit, class_labels_shuffled)
+    sens,spec,F1 = getClfPredPower(lda_shuffled,X_to_fit, class_labels_shuffled, class_ind_to_check)
+    print('-- LDA train_on_shuffle labels sens {:.2f} spec {:.2f} F1 {:.2f}'.format(sens,spec,F1) )
+
+    subres = {}
+    subres['perfs'] = sens,spec,F1
+    res['fit_to_all_data_train_on_shuffle'] = subres
 
     ########## Compute with CV
     perf_noCV, perfs_CV, res_aver_LDA, ldas_CV = \
         getPredPowersCV(lda, X_to_fit,  class_labels, class_ind_to_check,
-                                printLog=False, n_splits=n_splits, return_clf_obj=True,
+                                printLog=False, n_splits=n_splits, ret_clf_obj=True,
                         skip_noCV=1)
     sens_cv,spec_cv,F1_cv = res_aver_LDA
 
@@ -2278,12 +1966,12 @@ def calcLDAVersions(X_to_fit, X_to_transform, class_labels,n_components_LDA,
     lda_aver.coef_ = coef_aver
     lda_aver.intercept_ = intercept_aver
 
-    sens_avCV,spec_avCV,F1_avCV = getLDApredPower(lda_aver,X_to_fit, class_labels, class_ind_to_check)
-    print('-- LDA avCV on train sens {:.2f} spec {:.2f} F1 {:.2f}'.format(sens,spec,F1) )
+    sens_avCV,spec_avCV,F1_avCV = getClfPredPower(lda_aver,X_to_fit, class_labels, class_ind_to_check)
+    print('-- LDA avCV on train sens {:.2f} spec {:.2f} F1 {:.2f}'.format(sens_avCV,spec_avCV,F1_avCV) )
 
     perf_nocv_LDA_avCV, results_LDA_avCV, res_aver_LDA_avCV, ldas_CV_avCV = \
         getPredPowersCV(lda_aver, X_to_fit,class_labels, class_ind_to_check,
-                                printLog=False, n_splits=n_splits, return_clf_obj=True, skip_noCV=1)
+                                printLog=False, n_splits=n_splits, ret_clf_obj=True, skip_noCV=1)
     sens_cv_avCV,spec_cv_avCV,F1_cv_avCV = res_aver_LDA_avCV
 
     print('-- LDA CV _avCV sens {:.2f} spec {:.2f} F1 {:.2f}'.format(sens_cv_avCV,spec_cv_avCV,F1_cv_avCV) )
@@ -2297,11 +1985,14 @@ def calcLDAVersions(X_to_fit, X_to_transform, class_labels,n_components_LDA,
 
     return res
 
-def selMinFeatSet(clf, X, class_labels, class_ind, sortinds, drop_perf_pct = 5, n_splits=4,
+def selMinFeatSet(clf, X, class_labels, class_ind, sortinds,
+                  drop_perf_pct = 4, conv_perf_pct = 2,
+                  n_splits=4,
                   verbose=1, add_fitopts={}, add_clf_creopts={}, check_CV_perf = False,
-                  nfeats_step = 3, nsteps_report=1, max_nfeats=100):
+                  nfeats_step = 3, nsteps_report=1, max_nfeats=100,
+                    stop_if_boring = True, ret_clf_obj=False):
     '''
-    sortind -- sorted increasing importance (i.e. the most imporant is the last one)
+    sortinds -- sorted increasing importance (i.e. the most imporant is the last one, as given by argsort)
     it is assumed that clf.fit has already been made
     last feature is the most significant
     returns list of tuples, the first one is for all features,
@@ -2315,11 +2006,13 @@ def selMinFeatSet(clf, X, class_labels, class_ind, sortinds, drop_perf_pct = 5, 
         s = 'CV'
     else:
         s = 'noCV'
-    print('selMinFeatSet: --- starting {} comp pred powers for X.shape={}, step={}, max_nfeats={}'.
-          format(s,X.shape,nfeats_step,max_nfeats) )
+    print('selMinFeatSet: --- starting {} for X.shape={}, step={}, max_nfeats={}, drop_perf_thr={}, conv_thr={}'.
+          format(s,X.shape,nfeats_step,max_nfeats,drop_perf_pct,conv_perf_pct) )
 
-    perf_nocv_, results_, res_aver_ = getPredPowersCV(clf,X,class_labels,class_ind, verbose >=3,
-                           n_splits=n_splits, add_fitopts=add_fitopts, add_clf_creopts=add_clf_creopts)
+    r0 = getPredPowersCV(clf,X,class_labels,class_ind, verbose >=3,
+                           n_splits=n_splits, add_fitopts=add_fitopts, add_clf_creopts=add_clf_creopts,
+                                                      ret_clf_obj=ret_clf_obj)
+    perf_nocv_, results_, res_aver_ = r0[:3]
     if check_CV_perf:
         sens_full,spec_full,F1_full = res_aver_
     else:
@@ -2330,7 +2023,7 @@ def selMinFeatSet(clf, X, class_labels, class_ind, sortinds, drop_perf_pct = 5, 
     #X_red = Xarr[:,sortinds[-2:].tolist()]
     model_red = type(clf)(**add_clf_creopts)
 
-    # red = utsne.getLDApredPower(model_red,X_red,y,
+    # red = utsne.getClfPredPower(model_red,X_red,y,
     #                             gp.class_ids_def['trem_' + mts_letter], printLog=1)
     # print(red)
 
@@ -2341,50 +2034,83 @@ def selMinFeatSet(clf, X, class_labels, class_ind, sortinds, drop_perf_pct = 5, 
         print('selMinFeatSet: --- all feats give perf={}, check_CV_perf = {}'.
             format( sprintfPerfs([sens_full,spec_full,F1_full] ),check_CV_perf) )
 
-    perfs += [ (-1, sortinds.tolist(), perf_nocv_, res_aver_)   ]
+    rr = [-1, sortinds.tolist(), perf_nocv_, res_aver_]
+    if ret_clf_obj:
+        models_cur = r0[3]
+        rr += [models_cur]
+    perfs += [ tuple(rr)    ]
+    #perfs += [ (-1, sortinds.tolist(), perf_nocv_, res_aver_)   ]
+
     sens_prev,spec_prev = 0,0
     if check_CV_perf:
         n_splits_cycle =  n_splits
     else:
         n_splits_cycle =  None
 
-    converge_thr = drop_perf_pct / 100
+    stop_now = False
+    converge_thr = conv_perf_pct / 100
     close_to_full_thr = drop_perf_pct / 100
+    nsteps = 0
     for i in range(1,max_nfeats+1,nfeats_step):
         # counting backwards
-        inds = sortinds[-i:].tolist()
+        inds = sortinds[-i:].tolist()[::-1] # reversal or order here is only since Jan 21. It is cosmetic
         X_red = Xarr[:,inds]
         model_red.fit(X_red, class_labels, **add_fitopts)
-        perf_nocv, results, res_aver = \
-            getPredPowersCV(model_red,X_red,class_labels, class_ind,
-                        printLog=(verbose >= 3), n_splits=n_splits_cycle,
-                        add_fitopts=add_fitopts,
-                        add_clf_creopts=add_clf_creopts)
+        r= getPredPowersCV(model_red,X_red,class_labels, class_ind,
+                    printLog=(verbose >= 3), n_splits=n_splits_cycle,
+                    add_fitopts=add_fitopts,
+                    add_clf_creopts=add_clf_creopts,ret_clf_obj=ret_clf_obj)
+        perf_nocv, results, res_aver = r[:3]
         sens,spec,F1 = perf_nocv
 
-        perfs += [ (i,inds, perf_nocv,res_aver)   ]
+        rr = [i,inds, perf_nocv,res_aver]
+        if ret_clf_obj:
+            models_cur = r[3]
+            rr += [models_cur]
+        perfs += [ tuple(rr)    ]
         if verbose >= 2 and ( int(i-1 / nfeats_step) % nsteps_report == (nsteps_report-1) ):
             print('selMinFeatSet: --- search of best feat set, len(inds)={}, perf={}'.
                   format(len(inds), sprintfPerfs(res_aver) ) )
 
         # the last one if always CV even though if we checking only training
         # data perf when selecting feats
+        # I do not want to use abs() here
         cond_conv = ( (sens - sens_prev) <  converge_thr ) and ( (spec - spec_prev) <  converge_thr )
         cond_close = (sens_full - sens  < close_to_full_thr) and (spec_full- spec  < close_to_full_thr)
-        if cond_close and cond_conv:
-            perf_nocv, results, res_aver = getPredPowersCV(model_red,X_red,class_labels,
-                                class_ind, printLog=verbose >= 3, n_splits=n_splits, add_fitopts=add_fitopts,
-                                                            add_clf_creopts=add_clf_creopts)
-            sens,spec,F1 = res_aver
-            perfs[-1] =  (i,inds, perf_nocv,res_aver)
+        cond_boring = ( sens_full < 0.4) and nsteps > 1 and (not stop_if_boring)
+        stop_now = (cond_close and cond_conv) or cond_boring
+        if stop_now:
+            if n_splits_cycle is None:
+                r = getPredPowersCV(model_red,X_red,class_labels, class_ind,
+                                    printLog=verbose >= 3, n_splits=n_splits,
+                                    add_fitopts=add_fitopts,
+                                    add_clf_creopts=add_clf_creopts,
+                                    ret_clf_obj=ret_clf_obj)
+                perf_nocv, results, res_aver = r[:3]
+                sens,spec,F1 = res_aver
+
+                rr = [i,inds, perf_nocv,res_aver]
+                if ret_clf_obj:
+                    models_cur = r[3]
+                    rr += [models_cur]
+                perfs[-1] = tuple(rr)
 
             if verbose >= 1:
-                print('selMinFeatSet: --- ENDED search of best feat set, len(inds)={}, perf={}'.
-                      format(len(inds), sprintfPerfs(res_aver) ) )
+                print('selMinFeatSet: --- ENDED search of best feat set, len(inds)={}, perf={}, boring={}'.
+                      format(len(inds), sprintfPerfs(res_aver), cond_boring ) )
             break
 
         sens_prev,spec_prev = sens,spec
+        nsteps += 1
 
+    if not stop_now:  # if we stopped because cycle has ended
+        if verbose >= 1:
+            print('selMinFeatSet: max number of features reached, adding full to the end')
+        rr = [i+1, sortinds.tolist(), perf_nocv_, res_aver_]
+        if ret_clf_obj:
+            models_cur = r0[3]
+            rr += [models_cur]
+        perfs += [ tuple(rr)  ]
 
     return perfs
 
@@ -2484,17 +2210,31 @@ def makeClassLabels(sides_hand, grouping, int_types_to_distinguish, ivalis_tb_in
 
     return class_labels, class_labels_good, revdict, class_ids_grouped
 
-def countClassLabels(class_labels_good, class_ids_grouped):
+def countClassLabels(class_labels_good, class_ids_grouped=None,revdict=None):
+    assert revdict is not None or (class_ids_grouped is not None)
     if isinstance (class_labels_good,np.ndarray):
         assert class_labels_good.ndim == 1
     elif not isinstance (class_labels_good,list):
         raise ValueError('Wrong type')
     counts = {}
-    for class_name in class_ids_grouped:
-        cid = class_ids_grouped[class_name]
-        #print(cid)
-        num_cur = np.sum(class_labels_good == cid)
-        counts[class_name] = num_cur
+    if revdict is not None:
+        for cid in set(class_labels_good):
+            num_cur = np.sum(class_labels_good == cid)
+            lbl = revdict.get(cid, 'cid={}'.format(cid) )
+            counts[lbl ] = num_cur
+    else:
+        raise ValueError('to be debugged')
+        cids_used = []
+        class_names_used = []
+        for class_name in class_ids_grouped:
+            cid = class_ids_grouped[class_name]
+            if cid in cids_used:
+                class_name
+            else:
+                lbl = class_name
+            #print(cid)
+            num_cur = np.sum(class_labels_good == cid)
+            counts[lbl] = num_cur
     return counts
 
 #def checkClassLabelsCompleteness(class_labels_good, class_ids_grouped, class_to_check,

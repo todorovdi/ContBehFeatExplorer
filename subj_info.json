@@ -396,6 +396,25 @@
         "tremfreq": 4,
         "tremor_side": "right"
     },
+    "S97": {
+        "bad_channels": {
+            "off": {
+                "hold": [ ], 
+                "move": [ ]
+            },
+            "on": {
+                "hold": [ ],
+                "move": [ ]
+            }
+        },
+        "dbs_system": "medtronic",
+        "lfpchan_used_in_paper": "LFPL01",
+        "lfpchan_selected_by_pipeline": "LFPL12", 
+        "move_side": "right",
+        "tremfreq": 6,
+        "tremor_side": "right",
+        "descr": "same as S99, but sides reversed"
+    },
     "S98": {
         "bad_channels": {
             "off": {

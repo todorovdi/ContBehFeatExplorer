@@ -20,50 +20,105 @@ if ~exist("rawnames")
   rawnames = ["S01_off_hold"];
 end
 
+if ~exist("use_data_afterICA")
+  use_data_afterICA = 1;
+end
+
+if ~exist("input_subdir")
+  input_subdir = "";
+end
+if ~exist("output_subdir")
+  output_subdir = "";
+end
+
+% double quotes are string array
+%input_rawname_type = ["resample", "afterICA"]
+%input_rawname_type = ["SSS", "notch", "highpass", "resample", "afterICA"]
+
+if ~exist("roi")
+  roi = {"parcel_aal_surf"};
+end
+
+if ~exist("input_rawname_type")
+  input_rawname_type = ["resample", "notch", "highpass"]  %this is default
+end
+
+if use_data_afterICA
+  input_rawname_type = [input_rawname_type "afterICA"]
+end
+rawname_suffix = '';
+for i=1:length(input_rawname_type)
+  rawname_suffix = sprintf("%s_%s",rawname_suffix,input_rawname_type(i) );
+end
+rawname_suffix = sprintf("%s_%s",rawname_suffix,"raw" );
+
+resname_add_str = '';
+%if any(contains(input_rawname_type, "SSS" ) ) 
+%  if any(strcmp(input_rawname_type, "afterICA" ) )   
+if contains(rawname_suffix, "SSS")
+  remove_bad_channels = 0;
+  % I better control it with setting subfolder names
+  %resname_add_str = "SSS"
+  %if contains(rawname_suffix, "afterICA")
+  %  resname_add_str = strcat(resname_add_str, "_afterICA")
+  %end
+else
+ remove_bad_channels = 1
+end
 
 % Brodmann 4 -- M1,   Brodmann 6 -- PMC
 %roi = {"Brodmann area 4"};
 %roi = {"Brodmann area 6"};
-%roi = {"HirschPt2011,2013direct"}
+%roi = {"HirschPt2011,2013"}
+%roi = {"HirschPt2011,2013","Thalamus"}
 %
 %roi = {"Brodmann area 4","Brodmann area 6"};
 %roi = {"HirschPt2011"};
-roi = {"parcel_aal"};
 save_srcrec          = 1;
 if exist("TEST_SRCREC")
   save_srcrec          = 0;
 end
 
 use_DICS = 0;
-use_data_afterICA = 1;
 
-remove_bad_channels = 1 - use_data_afterICA;
-
+% Load Jan-provided info
 if 1 ~= exist("Info")
   load(strcat(data_dir,"/Info.mat") );
 end
 
 highpass_freq = 1.5;
 
-load('head_scalemat');
+f_scalemat = load('head_scalemat');
 
-afni = ft_read_atlas('~/soft/fieldtrip/template/atlas/afni/TTatlas+tlrc.HEAD');  % goes deeper in the sulcus
+
+atlas_type = "aal"
+if strcmp(atlas_type, "aal")
+  aal = ft_read_atlas('~/soft/fieldtrip/template/atlas/aal/ROI_MNI_V4.nii');
+  atlas = aal;
+elseif strcmp(atlas_type, "afni")  % has Brodmann areas, no sides
+  afni = ft_read_atlas('~/soft/fieldtrip/template/atlas/afni/TTatlas+tlrc.HEAD');  % goes deeper in the sulcus
+  atlas = afni;
+end
 %singleshell = load('~/soft/fieldtrip/template/headmodel/standard_singleshell');
 source_grid = load('~/soft/fieldtrip/template/sourcemodel/standard_sourcemodel3d5mm');
+source_grid.sourcemodel.coordsys = 'mni';
 % pts_converted = mni2icbm_spm( pts )
 % atlas.  pts_converted = mni2icbm_spm( pts )
-atlas = ft_convert_units(afni,'cm'); % ftrop and our sourcemodels have cm units
+atlas = ft_convert_units(atlas,'cm'); % ftrop and our sourcemodels have cm units
+atlas.coordsys = 'mni';
 
-cfg_vlookup = [];
-cfg_vlookup.atlas = atlas;
-cfg_vlookup.roi = roi;
-%cfg_vlookup.roi = atlas.tissuelabel;
-cfg_vlookup.inputcoord = 'mni';  % coord of the source
-%cfg_vlookup.inputcoord = 'tal';
-%source_grid_mask = ft_volumelookup(cfg_vlookup,source_grid.sourcemodel);  % selecting only a subset
-source_grid_mask = [];
+% if roi is found in the atlas. Here I assume that if one is from the atlas than other rois too
+if isfield(atlas, "tissuelabel")
+  tlarr = atlas.tissuelabel;
+elseif isfield(atlas, "brick0label")  
+  tlarr = cat ( 1, {atlas.brick0label{:},atlas.brick1label{:} } );
+end
 
 read_upd_bads = 0;
+
+%TODO: first read and do reject artifact, then append data then call source reconstruction
+%cfg = [];
+%data_merged =  ft_appenddata(cfg, data1_resampled, data2);
 
 num_prcessed = 0;
 for rawi = 1:length(rawnames)
@@ -83,21 +138,24 @@ for rawi = 1:length(rawnames)
 %    for taski = 1:length(tasks)
 %      taskstr = tasks(taski);
 
-      if use_data_afterICA
-        basename = sprintf('/%s_%s_%s_resample_afterICA_raw.fif',subjstr,medstr,taskstr);
-      else
-        % resample was notched but not highpassed
-        %basename = sprintf('/%s_%s_%s_resample_raw.fif',subjstr,medstr,taskstr);
-        basename = sprintf('/%s_%s_%s_resample_notch_highpass_raw.fif',subjstr,medstr,taskstr);
-      end
+      % rawnames_suffix starts with '_'
+      basename = sprintf('/%s_%s_%s%s.fif',subjstr,medstr,taskstr,rawname_suffix);
+
+      %if use_data_afterICA
+      %  basename = sprintf('/%s_%s_%s_resample_afterICA_raw.fif',subjstr,medstr,taskstr);
+      %else
+      %  % resample was notched but not highpassed
+      %  %basename = sprintf('/%s_%s_%s_resample_raw.fif',subjstr,medstr,taskstr);
+      %  basename = sprintf('/%s_%s_%s_resample_notch_highpass_raw.fif',subjstr,medstr,taskstr);
+      %end
       fprintf(" Using basename=%s\n",basename)
       %basename = sprintf('/%s_%s_%s_resample_maxwell_raw.fif',subjstr,medstr,taskstr);
-      fname = strcat(data_dir, basename );
-      if isfile(fname)
+      fname = fullfile(data_dir, input_subdir, basename );
+      if isfile(fname)   % if file exists
         fprintf("%s\n",fname)
 
         cfgload = [];
-        cfgload.dataset = fname;          % fname should be char array (single quotes), not string (double quotes)
+        cfgload.dataset = char(fname);          % fname should be char array (single quotes), not string (double quotes)
         cfgload.chantype = {'meg'};
         cfgload.coilaccuracy = 1;   % 0 1 or 2, idk what each of them means -- it is about combining grad and mag
 
@@ -114,7 +172,7 @@ for rawi = 1:length(rawnames)
 
           if read_upd_bads;
               fname_bads_mat = sprintf('%s_MEGch_bads_upd.mat',fname_noext);
-              fname_bads_mat_full = [ data_dir, '/', fname_bads_mat];
+              fname_bads_mat_full = fullfile( data_dir, fname_bads_mat);
               bads_upd = load(fname_bads_mat_full).bads;
               bads = bads_upd;
           end
@@ -152,7 +210,7 @@ for rawi = 1:length(rawnames)
         %deal with artifacts
         %fname_srcrec_exclude = sprintf('/%s_%s_%s_ann_MEGartif.txt', subjstr,medstr,taskstr);
         fname_srcrec_exclude = sprintf('/%s_%s_%s_ann_srcrec_exclude.txt', subjstr,medstr,taskstr);
-        filename      = [data_dir fname_srcrec_exclude];
+        filename      = fullfile(data_dir,fname_srcrec_exclude);
         FID = fopen(filename);
         fgets(FID); fgets(FID); % skip first 2 lines
         form='%f,%f,%s'; % we have 7 columns, then use 7 %f
@@ -161,7 +219,7 @@ for rawi = 1:length(rawnames)
         bins_artif = datall_.fsample * times_artif;  
         bins_artif = 1 + round(bins_artif);
         %bins_artif = times_artif;
-        fclose(FID)
+        fclose(FID);
 
 
         cfg_ar = [];
@@ -175,20 +233,39 @@ for rawi = 1:length(rawnames)
 
         cfg_ar.artfctdef.minaccepttim    = 1; %min length of remaining trial in seconds
         %   cfg.artfctdef.feedback        = 'yes' or 'no' (default = 'no')
-        %   cfg.artfctdef.invert          = 'yes' or 'no' (default = 'no')
-        data_cleaned = ft_rejectartifact(cfg_ar,datall)
+        %   cfg.artfctdef.invert          = 'yes' or 'no' (default = 'no') -- invert artifact selection
+        
+        % unfortunately it cannot reduce trial size, just throw away it 
+        % completely, so I do some dirty work later        
+        data_cleaned = ft_rejectartifact(cfg_ar,datall) 
         %return
-
-
 
         for roii = 1:length(roi) 
           roicur = roi{roii};
 
-          if isKey(scalemat,subjstr)
-            S = scalemat(subjstr);
+          % scaling matrix, no longer used, kept for compatibility
+          if isKey(f_scalemat.scalemat,subjstr)
+            S = f_scalemat.scalemat(subjstr);
           else
-            S = eye(3)
+            S = eye(3);
           end
+
+          % do we find roi in the atlas?
+          roimask = contains(cellstr(tlarr), roicur );
+          if sum(roimask) == 1 
+            cfg_vlookup = [];
+            cfg_vlookup.atlas = atlas;
+            cfg_vlookup.roi = roi;
+            %cfg_vlookup.roi = atlas.tissuelabel; % this would lookup for all possible
+            cfg_vlookup.inputcoord = 'mni';  % coord of the source
+            %cfg_vlookup.inputcoord = 'tal';
+            source_grid_mask = ft_volumelookup(cfg_vlookup,source_grid.sourcemodel);  % selecting only a subset
+            fprintf("%s: Num of sources = %d\n",roicur,sum(source_grid_mask) )
+          else
+            fprintf("%s not found in atlas\n",roicur )
+            source_grid_mask = [];
+          end
+
           source_data = srcrec(subjstr,datall,data_cleaned,hdmf,{roicur},bads,S,source_grid,source_grid_mask,use_DICS);
 
           for fbi = 1:length(source_data) 
@@ -196,12 +273,15 @@ for rawi = 1:length(rawnames)
           end
 
           if save_srcrec
-            basename_srcd = sprintf("/srcd_%s_%s_%s_%s.mat",subjstr,medstr,taskstr,roicur);
-            fname_srcd = strcat(data_dir, basename_srcd );
+            basename_srcd = sprintf("/srcd_%s_%s_%s_%s%s.mat",subjstr,medstr,taskstr,roicur,resname_add_str);
+            %data_dir_out = strcat(
+            fname_srcd = fullfile(data_dir, output_subdir, basename_srcd );
             fprintf("Saving to %s\n",fname_srcd)
             save(fname_srcd,"source_data","-v7.3");
           end
         end
+      else
+        fprintf(" file not found! %s",fname)
       end
 %    end
 %  end

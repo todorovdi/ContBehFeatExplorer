@@ -31,11 +31,6 @@ import datetime
 
 from xgboost import XGBClassifier
 
-if os.environ.get('DATA_DUSS') is not None:
-    data_dir = os.path.expandvars('$DATA_DUSS')
-else:
-    data_dir = '/home/demitau/data'
-
 #nPCA_comp = 0.95
 nPCA_comp = 0.95
 n_channels = 7
@@ -53,6 +48,7 @@ qshift = 1e-2
 force_single_core = False
 ##########################
 
+# all possible
 feat_types_all = [ 'con',  'H_act', 'H_mob', 'H_compl', 'bpcorr', 'rbcorr']
 data_modalities_all = ['LFP', 'msrc']
 
@@ -72,7 +68,8 @@ bands_type = 'fine'
 prefix = ''
 
 #do_impute_artifacts = 1
-artifact_handling = 'impute' #or 'discard' or 'do_nothing'
+#artif_handling_before_fit = 'impute' #or 'discard' or 'do_nothing'
+artif_handling_before_fit = 'discard'
 do_outliers_discard = 1
 
 def_sources_type = 'HirschPt2011'
@@ -110,120 +107,214 @@ search_best_LFP = 1
 save_output = 1
 rescale_feats = 1
 
+discard_remaining_int_types_during_fit = 1
+skip_XGB_aux_intervals = 1
+max_XGB_step_nfeats=30
+
 cross_couplings_only=0
 mainLFPchan_new_name_templ = 'LFP{}007'    # to make datasets consistent
 remove_corr_self_couplings = 1
+self_couplings_only =0
+
+plot_types_all = ['pcapoints', 'ldapoints', 'feat_stats' ]
+plot_types = plot_types_all
+
+n_splits = 4
+input_subdir = ""
+output_subdir = ""
+scale_feat_combine_type = 'medcond'
+
+use_smoothened = 0
 
 #groupings_to_use = gp.groupings
 groupings_to_use = [ 'merge_all_not_trem', 'merge_movements', 'merge_nothing' ]
 groupings_to_use = [ 'merge_nothing' ]
 #int_types_to_use = gp.int_types_to_include
 int_types_to_use = [ 'basic', 'trem_vs_quiet' ]
+featsel_shap = []
 
-helpstr = 'Usage example\nrun_PCA.py --rawnames <rawname_naked1,rawnames_naked2> '
+params_read = {}
+params_cmd = {}
+
+helpstr = 'Usage example\nrun_ML.py --rawnames <rawname_naked1,rawnames_naked2> '
 opts, args = getopt.getopt(effargv,"hr:n:s:w:p:",
-        ["rawnames=", "n_channels=", "skip_feat=", "windowsz=", "pcexpl=",
+        ["rawnames=", "n_channels=",  "windowsz=", "pcexpl=",
          "show_plots=","discard=", 'feat_types=', 'use_HFO=', 'mods=',
-         'prefix=', 'load_only=', 'fbands=', 'n_feats=', 'single_core=', 'sources_type=',
+         'prefix=', 'load_only=', 'fbands=', 'n_feats=',
+         'single_core=', 'sources_type=',
          'bands_type=', 'crop=', 'parcel_types=', "src_grouping=", "src_grouping_fn=",
          'groupings_to_use=', 'int_types_to_use=', 'skip_XGB=', 'LFP_related_only=',
          'parcel_group_names=', "subskip_fit=", "search_best_LFP=", "save_output=",
-        'rescale_feats=', "cross_couplings_only=", "LFPchan=", "heavy_fit_red_featset=" ])
+        'rescale_feats=', "cross_couplings_only=", "LFPchan=", "heavy_fit_red_featset=",
+         "n_splits=", "input_subdir=", "output_subdir=", "artif_handling=", "plot_types=",
+         "skip_XGB_aux_int=", "max_XGB_step_nfeats=", "self_couplings_only=", "param_file=",
+         "scale_feat_combine_type=", "use_smoothened=", "featsel_shap=" ])
 print(sys.argv)
+print('Argv str = ',' '.join(sys.argv ) )
 print(opts)
 print(args)
 for opt, arg in opts:
-    print(opt)
+    print(opt,arg)
     if opt == '-h':
         print (helpstr)
         sys.exit(0)
-    elif opt == "--n_channels":
+    elif opt == "--param_file":
+        param_fname_full = os.path.join('params',arg)
+        params_read = gv.paramFileRead(param_fname_full)
+    else:
+        if opt.startswith('--'):
+            optkey = opt[2:]
+        elif opt == '-r':
+            optkey = 'rawnames'
+        else:
+            raise ValueError('wrong opt {}'.format(opt) )
+        params_cmd[optkey] = arg
+
+params_read.update(params_cmd)
+pars = params_read
+
+for opt,arg in pars.items():
+    if opt == "n_channels":
         n_channels = int(arg)
-    elif opt == "--n_feats":
+    elif opt == "n_feats":
         n_feats = int(arg)
         n_feats_set_explicitly = True
-    elif opt == "--skip_XGB":
+    elif opt == "scale_feat_combine_type":
+        scale_feat_combine_type = arg
+    elif opt == "skip_XGB":
         do_XGB = not bool(int(arg))
-    elif opt == "--heavy_fit_red_featset":
+    elif opt == "skip_XGB_aux_int":
+        skip_XGB_aux_intervals = bool(int(arg))
+    elif opt == "self_couplings_only":
+        self_couplings_only = int(arg)
+    elif opt == "heavy_fit_red_featset":
         use_low_var_feats_for_heavy_fits = int(arg)
-    elif opt == "--parcel_types":  # names of the roi_labels (not groupings)
+    elif opt == "parcel_types":  # names of the roi_labels (not groupings)
         parcel_types = arg.split(',')
-    elif opt == "--parcel_group_names":
+    elif opt == "plot_types":  # names of the roi_labels (not groupings)
+        plot_types = arg.split(',')
+        for pt in plot_types:
+            assert pt in plot_types_all
+    elif opt == "input_subdir":
+        input_subdir = arg
+        if len(input_subdir) > 0:
+            subdir = os.path.join(gv.data_dir,input_subdir)
+            assert os.path.exists(subdir ), subdir
+    elif opt == "output_subdir":
+        output_subdir = arg
+        if len(output_subdir) > 0:
+            subdir = os.path.join(gv.data_dir,output_subdir)
+            if not os.path.exists(subdir ):
+                print('Creating output subdir {}'.format(subdir) )
+                os.makedirs(subdir)
+    elif opt == "featsel_shap":
+        featsel_shap = arg.split(',')
+    elif opt == "parcel_group_names":
         parcel_group_names = arg.split(',')
-    elif opt == "--crop":
+    elif opt == "artif_handling":
+        assert arg in ['impute' , 'discard']
+        artif_handling_before_fit = arg
+    elif opt == "crop":
         cr =  arg.split(',')
         crop_start = float(cr[0])
         crop_end = float(cr[1] )
-    elif opt == '--int_types_to_use':
+    elif opt == 'int_types_to_use':
         int_types_to_use = arg.split(',')
-    elif opt == '--groupings_to_use':
+    elif opt == 'groupings_to_use':
         groupings_to_use = arg.split(',')
-    elif opt == "--search_best_LFP":
+    elif opt == 'n_splits': # number of splits to be used in cross-validation
+        n_splits = int(arg)
+    elif opt == "search_best_LFP":
         search_best_LFP = int(arg)
-    elif opt == "--src_grouping":
+    elif opt == "src_grouping":
         src_grouping = int(arg)
-    elif opt == "--src_grouping_fn":
+    elif opt == "use_smoothened":
+        use_smoothened = int(arg)
+    elif opt == "src_grouping_fn":
         src_file_grouping_ind = int(arg)
-    elif opt == "--rescale_feats":
+    elif opt == "max_XGB_step_nfeats":
+        max_XGB_step_nfeats = int(arg)
+        assert max_XGB_step_nfeats > 0
+    elif opt == "rescale_feats":
         rescale_feats = int(arg)
-    elif opt == "--cross_couplings_only":
+    elif opt == "cross_couplings_only":
         cross_couplings_only = int(arg)
-    elif opt == "--skip_feat":
-        skip = int(arg)
-    elif opt == "--save_output":
+    elif opt == "save_output":
         save_output = int(arg)
-    elif opt == "--bands_type":
+    elif opt == "bands_type":
         bands_type = arg
-    elif opt == "--sources_type":
+    elif opt == "sources_type":
         if len(arg):
             sources_type = arg
-    elif opt == "--single_core":
+    elif opt == "single_core":
         force_single_core = int(arg)
-    elif opt == '--load_only':
+    elif opt == 'load_only':
         load_only = int(arg)
-    elif opt == '--show_plots':
+    elif opt == 'show_plots':
         show_plots = int(arg)
-    elif opt == '--subskip_fit':
+    elif opt == 'subskip_fit':
         subskip_fit = int(arg)
-    elif opt == "--windowsz":
+    elif opt == "windowsz":
         windowsz = int(arg)
-    elif opt == "--LFP_related_only":
+    elif opt == "LFP_related_only":
         LFP_related_only = int(arg)
-    elif opt == "--discard":
+    elif opt == "discard":
         discard = float(arg)
-    elif opt == "--prefix":
+    elif opt == "prefix":
         prefix = arg + '_'
-    elif opt == "--msrc_inds":
+    elif opt == "msrc_inds":
         msrc_inds = [ int(indstr) for indstr in arg.split(',') ]
         msrc_inds = np.array(msrc_inds, dtype=int)
-    elif opt == "--feat_types":
+    elif opt == "feat_types":
         features_to_use = arg.split(',')
         for ftu in features_to_use:
             assert ftu in feat_types_all, ftu
-    elif opt == "--mods":
+    elif opt == "mods":
         data_modalities = arg.split(',')   #lfp of msrc
-    elif opt == '--fbands':
+    elif opt == 'fbands':
         fbands_to_use = arg.split(',')
-    elif opt == '--LFPchan':
+    elif opt == 'LFPchan':
         if arg == 'main': # use only main channel
             use_main_LFP_chan = 1
         elif arg == 'all':   # use all channels
             use_main_LFP_chan = 0
         elif arg.find('LFP') >= 0:   # maybe I want to specify expliclity channel name
             raise ValueError('to be implemented')
-    elif opt == '--use_HFO':
+    elif opt == 'use_HFO':
         use_lfp_HFO = int(arg)
-    elif opt == "--pcexpl":
+    elif opt == "pcexpl":
         nPCA_comp = float(arg)  #crude of fine
         if nPCA_comp - int(nPCA_comp) < 1e-6:
             nPCA_comp = int(nPCA_comp)
-    elif opt in ('-r','--rawnames'):
+    elif opt == 'rawnames':
         rawnames = arg.split(',')
+    elif opt.startswith('iniAdd'):
+        print('skip ',opt)
     else:
         print('Unrecognized option {} with arg {}, exiting'.format(opt,arg) )
-        sys.exit(1)
+        sys.exit('Unrecognized option')
+
+
+single_fit_type_mode = 0
+if len(groupings_to_use) == 1 and len(int_types_to_use) == 1:
+    single_fit_type_mode = 1
+    grouping_key = groupings_to_use[0]
+    int_types_key = int_types_to_use[0]
+
+    grouping = gp.groupings[grouping_key ]
+    if grouping_key not in gp.group_vs_int_type_allowed[int_types_key]:
+        print('--!!--!!-- runPCA: Exiting without output because grouping {} for int types {}'.
+              format(grouping,int_types_key) )
+        #sys.exit("wrong grouping vs int_set")
+        sys.exit(None)
 
 #print('test exit', parcel_types); sys.exit(1) ;
+n_jobs_XGB = None
+if force_single_core:
+    n_jobs_XGB = 1
+else:
+    n_jobs_XGB = max(1, mpr.cpu_count()-gp.n_free_cores)
+assert n_jobs_XGB > 0
 
 if bands_type == 'fine':
     fbands_def = fband_names_fine_inc_HFO
@@ -240,6 +331,12 @@ with open('subj_info.json') as info_json:
     gen_subj_info = json.load(info_json)
 
 ##############################
+test_mode = ( int(rawnames[0][1:3]) > 10 ) or (prefix == 'test_')
+if test_mode:
+    print( '!!!!!!!!!!  test_mode   !!!!!!!!!!!!!' )
+    print( '!!!!!!!!!!  test_mode   !!!!!!!!!!!!!' )
+    print( '!!!!!!!!!!  test_mode   !!!!!!!!!!!!!' )
+##########################
 
 tasks = []
 X_pri = []
@@ -254,7 +351,7 @@ mts_letters_pri = []
 src_rec_info_pri = []
 rawtimes_pri = []
 wbd_pri = []
-main_side_pri = []
+main_side_pri = [] # before reversal
 new_main_side_pri = []
 feat_info_pri = []
 fname_feat_full_pri = []
@@ -276,30 +373,31 @@ for rawname_ in rawnames:
     if crop_end is not None:
         crp_str = '_crop{}-{}'.format(int(crop_start),int(crop_end) )
 
+    inp_sub = os.path.join(gv.data_dir, input_subdir)
     if sources_type == def_sources_type:
         a = '{}_feats_{}chs_nfeats{}_skip{}_wsz{}_grp{}-{}{}.npz'.\
             format(rawname_,n_channels, n_feats, skip, windowsz,
                    src_file_grouping_ind, src_grouping, crp_str)
         feat_fnames += [a]
-        fname_feat_full = os.path.join( data_dir,a)
+        fname_feat_full = os.path.join( inp_sub,a)
     else:
         regex = '{}_feats_{}_{}chs_nfeats{}_skip{}_wsz{}_grp{}-{}{}.npz'.\
             format(rawname_,sources_type,'[0-9]+', '[0-9]+', skip, windowsz,
                     src_file_grouping_ind, src_grouping, crp_str)
             #format(rawname_, prefix, regex_nrPCA, regex_nfeats, regex_pcadim)
 
-        fnfound = utsne.findByPrefix(data_dir, rawname_, prefix, regex=regex)
+        fnfound = utsne.findByPrefix(inp_sub, rawname_, prefix, regex=regex)
         if len(fnfound) > 1:
             fnt = [0] * len(fnfound)
             for fni in range(len(fnt) ):
-                fnfull = os.path.join(data_dir, fnfound[fni])
+                fnfull = os.path.join(inp_sub, fnfound[fni])
                 fnt[fni] = os.path.getmtime(fnfull)
             fni_max = np.argmax(fnt)
             fnfound = [ fnfound[fni_max] ]
 
 
         assert len(fnfound) == 1, 'For {} found not single fnames {}'.format(rawname_,fnfound)
-        fname_feat_full = os.path.join( data_dir, fnfound[0] )
+        fname_feat_full = os.path.join( inp_sub, fnfound[0] )
 
     fname_feat_full_pri += [fname_feat_full]
 
@@ -312,7 +410,10 @@ for rawname_ in rawnames:
 
 
     sfreq = f['sfreq']
-    X_allfeats =  f['X']
+    if use_smoothened:
+        X_allfeats =  f['X_smooth']
+    else:
+        X_allfeats =  f['X']
     Xtimes = f['Xtimes']
     rawtimes = f['rawtimes']
     skip_ =f['skip']
@@ -331,15 +432,15 @@ for rawname_ in rawnames:
 
     # this is what is actually in features already, so it is needed only for
     # annotations. Body side is meant, not brain side
-    new_main_side = feat_info.get('new_main_side','L')
-    main_side = feat_info.get('main_side_before_switch','L')
-    main_side_pri += [main_side]
+    new_main_side = feat_info.get('new_main_side','left')
+    main_side_pri += [feat_info.get('main_side_before_switch','left') ]
     new_main_side_pri += [new_main_side]
 
     feat_info_pri += [feat_info]
     rawtimes_pri += [rawtimes]
 
-    if Xtimes[1] > 0.5:  # then we have saved the wrong thing
+
+    if Xtimes[1]-Xtimes[0] > 0.5:  # then we have saved the wrong thing
         print('Warning: Xtimes {} are too large, dividing by sfreq '.format(Xtimes[:5] ) )
         Xtimes = Xtimes / sfreq
     Xtimes_pri += [Xtimes]
@@ -364,6 +465,20 @@ for rawname_ in rawnames:
     if use_main_LFP_chan:
         assert mainLFPchan is not None
 
+    ##################
+
+    #if 'brcorr' in data_modalities or 'rbcorr' in data_modalities:
+    #search for non-zero components in short msrc names
+    b = []
+    for fen in feature_names_all:
+        r = re.match('.*msrc._[0-9]+_[0-9]+_c[^0][0-9]*', fen)
+        if r is not None:
+            print(fen)
+            b += [fen]
+    if len(b):
+        raise ValueError('Non zero components found among feature names {}'.format(b) )
+
+    ##################
 
 
     bad_inds = set([] )
@@ -371,7 +486,7 @@ for rawname_ in rawnames:
 
     src_rec_info_fn = '{}_{}_grp{}_src_rec_info'.\
         format(rawname_,sources_type, src_file_grouping_ind)
-    src_rec_info_fn_full = os.path.join(gv.data_dir, src_rec_info_fn + '.npz')
+    src_rec_info_fn_full = os.path.join(gv.data_dir, input_subdir, src_rec_info_fn + '.npz')
     rec_info = np.load(src_rec_info_fn_full, allow_pickle=True)
     src_rec_info_pri += [rec_info]
     roi_labels = rec_info['label_groups_dict'][()]
@@ -423,9 +538,10 @@ for rawname_ in rawnames:
         bad_parcel_inds = [i for i, p in enumerate(all_parcels) if p in temp]
         assert len(bad_parcel_inds) > 0, bad_parcels
 
+        final_src_grouping = 9
         regexes = []
         for bpi in bad_parcel_inds:
-            regex_parcel_cur = '.*src._{}_{}_.*'.format(src_grouping, bpi)
+            regex_parcel_cur = '.*src._[0-9]+_{}_.*'.format( bpi)
             regexes += [regex_parcel_cur]
         inds_bad_parcels = utsne.selFeatsRegexInds(feature_names_all,regexes)
         bad_inds.update(inds_bad_parcels)
@@ -462,6 +578,17 @@ for rawname_ in rawnames:
         if len(inds_self_coupling):
             #print('Removing self-couplings of LFP and msrc {}'.format( inds_self_coupling) )
             bad_inds.update(inds_self_coupling )
+
+    if self_couplings_only:
+        regex_same_LFP = r'.*(LFP.[0-9]+),.*\1.*'
+        regex_same_src = r'.*(msrc._[0-9]+_[0-9]+_c[0-9]+),.*\1.*'
+        regex_same_Hs = [ r'H_act.*', r'H_mob.*', r'H_compl.*'   ]
+        regexs = [regex_same_LFP, regex_same_src] + regex_same_Hs
+        inds_self_coupling = utsne.selFeatsRegexInds(feature_names_all,regexs)
+
+        if len(inds_self_coupling):
+            inds_non_self_coupling = set(range(len(feature_names_all) )) - set(inds_self_coupling)
+            bad_inds.update( inds_non_self_coupling )
 
     if len(fbands_to_use) < len(fband_names_fine_inc_HFO):
         fbnames_bad = set(fbands_def) - set(fbands_to_use)
@@ -511,6 +638,13 @@ for rawname_ in rawnames:
         print('Removing non-main LFPs ',chnames_bad_LFP)
         bad_inds.update(inds_bad_LFP)
 
+    # removing HFO-related feats if needed
+    if not use_lfp_HFO:
+        regexs = [ '.*HFO.*' ]
+        inds_HFO = utsne.selFeatsRegexInds(feature_names_all, regexs, unique=1)
+        bad_inds.update( inds_HFO )
+
+    ############# for HisrchPt2011 only
     # collecting indices of all msrc that we have used
     regex = 'msrc._([0-9]+)'
     res = []
@@ -530,12 +664,8 @@ for rawname_ in rawnames:
         regexs = [ '.*msrc.{}.*'.format(ind) for ind in msrc_inds_undesired]
         inds_bad_src = utsne.selFeatsRegexInds(feature_names_all, regexs, unique=1)
         bad_inds.update(inds_bad_src)
+    #################### end
 
-    # removing HFO-related feats if needed
-    if not use_lfp_HFO:
-        regexs = [ '.*HFO.*' ]
-        inds_HFO = utsne.selFeatsRegexInds(feature_names_all, regexs, unique=1)
-        bad_inds.update( inds_HFO )
 
     # keeping good features
     print('Removing {} features out of {}'.format( len(bad_inds) , len(feature_names_all) ) )
@@ -560,57 +690,113 @@ assert np.all ( [ (set(featns) == set(good_feats) ) for featns in feature_names_
 featnames = feature_names_pri[0]  # already filtered
 
 ##################################################
+side_switch_happened_pri = [ fi.get('side_switched',False) for fi in feat_info_pri ]
 
-#main_side_let = 'L'
-int_type_pri = ['notrem_{}'.format(main_side[0].upper() ) for main_side in main_side_pri  ]
+if len(set(main_side_pri)  ) > 1:
+    print('we have datasets with different main sides here! Remapping was done ! orig_sides {} switched {}'.
+          format(main_side_pri, side_switch_happened_pri) )
+    #raise ValueError('STOP!  we have datasets with different main sides here! Remapping is needed!')
+
+new_main_side_let = new_main_side[0].upper()
+#int_type_baseline_pri = ['notrem_{}'.format(main_side[0].upper() ) for main_side in main_side_pri  ]
+baseline_int_type = 'notrem_{}'.format(new_main_side[0].upper() )
+
+plot_feat_stat_scatter = 1
+
+if show_plots:
+    from matplotlib.backends.backend_pdf import PdfPages
+    mpl.use('Agg')
+
+    out_name_templ = '_{}_grp{}-{}_{}ML_nr{}_{}chs_nfeats{}_skip{}_wsz{}'
+    out_name = (out_name_templ ).\
+        format(sources_type, src_file_grouping_ind, src_grouping,
+            prefix, len(rawnames),
+            n_channels, sum([len(X) for X in X_pri] ),
+            skip, windowsz)
+    if use_main_LFP_chan:
+        out_name += '_mainLFP'
+
+    str_mods = ','.join(data_modalities)
+    str_feats = ','.join(features_to_use)
+
+    out_name_plot = rn_str + out_name + \
+        'mainLFP{}_HFO{}_{}_{}'.\
+        format(int(use_main_LFP_chan), int(use_lfp_HFO), str_mods, str_feats)
+    pdf= PdfPages(os.path.join(gv.dir_fig, output_subdir, out_name_plot + '.pdf' ))
 
 if rescale_feats:
     print('Rescaling features')
+
+
+    if show_plots and 'feat_stats' in plot_types:
+        int_types_to_stat = [it + '_{}'.format(new_main_side_let) for it in gp.int_types_basic]
+        upre.plotFeatStatsScatter(rawnames, X_pri, int_types_to_stat,
+                            featnames,sfreq,
+                            rawtimes_pri,side_switch_happened_pri, wbd_pri=wbd_pri,
+                                    save_fig=False, separate_by = 'feat_type' )
+        plt.suptitle('Feat stats before rescaling')
+        pdf.savefig()
+        plt.close()
+        gc.collect()
+
     # we need to give movement annotations that contain notrem_ of this main side
-    X_pri = upre.rescaleFeats(rawnames, X_pri, featnames, wbd_pri,
-                    sfreq, rawtimes_pri, int_type_pri = int_type_pri,
-                    main_side_pri = None,
-                    minlen_bins = 5 * sfreq // skip, combine_within='no')
+    import copy
+    if test_mode:
+        X_pri_pre = X_pri
+        X_pri = copy.deepcopy(X_pri)
+    # rescaling happens in-place
+    # we don't need stat file because here we load everything in memory in any
+    # case
+    X_pri_rescaled, indsets, means, stds = upre.rescaleFeats(rawnames, X_pri,
+                    feature_names_pri, wbd_pri,
+                    sfreq, rawtimes_pri, int_type = baseline_int_type,
+                    main_side = None,
+                    side_rev_pri = side_switch_happened_pri,
+                    minlen_bins = 5 * sfreq // skip,
+                    combine_within=scale_feat_combine_type)
+    #X_pri = X_pri_rescaled
+
+    if show_plots and 'feat_stats' in plot_types:
+        int_types_to_stat = [it + '_{}'.format(new_main_side_let) for it in gp.int_types_basic]
+        upre.plotFeatStatsScatter(rawnames, X_pri, int_types_to_stat,
+                            featnames,sfreq,
+                            rawtimes_pri,side_switch_happened_pri, wbd_pri=wbd_pri,
+                                    save_fig=False, separate_by = 'feat_type' )
+        plt.suptitle('Feat stats after rescaling')
+        pdf.savefig()
+        plt.close()
+        gc.collect()
+        if len(plot_types) == 1:
+            pdf.close()
 
 
-
-if len(set(main_side_pri)  ) > 1:
-    print( set(main_side_pri) )
-    raise ValueError('STOP!  we have datasets with different main sides here! Remapping is needed!')
-
-#if len(set(mts_letters_pri)  ) > 1:
-#    print( set(mts_letters_pri) )
-#    raise ValueError('STOP!  we have datasets with different main tremor sides here! Remapping is needed!')
+if len(set(new_main_side_pri)  ) > 1:
+    ws = 'STOP!  we have datasets with different main tremor sides here! Remapping is needed!'
+    print(ws, set(new_main_side_pri) )
+    #raise ValueError(ws)
 
 Xconcat = np.concatenate(X_pri,axis=0)
 
-if do_outliers_discard:
-    out_bininds, qvmult, discard_ratio = \
-        utsne.findOutlierLimitDiscard(Xconcat,discard=discard,qshift=1e-2)
-    good_inds = np.setdiff1d( np.arange(Xconcat.shape[0] ), out_bininds)
-else:
-    good_inds = np.arange(Xconcat.shape[0])    #everything
 
 nbins_total =  sum( [ len(times) for times in rawtimes_pri ] )
 # merge wbds
-cur_zeroth_bin = 0
-wbds = []
-for dati in range(len(X_pri) ):
-    wbd = wbd_pri [dati]
-    times = rawtimes_pri[dati]
-    wbds += [wbd + cur_zeroth_bin]
-    #cur_zeroth_bin += len(times)  NO! because we concat only windows (thus unused end of the window should be lost)
-    cur_zeroth_bin += wbd[1,-1] + skip
-wbd_merged = np.hstack(wbds)
-d = np.diff(wbd_merged, axis=1)
-assert np.min(d)  > 0, d
+#cur_zeroth_bin = 0
+#wbds = []
+#for dati in range(len(X_pri) ):
+#    wbd = wbd_pri [dati]
+#    times = rawtimes_pri[dati]
+#    #cur_zeroth_bin += len(times)  NO! because we concat only windows (thus unused end of the window should be lost)
+#    wbds += [wbd + cur_zeroth_bin]
+#    cur_zeroth_bin += wbd[1,-1] + skip
+#wbd_merged = np.hstack(wbds)
 # collect movement annotations first
 
-side_switch_happened_pri = [ fi.get('side_switched',False) for fi in feat_info_pri ]
-anns, anns_pri, times, dataset_bounds = utsne.concatAnns(rawnames,
+anns, anns_pri, times_concat, dataset_bounds, wbd_merged = utsne.concatAnns(rawnames,
                                                           rawtimes_pri, crop=(crop_start,crop_end),
                                                           side_rev_pri = side_switch_happened_pri,
-                                                         wbd_pri = wbd_pri, sfreq=sfreq)
+                                                         wbd_pri = wbd_pri, sfreq=sfreq, ret_wbd_merged=1)
+print('times_concat end {} wbd end {}'.format(times_concat[-1] * sfreq, wbd_merged[1,-1] ) )
+
 ivalis = utils.ann2ivalDict(anns)
 ivalis_tb_indarrays_merged = \
     utils.getWindowIndicesFromIntervals(wbd_merged,ivalis,
@@ -620,17 +806,34 @@ ivalis_tb_indarrays_merged = \
 #ivalis_tb, ivalis_tb_indarrays = utsne.getAnnBins(ivalis, Xtimes, nedgeBins, sfreq, skip, windowsz, dataset_bounds)
 #ivalis_tb_indarrays_merged = utsne.mergeAnnBinArrays(ivalis_tb_indarrays)
 
+##############################  Artifacts ####################################
 
+#######################   naive artifacts
+bininds_concat_good = np.arange(Xconcat.shape[0])    #everything
+if do_outliers_discard:
+    artif_naive_bininds, qvmult, discard_ratio = \
+        utsne.findOutlierLimitDiscard(Xconcat,discard=discard,qshift=1e-2)
+    bininds_concat_good = np.setdiff1d( bininds_concat_good, artif_naive_bininds)
+
+    print('Outliers selection result: qvmult={:.3f}, len(artif_naive_bininds)={} of {} = {:.3f}s, discard_ratio={:.3f} %'.
+        format(qvmult, len(artif_naive_bininds), Xconcat.shape[0],
+            len(artif_naive_bininds)/sfreq,  100 * discard_ratio ) )
+
+
+#######################   artifacts by hads
+ann_MEGartif_prefix_to_use = '_ann_MEGartif_flt'
 # collect artifacts now annotations first
 suffixes = []
 if 'LFP' in data_modalities:
-    suffixes +=  ['_ann_LFPartif']
+    suffixes += [ '_ann_LFPartif' ]
 if 'msrc' in data_modalities:
-    suffixes += ['_ann_MEGartif']
+    suffixes += [ ann_MEGartif_prefix_to_use ]
 anns_artif, anns_artif_pri, times_, dataset_bounds_ = \
     utsne.concatAnns(rawnames,rawtimes_pri, suffixes,crop=(crop_start,crop_end),
                  allow_short_intervals=True, side_rev_pri =
                  side_switch_happened_pri, wbd_pri = wbd_pri, sfreq=sfreq)
+wrong_brain_side_let = new_main_side[0].upper()  # ipsilater is wrong
+anns_artif = utils.removeAnnsByDescr(anns_artif, 'BAD_LFP{}'.format(wrong_brain_side_let)  )
 ivalis_artif = utils.ann2ivalDict(anns_artif)
 ivalis_artif_tb_indarrays_merged = \
     utils.getWindowIndicesFromIntervals(wbd_merged,ivalis_artif,
@@ -640,9 +843,6 @@ ivalis_artif_tb_indarrays_merged = \
 #ivalis_artif_tb, ivalis_artif_tb_indarrays = utsne.getAnnBins(ivalis_artif, Xtimes,
 #                                                            nedgeBins, sfreq, skip, windowsz, dataset_bounds)
 #ivalis_artif_tb_indarrays_merged = utsne.mergeAnnBinArrays(ivalis_artif_tb_indarrays)
-####################
-
-test_mode = int(rawnames[0][1:3]) > 10
 Xconcat_artif_nan  = utils.setArtifNaN(Xconcat, ivalis_artif_tb_indarrays_merged, featnames,
                                        ignore_shape_warning=test_mode)
 isnan = np.isnan( Xconcat_artif_nan)
@@ -650,64 +850,72 @@ if np.sum(isnan):
     artif_bininds = np.where( isnan )[0]
 else:
     artif_bininds = []
-bininds_noartif = np.setdiff1d( np.arange(len(Xconcat) ) , artif_bininds)
+#bininds_noartif = np.setdiff1d( np.arange(len(Xconcat) ) , artif_bininds)
 num_nans = np.sum(np.isnan(Xconcat_artif_nan), axis=0)
 print('Max artifact NaN percentage is {:.4f}%'.format(100 * np.max(num_nans)/Xconcat_artif_nan.shape[0] ) )
 
-if artifact_handling == 'impute':
-    imp_mean = SimpleImputer(missing_values=np.nan, strategy='constant', fill_value=0.)
-    imp_mean.fit(Xconcat_artif_nan)
-    Xconcat_imputed = imp_mean.transform(Xconcat_artif_nan)
+imp_mean = SimpleImputer(missing_values=np.nan, strategy='constant', fill_value=0.)
+imp_mean.fit(Xconcat_artif_nan)
+Xconcat_imputed = imp_mean.transform(Xconcat_artif_nan)
+#Xconcat_to_fit is NOT about removing points, it is used TOGETHER with bininds_concat_good
+if artif_handling_before_fit == 'impute':
+    # replacing artifact-related NaNs with zeros
+    # mean should be zero since we centered features earlier
 
-if artifact_handling == 'impute':
+    #we DO NOT change bininds_concat_good here
     Xconcat_to_fit = Xconcat_imputed
-    #Xconcat_all    = Xconcat_imputed
-elif artifact_handling == 'discard':
+elif artif_handling_before_fit == 'discard':
+    bininds_concat_good = np.setdiff1d(bininds_concat_good, artif_bininds)
     Xconcat_to_fit = Xconcat
-    np.setdiff1d(good_inds, artif_bininds)
+
+    assert not np.any( np.isnan(Xconcat[bininds_concat_good] ) )
+else:
+    raise ValueError('wrong value of artif_handling_before_fit = {}'.format(artif_handling_before_fit) )
     #Xconcat_all    = Xconcat
-#elif artifact_handling == 'do_nothing':
+#elif artif_handling_before_fit == 'do_nothing':
 #    #Xconcat_to_fit = Xconcat
 #    Xconcat_all    = Xconcat
 
+# collect all marked behavioral states
 lst =  [inds for inds in ivalis_tb_indarrays_merged.values()]
 all_interval_inds = np.hstack(lst  )
 unset_inds = np.setdiff1d(np.arange(len(Xconcat)), all_interval_inds)
 
 # this is the most bruteforce way when I join all artifacts
-lst2 =  [inds for inds in ivalis_artif_tb_indarrays_merged.values()]
-if len(lst2):
-    all_interval_artif_inds = np.hstack(lst2  )
-else:
-    all_interval_artif_inds = np.array([])
+#lst2 =  [inds for inds in ivalis_artif_tb_indarrays_merged.values()]
+#if len(lst2):
+#    all_interval_artif_inds = np.hstack(lst2  )
+#else:
+#    all_interval_artif_inds = np.array([])
 
-#sys.exit(0)
-#unset_inds = np.setdiff1d(unset_inds, all_interval_artif_inds)
-
-remove_unlabeled = 1
-if remove_unlabeled:
+remove_pts_unlabeled_beh_states = 1
+if remove_pts_unlabeled_beh_states:
     #do somthing
-    good_inds_ = np.setdiff1d( good_inds, unset_inds)
-    print('Removing {} unlabeled pts before PCA'.format(len(good_inds) - len(good_inds_) ) )
-    good_inds = good_inds_
+    bininds_concat_good_yes_label = np.setdiff1d( bininds_concat_good, unset_inds)
+    print('Removing {} unlabeled pts before PCA'.
+          format(len(bininds_concat_good) - len(bininds_concat_good_yes_label) ) )
+    bininds_concat_good = bininds_concat_good_yes_label
 else:
     print('Warning not removing unlabeled before PCA')
 
-print('Outliers selection result: qvmult={:.3f}, len(out_bininds)={} of {} = {:.3f}s, discard_ratio={:.3f} %'.
-    format(qvmult, len(out_bininds), Xconcat_imputed.shape[0],
-           len(out_bininds)/sfreq,  100 * discard_ratio ) )
+
+featnames_nice = utils.nicenFeatNames(featnames,
+                                    roi_labels,srcgrouping_names_sorted)
 
 if load_only:
     print('Got load_only, exiting!')
+    #if show_plots:
+    #    pdf.close()
     sys.exit(0)
 
-# good_inds  are inds of bin where I have thrown away outliers and removed
+# bininds_concat_good  are inds of bin where I have thrown away outliers and removed
 # unlabeled
 
-print('Input PCA dimension ', (len(good_inds),Xconcat_imputed.shape[1]) )
+print('Input PCA dimension ', (len(bininds_concat_good),Xconcat.shape[1]) )
 pca = PCA(n_components=nPCA_comp)
-Xconcat_good = Xconcat_to_fit[good_inds]
-pca.fit(Xconcat_good )   # fit to not-outlier data
+Xsubset_to_fit = Xconcat_to_fit[bininds_concat_good]
+#Xsubset_to_fit = Xsubset_to_fit
+pca.fit(Xsubset_to_fit )   # fit to not-outlier data
 pcapts = pca.transform(Xconcat_imputed)  # transform outliers as well
 
 print('Output PCA dimension {}, total explained variance proportion {:.4f}'.
@@ -716,10 +924,59 @@ print('PCA First several var ratios ',pca.explained_variance_ratio_[:5])
 
 nfeats_per_comp_LDA_strongred = max(pcapts.shape[1] // 10, 5)
 
+subjs_analyzed = upre.getRawnameListStructure(rawnames)
+sind_strs = list(sorted( (subjs_analyzed.keys()) ) )
+sind_join_str = ','.join(sind_strs)
 
-featnames_nice = utils.nicenFeatNames(featnames,
-                                    roi_labels,srcgrouping_names_sorted)
-n_splits = 4
+############################################
+lens_pri = [ Xcur.shape[0] for Xcur in X_pri ]
+indst = 0
+indend = lens_pri[0]
+dataset_bounds_Xbins = [] #skipped bin indices
+for rawind,rawname_ in enumerate(rawnames):
+    sl = slice(indst,indend)
+    dataset_bounds_Xbins += [ (indst,indend) ]
+
+    if rawind+1 < len(lens_pri):
+        indst += lens_pri[rawind]
+        indend += lens_pri[rawind+1]
+
+info = {}
+info['n_channels_featfile'] = 7
+info['features_to_use'] = features_to_use
+info['data_modalities'] = data_modalities
+info['msrc_inds' ]  = msrc_inds
+info['use_main_LFP_chan'] = use_main_LFP_chan
+info['use_lfp_HFO'] = use_lfp_HFO
+info['nPCA_comp'] = nPCA_comp
+info['feat_fnames'] = feat_fnames
+info['selected_feat_inds_pri'] = selected_feat_inds_pri
+info['good_feat_inds_pri'] = selected_feat_inds_pri  # for compatibility only
+info['artif_naive_bininds'] = artif_naive_bininds
+info['cross_couplings_only'] = cross_couplings_only
+info['qvmult'] = qvmult
+info['discard_ratio'] = discard_ratio
+info['prefix'] = prefix
+info['use_low_var_feats_for_heavy_fits'] = use_low_var_feats_for_heavy_fits
+info['rescale_feats'] = rescale_feats
+info['do_XGB'] = do_XGB
+info['skip_XGB_aux_intervals'] =  skip_XGB_aux_intervals
+info['sources_type'] = sources_type
+info['LFP_related_only'] = LFP_related_only
+info['fbands_to_use'] = LFP_related_only
+info['remove_crossLFP'] = remove_crossLFP
+info['data_modalities'] = data_modalities
+info['int_types_to_use'] = int_types_to_use
+info['groupings_to_use'] = groupings_to_use
+info['src_grouping'] = src_grouping
+info['src_grouping_fn'] = src_file_grouping_ind
+# I'd prefer to save both the entire list and the feat fname most related
+# to the current output
+info['fname_feat_full'] = fname_feat_full_pri[rawind] # don't remove!! althought before Jan 25 it is wrong :(
+info['fname_feat_full_pri'] = fname_feat_full_pri
+info['artif_handling'] = artif_handling_before_fit
+PCA_info = info
+
 
 if do_LDA:
     # don't change the order!
@@ -742,11 +999,18 @@ if do_LDA:
                 print('Skipping grouping {} for int types {}'.format(grouping,int_types_key) )
                 lda_output_pit[int_types_key] = None
                 continue
+            if int_types_key == 'trem_vs_quiet' and 'merge_nothing' in groupings_to_use and \
+                    grouping_key == 'merge_all_not_trem':
+                print("We don't want to compute the same thing twice, so skipping {},{}".
+                      format(grouping_key, int_types_key) )
+                continue
+
             int_types_to_distinguish = gp.int_types_to_include[int_types_key]
 
-            print('------')
+            print('---------------------------------------------')
             print('Start classif (grp {}, its {})'.format(grouping_key, int_types_key))
 
+            # distinguishing datasets
             if int_types_key in gp.int_type_datset_rel:
                 class_labels = np.zeros( len(Xconcat_imputed) , dtype=int )
 
@@ -795,7 +1059,7 @@ if do_LDA:
                         indend += lens_pri[rawi+1]
                 # we should have labeled everything
                 assert np.sum( class_labels  ==0) == 0
-                class_labels_good = class_labels[good_inds]
+                class_labels_good = class_labels[bininds_concat_good]
 
                 rawind_to_test = 0
                 sind_str,m,t = utils.getParamsFromRawname(rawnames[rawind_to_test] )
@@ -809,27 +1073,26 @@ if do_LDA:
                     raise ValueError('wrong int_types_key {}'.format(int_types_key) )
                 class_to_check = key_cur
 
-                Xconcat_good_cur = Xconcat_good
+                Xconcat_good_cur = Xsubset_to_fit
             else:
-                sides_hand = [main_side[0].upper() ]
-                rem_neut = 1
+                sides_hand = [new_main_side[0].upper() ]
                 class_labels, class_labels_good, revdict, class_ids_grouped = \
                     utsne.makeClassLabels(sides_hand, grouping,
                                         int_types_to_distinguish,
-                                        ivalis_tb_indarrays_merged, good_inds,
-                                        len(Xconcat_imputed), rem_neut )
-                if rem_neut:
+                                        ivalis_tb_indarrays_merged, bininds_concat_good,
+                                        len(Xconcat_imputed), discard_remaining_int_types_during_fit )
+                if discard_remaining_int_types_during_fit:
                     neq = class_labels_good != gp.class_id_neut
                     inds_not_neut = np.where( neq)[0]
-                    Xconcat_good_cur = Xconcat_good[inds_not_neut]
+                    Xconcat_good_cur = Xsubset_to_fit[inds_not_neut]
                 else:
-                    Xconcat_good_cur = Xconcat_good
+                    Xconcat_good_cur = Xsubset_to_fit
 
                 #this is a string label
-                class_to_check = '{}_{}'.format(int_types_to_distinguish[0], main_side[0].upper() )
+                class_to_check = '{}_{}'.format(int_types_to_distinguish[0], new_main_side[0].upper() )
             class_ind_to_check = class_ids_grouped[class_to_check]
 
-            counts = utsne.countClassLabels(class_labels_good, class_ids_grouped)
+            counts = utsne.countClassLabels(class_labels_good, class_ids_grouped=None, revdict=revdict)
             print('bincounts are ',counts)
             if counts[class_to_check] < 10:
                 cid = class_ids_grouped[class_to_check]
@@ -844,7 +1107,8 @@ if do_LDA:
                 continue
 
             print('  Computing MI')
-            MI_per_feati = utsne.getMIs(Xconcat_good_cur,class_labels_good,class_ind_to_check)
+            MI_per_feati = utsne.getMIs(Xconcat_good_cur,class_labels_good,class_ind_to_check,
+                                        n_jobs=n_jobs_XGB)
             high_to_low_MIinds = np.argsort(MI_per_feati)[::-1]
 
             n_MI_to_show = 8
@@ -902,6 +1166,9 @@ if do_LDA:
             lda_analysis_versions[lda_version_name] = res_all_feats
             gc.collect()
 
+            # labels_pred = lda.predict(Xconcat_good_cur)
+            # conf_mat = confusion_matrix(y_true, y_pred)
+
             if search_best_LFP and (not use_main_LFP_chan) and ('LFP' in data_modalities):
                 for chn_LFP in chnames_LFP:
 
@@ -913,13 +1180,13 @@ if do_LDA:
                     feat_inds_good = list(sorted(feat_inds_good) )
 
                     lda_version_name = 'all_present_features_but_{}'.format(chn_LFP)
-                    res_all_feats =\
+                    res_cur =\
                         utsne.calcLDAVersions(Xconcat_good_cur[:,feat_inds_good],
                                           Xconcat_imputed[:,feat_inds_good],
                                           class_labels_good, n_components_LDA,
                                           class_ind_to_check, revdict,
                                           calcName=lda_version_name,n_splits=n_splits)
-                    lda_analysis_versions[lda_version_name] = res_all_feats
+                    lda_analysis_versions[lda_version_name] = res_cur
                     gc.collect()
 
             # look at different feature subsets based on q threshold from PCA
@@ -928,12 +1195,12 @@ if do_LDA:
                 pca_derived_featinds = pca_derived_featinds_perthr[thri]
                 if len(pca_derived_featinds) == 0:
                     continue
-                res_all_feats = utsne.calcLDAVersions(Xconcat_good_cur[:,pca_derived_featinds],
+                res_cur = utsne.calcLDAVersions(Xconcat_good_cur[:,pca_derived_featinds],
                                                     Xconcat_imputed[:,pca_derived_featinds],
                                                     class_labels_good,
                                     n_components_LDA, class_ind_to_check, revdict,
                                             calcName=lda_version_name,n_splits=n_splits)
-                lda_analysis_versions[lda_version_name] = res_all_feats
+                lda_analysis_versions[lda_version_name] = res_cur
                 gc.collect()
 
 
@@ -944,45 +1211,40 @@ if do_LDA:
                 q=0.8, printLog = 0)
             inds_important, strong_inds_pc, strongest_inds_pc  = r
 
-
             lda_version_name =  'strongest_features_LDA_opinion'
-            res_strongest_LDA_feats = utsne.calcLDAVersions(Xconcat_good_cur[:,inds_important],
+            res_cur = utsne.calcLDAVersions(Xconcat_good_cur[:,inds_important],
                                   Xconcat_imputed[:,inds_important],
                                   class_labels_good,
                                   n_components_LDA, class_ind_to_check,
                                   revdict, calcName=lda_version_name,n_splits=n_splits)
-            lda_analysis_versions[lda_version_name] = res_strongest_LDA_feats
+            lda_analysis_versions[lda_version_name] = res_cur
             gc.collect()
 
+            #######################
             ldaobj = LinearDiscriminantAnalysis(n_components=n_components_LDA)
             ldaobj.fit(X_for_heavy, class_labels_for_heavy)
             sortinds_LDA = np.argsort( np.max(np.abs(ldaobj.scalings_ ), axis=1) )
             perfs_LDA_featsearch = utsne.selMinFeatSet(ldaobj, X_for_heavy,
-                                                       class_labels_for_heavy,
-                                class_ind_to_check,sortinds_LDA,n_splits=n_splits,
-                                                       verbose=2, check_CV_perf=True, nfeats_step=5,
-                                                       nsteps_report=5)
+                            class_labels_for_heavy, class_ind_to_check,sortinds_LDA,
+                                n_splits=n_splits, verbose=2, check_CV_perf=True, nfeats_step=5,
+                                                       nsteps_report=5, stop_if_boring=False)
             _, best_inds_LDA , _, _ =   perfs_LDA_featsearch[-1]
             best_inds_LDA = feat_subset_heavy[best_inds_LDA]
             gc.collect()
 
 
             lda_version_name =  'strongest_features_LDA_selMinFeatSet'
-            res_strongest_LDA_feats = utsne.calcLDAVersions(Xconcat_good_cur[:,best_inds_LDA],
+            res_cur = utsne.calcLDAVersions(Xconcat_good_cur[:,best_inds_LDA],
                                   Xconcat_imputed[:,best_inds_LDA],
                                   class_labels_good,
                                   n_components_LDA, class_ind_to_check,
                                   revdict, calcName=lda_version_name,n_splits=n_splits)
-            lda_analysis_versions[lda_version_name] = res_strongest_LDA_feats
+            lda_analysis_versions[lda_version_name] = res_cur
             gc.collect()
 
             ##################
-            if do_XGB:
-                n_jobs_XGB = None
-                if force_single_core:
-                    n_jobs_XGB = 1
-                else:
-                    n_jobs_XGB = mpr.cpu_count()-gp.n_free_cores
+            do_XGB_cur =  do_XGB and not (int_types_key in gp.int_type_datset_rel and skip_XGB_aux_intervals  )
+            if do_XGB_cur:
 
                 from sklearn import preprocessing
                 le = preprocessing.LabelEncoder()
@@ -1003,25 +1265,30 @@ if do_LDA:
                 sortinds = np.argsort( importance )
                 gc.collect()
 
-                perfs_XGB = utsne.selMinFeatSet(model,X_for_heavy,class_labels_good_for_classif,
-                                    list(le.classes_).index(class_ind_to_check),sortinds,n_splits=n_splits,
+                step_XGB = min(max_XGB_step_nfeats, max(5, X_for_heavy.shape[1] // 20)  )
+                perfs_XGB = utsne.selMinFeatSet(model, X_for_heavy, class_labels_good_for_classif,
+                                    list(le.classes_).index(class_ind_to_check), sortinds,
+                                                n_splits=n_splits,
                                                 add_fitopts=add_fitopts, add_clf_creopts=add_clf_creopts,
-                                                check_CV_perf=True, nfeats_step=max(5, X_for_heavy.shape[1] // 20),
-                                                verbose=2, max_nfeats = X_for_heavy.shape[1] // 2)
+                                                check_CV_perf=True, nfeats_step= step_XGB,
+                                                verbose=2, max_nfeats = X_for_heavy.shape[1] // 2,
+                                                ret_clf_obj=True)
                 gc.collect()
 
                 perf_inds_to_print = [0,1,2,-1]
                 for perf_ind in perf_inds_to_print:
                     if perf_ind >= len(perfs_XGB):
                         continue
-                    _, best_inds_XGB , perf_nocv, res_aver =   perfs_XGB[perf_ind]
+                    _, inds_XGB , perf_nocv, res_aver, clfs_CV =   perfs_XGB[perf_ind]
                     print('XGB CV perf on {} feats : sens {:.2f} spec {:.2f} F1 {:.2f}'.format(
-                        len(best_inds_XGB), res_aver[0], res_aver[1], res_aver[2] ) )
-                _, best_inds_XGB , perf_nocv, res_aver =   perfs_XGB[-1]
-                best_inds_XGB = feat_subset_heavy[best_inds_XGB]
+                        len(inds_XGB), res_aver[0], res_aver[1], res_aver[2] ) )
+                _, best_inds_XGB_among_heavy , perf_nocv, res_aver, clfs_best_CV =   perfs_XGB[-1]
+                best_inds_XGB = feat_subset_heavy[best_inds_XGB_among_heavy]
 
                 best_nice = list( np.array(featnames_nice) [best_inds_XGB] )
-                print('XGB best feats ',best_nice )
+                n_XGB_feats_to_print = 20
+                print('XGB best feats (best {}, descending importance)={}'.
+                      format(n_XGB_feats_to_print,best_nice[::-1][:n_XGB_feats_to_print] ) )
 
                 pca_XGBfeats = PCA(n_components=nPCA_comp )
                 pca_XGBfeats.fit( Xconcat_good_cur[:,best_inds_XGB])
@@ -1045,14 +1312,14 @@ if do_LDA:
             #    format(grouping_key, int_types_key, class_to_check,sens,spec, sens_red,spec_red))
 
 
-            if do_XGB:
+            if do_XGB_cur:
                 lda_version_name =  'strongest_features_XGB_opinion'
-                res_strongest_XGB_feats = utsne.calcLDAVersions(Xconcat_good_cur[:,best_inds_XGB],
+                res_cur = utsne.calcLDAVersions(Xconcat_good_cur[:,best_inds_XGB],
                                     Xconcat_imputed[:,best_inds_XGB],
                                     class_labels_good,
                                     n_components_LDA, class_ind_to_check,
                                     revdict, calcName=lda_version_name,n_splits=n_splits)
-                lda_analysis_versions[lda_version_name] = res_all_feats
+                lda_analysis_versions[lda_version_name] = res_cur
                 gc.collect()
 
             #---------- again, not much reduction
@@ -1068,7 +1335,7 @@ if do_LDA:
 
             # in strong_inds_pc, the last one in each array is the strongest
             # LDA on XGB-selected feats
-            if do_XGB:
+            if do_XGB_cur:
                 perf_red_XGB = lda_analysis_versions['strongest_features_XGB_opinion']['fit_to_all_data']['perfs']
             else:
                 perf_red_XGB = None
@@ -1081,6 +1348,7 @@ if do_LDA:
                             'perf':lda_analysis_versions['all_present_features']['fit_to_all_data']['perfs'],
                             'perf_red':lda_analysis_versions['strongest_features_LDA_opinion']['fit_to_all_data']['perfs'],
                             'perf_red_XGB':perf_red_XGB,
+                           'perfs_LDA_featsearch':perfs_LDA_featsearch,
                         'labels_good':class_labels_good,
                             'class_labels':class_labels,
                            'highest_meaningful_thri':highest_meaningful_thri,
@@ -1092,22 +1360,114 @@ if do_LDA:
                         'strongest_inds_pc':strongest_inds_pc,
                             'XGBobj':model,
                             'strong_inds_XGB':best_inds_XGB,
+                            'strong_inds_LDA':best_inds_LDA,
                             'perfs_XGB': perfs_XGB,
                             'pca_xgafeats': pca_XGBfeats,
                            'MI_per_feati':MI_per_feati }
 
-            out_name_templ = '_{}_grp{}-{}_{}PCA_nr{}_{}chs_nfeats{}_pcadim{}_skip{}_wsz{}__({},{})'
-            out_name = (out_name_templ ).\
-                format(sources_type, src_file_grouping_ind, src_grouping,
-                    prefix, len(rawnames),
-                    n_channels, Xconcat_imputed.shape[1],
-                    pcapts.shape[1], skip, windowsz,grouping_key,int_types_key)
-            if use_main_LFP_chan:
-                out_name += '_mainLFP'
-            fname_PCA_full_intermed = os.path.join( data_dir, '_{}{}{}.npz'.format(len(rawnames),rawnames[0],out_name))
+            #out_name_templ = '_{}_grp{}-{}_{}ML_nr{}_{}chs_nfeats{}_pcadim{}_skip{}_wsz{}__({},{})'
+            #out_name = (out_name_templ ).\
+            #    format(sources_type, src_file_grouping_ind, src_grouping,
+            #        prefix, len(rawnames),
+            #        n_channels, Xconcat_imputed.shape[1],
+            #        pcapts.shape[1], skip, windowsz,grouping_key,int_types_key)
+            #fname_ML_full_intermed = os.path.join( gv.data_dir, output_subdir,
+            #                                       '_{}{}.npz'.format(sind_join_str,out_name))
+
+            out_name =  utils.genMLresFn(rawnames,sources_type, src_file_grouping_ind, src_grouping,
+                    prefix, n_channels, Xconcat_imputed.shape[1],
+                    pcapts.shape[1], skip, windowsz, use_main_LFP_chan, grouping_key,int_types_key )
+
+            fname_ML_full_intermed = os.path.join( gv.data_dir, output_subdir, out_name)
+
+            featsel_shap_res = {}
+            results_cur['featsel_shap_res'] = featsel_shap_res
+            # collect small non-system local variables
+            #vv = locals().items()
+            #for name,val in vv:
+            #    if name[0] == '_':
+            #        continue
+            #    simple_types = (int,float,str,bool)
+            #    is_simple_type = isinstance(val,simple_types)
+            #    is_good_list = isinstance(val,(list,np.ndarray)) and \
+            #        ((len(val) == 0) or isinstance(val[0], simple_types) )
+            #    is_good_dict = isinstance(val,(dict)) and np.all( [isinstance(dval, simple_types) for dval in val.values()] )
+            #    if is_simple_type or is_good_list or is_good_dict:
+            #        print(name, type(val))
+
+            # save first without Shapley values (because they can take too long
+            # to compute and I want output anyway) -- somehow it does not work
+            # on HPC :(, I get only first file
             if save_output:
-                print('Saving intermediate result to {}'.format(fname_PCA_full_intermed) )
-                np.savez(fname_PCA_full_intermed, results_cur=results_cur)
+                print('Saving intermediate result to {}'.format(fname_ML_full_intermed) )
+                np.savez(fname_ML_full_intermed, results_cur=results_cur,
+                         Xconcat_good_cur = Xconcat_good_cur, class_labels_good=class_labels_good,
+                        selected_feat_inds_pri=dict(enumerate(selected_feat_inds_pri) ),
+                        feature_names_filtered_pri = dict(enumerate(feature_names_pri)),
+                          bininds_good = bininds_concat_good,
+                         feat_info_pri = dict(enumerate(feat_info_pri)),
+                        rawtimes_pri=dict(enumerate(rawtimes_pri)),
+                         Xtimes_pri=dict(enumerate(Xtimes_pri)),
+                        wbd_pri=dict(enumerate(wbd_pri)),
+                        pcapts = pcapts, pcaobj=pca,
+                        X_imputed=Xconcat_imputed,
+                         cmd=(opts,args), pars=pars )
+            else:
+                print('Skipping saving intermediate result')
+
+            for fsh in featsel_shap:
+                shap_values = None
+                if fsh == 'XGB':
+                    import shap
+                    #X = Ximp_per_raw[rncur][prefix]
+                    #X_to_fit = X[gi]
+                    #print(X_to_fit.shape)
+
+                    #X_to_analyze_feat_sign = Xconcat_good_cur[:,best_inds_XGB]
+                    X_to_analyze_feat_sign = X_for_heavy[:,best_inds_XGB_among_heavy]
+                    featnames_sel = list( np.array(featnames_nice)[best_inds_XGB]  )
+
+                    #
+                    nsamples = max(200, X_to_analyze_feat_sign.shape[0] // 10 )
+                    Xsubset = shap.utils.sample(X_to_analyze_feat_sign, nsamples)
+
+                    print('Start computing Shapley values using Xsubset with shape',Xsubset.shape)
+
+                    clf_bestfeats = XGBClassifier(**add_clf_creopts)
+                    #clf_bestfeats.fit(X_for_heavy[:,best_inds_XGB_among_heavy],
+                    #                  class_labels_good_for_classif, **add_fitopts)
+                    clf_bestfeats.fit(X_to_analyze_feat_sign,
+                                      class_labels_good_for_classif, **add_fitopts)
+
+                    #try:
+                    explainer= shap.Explainer(clf_bestfeats.predict, Xsubset,feature_names=featnames_sel)
+                    #explainer= shap.Explainer(clf_bestfeats.predict, Xsubset)
+                    shap_values = explainer(X_to_analyze_feat_sign)
+                    #except ValueError as e:
+                    #    print(str(e) )
+                    #    shap_values = None
+                else:
+                    raise ValueError('not implemented')
+
+                if shap_values is not None:
+                    featsel_shap_res[fsh] = shap_values
+
+            if save_output:
+                results_cur['featsel_shap_res'] = featsel_shap_res
+
+                print('Saving intermediate result to {}'.format(fname_ML_full_intermed) )
+                np.savez(fname_ML_full_intermed, results_cur=results_cur,
+                         Xconcat_good_cur = Xconcat_good_cur, class_labels_good=class_labels_good,
+                        selected_feat_inds_pri=dict(enumerate(selected_feat_inds_pri) ),
+                        feature_names_filtered_pri = dict(enumerate(feature_names_pri)),
+                          bininds_good = bininds_concat_good,
+                         feat_info_pri = dict(enumerate(feat_info_pri)),
+                        rawtimes_pri=dict(enumerate(rawtimes_pri)),
+                         Xtimes_pri=dict(enumerate(Xtimes_pri)),
+                        wbd_pri=dict(enumerate(wbd_pri)),
+                        pcapts = pcapts, pcaobj=pca,
+                        X_imputed=Xconcat_imputed,
+                         cmd=(opts,args), pars=pars )
             else:
                 print('Skipping saving intermediate result')
 
@@ -1125,136 +1485,90 @@ else:
 
 
 ###### Save result
-lens_pri = [ Xcur.shape[0] for Xcur in X_pri ]
 
-indst = 0
-indend = lens_pri[0]
-# save PCA output separately
-for rawind,rawname_ in enumerate(rawnames):
-    # note that we use number of features that we actually used, not that we
-    # read
+if not single_fit_type_mode:
+    # save PCA output separately
+    for rawind,rawname_ in enumerate(rawnames):
+        # note that we use number of features that we actually used, not that we
+        # read
 
-    str_feats = ','.join(features_to_use)
-    str_mods = ','.join(data_modalities)
-    #use_lfp_HFO
-    #use_main_LFP_chan
+        str_feats = ','.join(features_to_use)
+        str_mods = ','.join(data_modalities)
+        #use_lfp_HFO
+        #use_main_LFP_chan
 
-    # I don't include rawname in template because I want to use it for PDF name
-    # as well
-    out_name_templ = '_{}_grp{}-{}_{}PCA_nr{}_{}chs_nfeats{}_pcadim{}_skip{}_wsz{}'
-    out_name = (out_name_templ ).\
-        format(sources_type, src_file_grouping_ind, src_grouping,
-               prefix, len(rawnames),
-               n_channels, Xconcat_imputed.shape[1],
-               pcapts.shape[1], skip, windowsz)
-    if use_main_LFP_chan:
-        out_name += '_mainLFP'
-    fname_PCA_full = os.path.join( data_dir, '{}{}.npz'.format(rawname_,out_name))
-
-    info = {}
-    info['n_channels_featfile'] = 7
-    info['features_to_use'] = features_to_use
-    info['data_modalities'] = data_modalities
-    info['msrc_inds' ]  = msrc_inds
-    info['use_main_LFP_chan'] = use_main_LFP_chan
-    info['use_lfp_HFO'] = use_lfp_HFO
-    info['nPCA_comp'] = nPCA_comp
-    info['feat_fnames'] = feat_fnames
-    info['selected_feat_inds_pri'] = selected_feat_inds_pri
-    info['good_feat_inds_pri'] = selected_feat_inds_pri  # for compatibility only
-    info['out_bininds'] = out_bininds
-    info['cross_couplings_only'] = cross_couplings_only
-    info['qvmult'] = qvmult
-    info['discard_ratio'] = discard_ratio
-    info['prefix'] = prefix
-    info['use_low_var_feats_for_heavy_fits'] = use_low_var_feats_for_heavy_fits
-    info['rescale_feats'] = rescale_feats
-    info['do_XGB'] = do_XGB
-    info['sources_type'] = sources_type
-    info['LFP_related_only'] = LFP_related_only
-    info['fbands_to_use'] = LFP_related_only
-    info['remove_crossLFP'] = remove_crossLFP
-    info['features_to_use'] = features_to_use
-    info['data_modalities'] = data_modalities
-    info['int_types_to_use'] = int_types_to_use
-    info['groupings_to_use'] = groupings_to_use
-    info['src_grouping'] = src_grouping
-    info['src_grouping_fn'] = src_file_grouping_ind
-    # I'd prefer to save both the entire list and the feat fname most related
-    # to the current output
-    info['fname_feat_full'] = fname_feat_full
-    info['fname_feat_full_pri'] = fname_feat_full_pri
+        # I don't include rawname in template because I want to use it for PDF name
+        # as well
+        out_name_templ = '_{}_grp{}-{}_{}PCA_nr{}_{}chs_nfeats{}_pcadim{}_skip{}_wsz{}'
+        out_name = (out_name_templ ).\
+            format(sources_type, src_file_grouping_ind, src_grouping,
+                prefix, len(rawnames),
+                n_channels, Xconcat_imputed.shape[1],
+                pcapts.shape[1], skip, windowsz)
+        if use_main_LFP_chan:
+            out_name += '_mainLFP'
+        fname_PCA_full = os.path.join( gv.data_dir, output_subdir, '{}{}.npz'.format(rawname_,out_name))
 
 
-    lda_output_pg_cur = copy.deepcopy(lda_output_pg)
-    sl = slice(indst,indend)
-    print(sl, sl.stop - sl.start)
-    assert (sl.stop-sl.start) == len(Xtimes_pri[rawind])
-    assert (sl.stop-sl.start) == len(X_pri[rawind])
 
-    # we need to restrict the LDA output to the right index range
-    #for grouping_key in groupings_to_use:
-    for grouping_key in lda_output_pg_cur:
-        grouping = gp.groupings[grouping_key]
+        lda_output_pg_cur = copy.deepcopy(lda_output_pg)
+        dataset_bounds_Xbins
+        indst,indend = dataset_bounds_Xbins[rawind]
+        sl = slice(indst,indend)
+        print(sl, sl.stop - sl.start)
+        assert (sl.stop-sl.start) == len(Xtimes_pri[rawind])
+        assert (sl.stop-sl.start) == len(X_pri[rawind])
 
-        lda_output_pit = {}
-        #for int_types_key in int_types_to_use:
-        for int_types_key in lda_output_pg_cur[grouping_key]:
-            r = lda_output_pg_cur[grouping_key][int_types_key]
-            if r is not None:
-                r['transformed_imputed'] = r['transformed_imputed'][sl]
-                r['transformed_imputed_CV'] = r['transformed_imputed_CV'][sl]
+        # we need to restrict the LDA output to the right index range
+        #for grouping_key in groupings_to_use:
+        for grouping_key in lda_output_pg_cur:
+            grouping = gp.groupings[grouping_key]
 
-                lda_analysis_vers =  r['lda_analysis_versions']
-                for ver in lda_analysis_vers:
-                    curver = lda_analysis_vers[ver]
+            lda_output_pit = {}
+            #for int_types_key in int_types_to_use:
+            for int_types_key in lda_output_pg_cur[grouping_key]:
+                r = lda_output_pg_cur[grouping_key][int_types_key]
+                if r is not None:
+                    r['transformed_imputed'] = r['transformed_imputed'][sl]
+                    r['transformed_imputed_CV'] = r['transformed_imputed_CV'][sl]
+
                     trkey = 'X_transformed'
-                    if trkey  in curver:
-                        curver[trkey] = curver[trkey][sl]
+                    # crop everything
+                    lda_analysis_vers =  r['lda_analysis_versions']
+                    for featset_name, anver_cur in lda_analysis_vers.items():
+                        for fit_type_name, fit_cur in anver_cur.items():
+                            if trkey in fit_cur:
+                                fit_cur[trkey] = fit_cur[trkey][sl]
+                            #else:
+                            #    print('{} not in {}:{}, skipping '.format(trkey,featset_name,fit_type_name) )
 
-    if save_output:
-        #before I had 'good_inds' name in the file for what now I call 'selected_feat_inds'
-        # here I am atually saving not all features names, but only the
-        # filtered ones
-        np.savez(fname_PCA_full, pcapts = pcapts[sl], pcaobj=pca,
-                X=X_pri[rawind], wbd=wbd_pri[rawind],
-                feature_names_all = feature_names_pri[rawind] , selected_feat_inds = selected_feat_inds_pri[rawind],
-                info = info, feat_info = feat_info_pri[rawind],
-                lda_output_pg = lda_output_pg_cur, Xtimes=Xtimes_pri[rawind], argv=sys.argv,
-                Xconcat_imputed=Xconcat_imputed ,  rawtimes=rawtimes_pri[rawind] )
-        print('Saving PCA to ',fname_PCA_full)
-    else:
-        print('Skipng saving')
-
-    if rawind+1 < len(lens_pri):
-        indst += lens_pri[rawind]
-        indend += lens_pri[rawind+1]
-
+        if save_output:
+            mask = np.zeros( len(Xconcat), dtype=bool )
+            mask[bininds_concat_good] = 1
+            bininds_good_cur = np.where( mask[sl] )[0]
+            #before I had 'bininds_concat_good' name in the file for what now I call 'selected_feat_inds'
+            # here I am atually saving not all features names, but only the
+            # filtered ones. Now bininds_concat_good is good bin inds (not feautre inds)
+            # !! Xconcat_imputed util Jan 25 daytime was the intire array, not the [sl] one
+            np.savez(fname_PCA_full, pcapts = pcapts[sl], pcaobj=pca,
+                    X=X_pri[rawind], wbd=wbd_pri[rawind], bininds_good = bininds_good_cur,
+                    feature_names_filtered = feature_names_pri[rawind] ,
+                    selected_feat_inds = selected_feat_inds_pri[rawind],
+                    info = PCA_info, feat_info = feat_info_pri[rawind],
+                    lda_output_pg = lda_output_pg_cur, Xtimes=Xtimes_pri[rawind], argv=sys.argv,
+                    X_imputed=Xconcat_imputed[sl] ,  rawtimes=rawtimes_pri[rawind] )
+            print('Saving PCA to ',fname_PCA_full)
+        else:
+            print('Skipping saving because save_output=0')
+else:
+    print('Skipping saving because of multi-groupings due to single_fit_type_mode')
 
 
 ######################## Plotting
-if show_plots:
-    from matplotlib.backends.backend_pdf import PdfPages
-    mpl.use('Agg')
-
+if show_plots and ( ('pcapoints' in plot_types) or ( 'ldapoints' in plot_types  ) ):
     print('Starting to plot')
-
-    use_main_tremorside = 1 # for now, temporarily
-    bands_only = 'fine' # until I code merging
-
-
-
     #str_feats = ','.join(features_to_use)
     #str_mods = ','.join(data_modalities)
-
-    out_name_plot = rn_str + out_name + \
-        'mainLFP{}_HFO{}_{}_{}'.\
-        format(int(use_main_LFP_chan), int(use_lfp_HFO), str_mods, str_feats)
-    #a = out_name_templ.\
-    #    format(rn_str,n_channels, Xconcat.shape[1], pcapts.shape[1], skip, windowsz)
-    pdf= PdfPages(os.path.join(gv.dir_fig,out_name_plot + '.pdf' ))
-    #pdf= PdfPages(   )
-
 
     ################  Prep colors
     mrk = ['<','>','o','^','v']
@@ -1269,14 +1583,18 @@ if show_plots:
     color_per_int_type = { 'trem':tremcolor, 'notrem':notremcolor, 'neut':neutcolor,
                         'move':movecolor, 'hold':holdcolor }
 
-    colors,markers =utsne.prepColorsMarkers(main_side[0].upper(), anns, Xtimes,
-            nedgeBins, windowsz, sfreq, skip, mrk,mrknames, color_per_int_type )
+    colors,markers =utsne.prepColorsMarkers( anns, Xtimes,
+            nedgeBins, windowsz, sfreq, skip, mrk,mrknames, color_per_int_type,
+                                            side_letter= new_main_side[0].upper())
 
-    utsne.plotPCA(pcapts,pca, nPCAcomponents_to_plot,feature_names_all, colors, markers,
-                mrk, mrknames, color_per_int_type, tasks,
-                pdf=pdf,neutcolor=neutcolor)
+    if 'pcapoints' in plot_types:
+        utsne.plotPCA(pcapts,pca, nPCAcomponents_to_plot,feature_names_all, colors, markers,
+                    mrk, mrknames, color_per_int_type, tasks ,neutcolor=neutcolor)
 
-    if do_LDA:
+        pdf.savefig()
+        plt.close()
+
+    if do_LDA and 'ldapoints' in plot_types:
 
         for int_types_key in int_types_to_use:
             for grouping_key in groupings_to_use:
@@ -1294,9 +1612,12 @@ if show_plots:
 
                 utsne.plotPCA(X_LDA,lda, 999,feature_names_all, colors, markers,
                             mrk, mrknames, color_per_int_type, tasks,
-                            pdf=pdf,neutcolor=neutcolor, nfeats_show=nfeats_per_comp_LDA,
+                              neutcolor=neutcolor, nfeats_show=nfeats_per_comp_LDA,
                               title_suffix = '_(grp {}, its {})_{}'.
                               format(grouping_key, int_types_key, s) )
+
+                pdf.savefig()
+                plt.close()
 
     pdf.close()
 

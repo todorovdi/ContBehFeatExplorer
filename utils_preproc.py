@@ -3,6 +3,8 @@ import os
 import numpy as np
 import gc
 import utils
+import utils_tSNE as utsne
+import globvars as gv
 
 def getFileAge(fname_full, ret_hours=True):
     import os, datetime
@@ -87,7 +89,7 @@ def loadBadChannelList(rawname_,ch_names):
             else:
                 badchlist += [chname]
     return badchlist
-def getRawnameListStructure(rawnames):
+def getRawnameListStructure(rawnames, change_rest_to_hold=False, ret_glob=False):
     subjs_analyzed = {}  # keys -- subjs,  vals -- arrays of keys in raws
     '''
     subj
@@ -104,10 +106,16 @@ def getRawnameListStructure(rawnames):
             task n_2  --> rawname
     '''
 
+    subjs_analyzed_glob = {}
+    subjs_analyzed_glob['per_medcond'] = {}
+    subjs_analyzed_glob['per_task'] = {}
+
     # I use that medcond, tasks don't intersect with keys I use
     for ki,k in enumerate(rawnames):
         #f = raws[k]
         sind_str,medcond,task = utils.getParamsFromRawname(k)
+        if change_rest_to_hold and task == 'rest':
+            task = 'hold'
 
         cursubj = {}
         if sind_str in subjs_analyzed:
@@ -129,6 +137,7 @@ def getRawnameListStructure(rawnames):
         else:
             cursubj['tasks'] = [task]
 
+        # per medcond within subj
         if medcond in cursubj:
             m = cursubj[medcond]
             if task in m:
@@ -146,46 +155,47 @@ def getRawnameListStructure(rawnames):
             else:
                 cursubj[medcond]['datasets'] += [k]
 
+        # per task within subj
+        if task in cursubj:
+            t = cursubj[task]
+            if medcond in t:
+                raise ValueError('Duplicate raw key!')
+            else:
+                t[medcond] = k
+                if 'datasets' not in cursubj[task]:
+                    cursubj[task]['datasets'] = [k]
+                else:
+                    cursubj[task]['datasets'] += [k]
+        else:
+            cursubj[task] = { medcond: k}
+            if 'datasets' not in cursubj[task]:
+                cursubj[task]['datasets'] = [k]
+            else:
+                cursubj[task]['datasets'] += [k]
+
+        if medcond not in subjs_analyzed_glob['per_medcond']:
+            d = { 'datasets': [] }
+            subjs_analyzed_glob['per_medcond'][medcond] = d
+        subjs_analyzed_glob['per_medcond'][medcond]['datasets'] += [k]
+
+        if task not in subjs_analyzed_glob['per_task']:
+            d = { 'datasets': [] }
+            subjs_analyzed_glob['per_task'][task] = d
+        subjs_analyzed_glob['per_task'][task]['datasets'] += [k]
+
         subjs_analyzed[sind_str] =  cursubj
-    return subjs_analyzed
+        r = subjs_analyzed
+    if ret_glob:
+        r = (subjs_analyzed, subjs_analyzed_glob)
+    return r
 
-def rescaleFeats(rawnames, X_pri, featnames, wbd_pri,
-                 sfreq, times_pri, int_type_pri, main_side_pri=None,
-                 minlen_bins = 5 * 256 / 32, combine_within='no'):
-    '''
-    usually notrem_<sidelet>
-    modifies raws in place. Rescales to zero mean, unit std
-    '''
-    if int_type_pri is None:
-        int_type_pri = [ 'entire' ] * len(rawnames)
-    for int_type in int_type_pri:
-        assert int_type.find('{}') < 0  # it should not be a template
-
-
-    assert len(featnames) == X_pri[0].shape[1],  ( len(featnames),  X_pri[0].shape[0] )
-    assert len(rawnames) == len(X_pri)
-    assert len(rawnames) == len(wbd_pri)
-    assert len(rawnames) == len(times_pri)
-    assert len(rawnames) == len(int_type_pri)
-    assert combine_within in ['subject', 'medcond', 'no']
-    mods = ['msrc' , 'LFP']
-
-    if main_side_pri is None:
-        main_side_pri = [ it[-1].upper() for it in int_type_pri ]
-
-    #print('Start raws rescaling for modality {} based on interval type {}'.format(mod,int_type_templ) )
-    import utils_tSNE as utsne
-    rwnstr = ','.join(rawnames)
-
-    #if mod == 'src':
-    #    chn_name_side_ind = 4
-    #if mod in ['LFP', 'LFP_hires']:
-    #    chn_name_side_ind = 3
-
-    if combine_within == 'no':
-        indsets = [ np.arange(len(rawnames) ) ]
+def genCombineIndsets(rawnames, combine_within):
+    import globvars as gv
+    assert combine_within in gv.rawnames_combine_types
+    if combine_within == 'no':   # dont combine at all, do separately
+        indsets = [ [i] for i in range(len(rawnames) ) ]
     else:
-        subjs_analyzed = getRawnameListStructure(rawnames)
+        subjs_analyzed, subjs_analyzed_glob = getRawnameListStructure(rawnames, ret_glob=True)
         if combine_within == 'subj':
             indsets = []
             for subj in subjs_analyzed:
@@ -195,35 +205,301 @@ def rescaleFeats(rawnames, X_pri, featnames, wbd_pri,
                 for rn in dsets:
                     indset_cur += [rawnames.index(rn) ]
                 indsets += [indset_cur]
-            indsets += [ np.arange(len(rawnames) ) ]
         elif combine_within == 'medcond':
             indsets = []
-            for subj in subjs_analyzed:
-                subj_sub = subjs_analyzed[subj]
+            for subj,subj_sub in subjs_analyzed.items():
                 for medcond in subj_sub['medconds']:
                     indset_cur = []
-                    dsets = subj_sub['medconds']['datasets']
+                    dsets = subj_sub[medcond]['datasets']
                     for rn in dsets:
                         indset_cur += [rawnames.index(rn) ]
                     indsets += [indset_cur]
-            indsets += [ np.arange(len(rawnames) ) ]
-    #for
+        elif combine_within == 'task':
+            indsets = []
+            for subj in subjs_analyzed:
+                subj_sub = subjs_analyzed[subj]
+                for task in subj_sub['tasks']:
+                    indset_cur = []
+                    dsets = subj_sub[task]['datasets']
+                    for rn in dsets:
+                        indset_cur += [rawnames.index(rn) ]
+                    indsets += [indset_cur]
+        elif combine_within == 'medcond_across_subj':
+            indsets = []
+            for medcond,pm in subjs_analyzed_glob['per_medcond'].items():
+                indset_cur = []
+                dsets = pm['datasets']
+                for rn in dsets:
+                    indset_cur += [rawnames.index(rn) ]
+                indsets += [indset_cur]
+        elif combine_within == 'task_across_subj':
+            indsets = []
+            for task,pt in subjs_analyzed_glob['per_task'].items():
+                indset_cur = []
+                dsets = pt['datasets']
+                for rn in dsets:
+                    indset_cur += [rawnames.index(rn) ]
+                indsets += [indset_cur]
+        elif combine_within == 'across_everything':
+            indsets = [ np.arange( len(rawnames) ) ]
+    return indsets
 
+def plotFeatStatsScatter(rawnames,X_pri, int_types_to_stat,
+                         feature_names_pri,sfreq,
+                         rawtimes_pri,side_switch_happened_pri, wbd_pri, save_fig=True,
+                        figname_prefix='', separate_by = '', artif_handling='reject',
+                         combine_couple=('across_everything','no')  ):
+
+    print('plotFeatStatsScatter: starting plotting preparation')
+
+    assert artif_handling in ['reject', 'no', 'impute']
+
+    #if not ( isinstance(feature_names_pri, list) and isinstance(feature_names_pri[0], str) ):
+    if ( (isinstance(feature_names_pri, list) or isinstance(feature_names_pri,np.ndarray) )\
+        and isinstance(feature_names_pri[0], str) ):
+        feature_names_pri = len(rawnames) * [feature_names_pri]
+
+    if wbd_pri is None:
+        dts = np.diff( rawtimes_pri[0] )
+        assert abs(np.mean(dts  ) - 1/sfreq) < 1e-10 and np.var(dts) < 1e-10  # should be times, not bins
+
+        wbd_pri = []
+        for times in rawtimes_pri:
+            # wbd is bin indices, not times!
+            temp = np.vstack([times*sfreq,times*sfreq] ).astype(int)
+            temp[1] += 1
+            wbd_pri += [temp]
+
+
+    indsets, means_combine_all, stds_combine_all = \
+        gatherFeatStats(rawnames, X_pri, feature_names_pri,
+                             wbd_pri, sfreq, rawtimes_pri,int_types_to_stat
+                , side_rev_pri = side_switch_happened_pri,
+                combine_within = combine_couple[0],require_all_intervals_present=False,
+                        printLog=False, minlen_bins = 2, artif_handling = artif_handling)
+
+    indsets, means_combine_no, stds_combine_no = \
+        gatherFeatStats(rawnames, X_pri, feature_names_pri,
+                             wbd_pri, sfreq, rawtimes_pri,
+                int_types_to_stat, side_rev_pri = side_switch_happened_pri,
+                combine_within = combine_couple[1], require_all_intervals_present=False, printLog=False,
+                        minlen_bins = 2, artif_handling = artif_handling)
+
+    #assert len(separate_by) <= 1
+
+    if len(separate_by) > 0:
+        if 'feat_type' == separate_by:
+            p = "([a-zA-Z]+)_.*"
+        elif 'mod' == separate_by:
+            p = "(LFP|msrc)[LR].*"
+        else:
+            raise ValueError('not implemented for separate_by={}'.formate(separate_by) )
+        import re
+        featnames_per_feat_type = {}
+        featnames_per_feat_type_perraw = {}
+        for rawi,rawn in enumerate(rawnames) :
+            featnames_per_feat_type_curraw = {}
+            for fni,fn in enumerate(feature_names_pri[rawi] ):
+                r = re.match(p,fn)
+                #print(fn,r)
+                if r is not None:
+                    feat_type = r.groups()[0]
+                else:
+                    feat_type = 'undef_feat_type'
+
+                if feat_type not in featnames_per_feat_type:
+                    featnames_per_feat_type[feat_type] = [fn ]
+                else:
+                    featnames_per_feat_type[feat_type] += [fn ]
+
+                if feat_type not in featnames_per_feat_type_curraw:
+                    featnames_per_feat_type_curraw[feat_type] = [fn ]
+                else:
+                    featnames_per_feat_type_curraw[feat_type] += [fn ]
+            featnames_per_feat_type_perraw[rawn]  = featnames_per_feat_type_curraw
+
+    else:
+        featnames_per_feat_type = {}
+        featnames_per_feat_type_perraw = {}
+        for rawi,rawn in enumerate(rawnames) :
+            featnames_per_feat_type_curraw = {}
+            #for fni,fn in enumerate(feature_names_pri[rawi] ):
+            featnames_per_feat_type['undef_feat_type'] = feature_names_pri[rawi]
+            featnames_per_feat_type_curraw['undef_feat_type'] = feature_names_pri[rawi]
+            featnames_per_feat_type_perraw[rawn] = featnames_per_feat_type_curraw
+
+    feat_types = list( sorted(featnames_per_feat_type.keys() ) )
+    nfeat_types_glob = len(featnames_per_feat_type)
+
+    subjs_analyzed = getRawnameListStructure(rawnames)
+    sind_strs = list(sorted(subjs_analyzed.keys()))
+
+    print('plotFeatStatsScatter: starting plotting {}'.format( feat_types ))
+
+    int_types = list(sorted(means_combine_all[0].keys() ))
+    nr = len(int_types)
+    nc = nfeat_types_glob
+    ww = 5
+    hh = 4
+    import matplotlib.pyplot as plt
+    shx,shy = False,False  # 'col','col'
+    fig,axs = plt.subplots(nr,nc,figsize=(ww*nc,hh*nr),sharex=shx,sharey=shy)
+    axs = axs.reshape( (nr,nc) )
+    #plt.subplots_adjust()
+    for iti,int_type in enumerate(int_types):
+        for rawi,rawn in enumerate(rawnames):
+            means_curint_combine_all = means_combine_all[0][int_type]
+            stds_curint_combine_all = stds_combine_all[0][int_type]
+
+            if int_type not in means_combine_no[rawi]:
+                continue
+            stdgl = stds_curint_combine_all
+            means_curint = (means_combine_no[rawi][int_type] - means_curint_combine_all) / stdgl
+            stds_curint = stds_combine_no[rawi][int_type] / stdgl
+
+
+            # for debug only
+            #stdgl = stds_combine_no[0][int_type]
+            #means_curint = (means_combine_no[rawi][int_type] - means_combine_no[0][int_type]) / stdgl
+            #stds_curint = stds_combine_no[rawi][int_type] / stdgl
+
+            #pts = np.zeros( (2, len(means_curint)))
+            for fti,feat_type in enumerate(feat_types):
+                fns_cur = featnames_per_feat_type_perraw[rawn].get(feat_type,None)
+
+                #import pdb; pdb.set_trace()
+                if fns_cur is None:
+                    print('skip ',feat_type)
+                    continue
+                pts0 = []
+                pts1 = []
+                for fn in fns_cur:
+                    chi = list(feature_names_pri[rawi]).index(fn)
+                #for chi in range(len(means_curint)):
+                    mean_curch = means_curint[chi]
+                    std_curch = stds_curint[chi]
+                    pts0 += [ mean_curch ]
+                    pts1 += [ std_curch ]
+
+                pts = [ np.array(pts0), np.array(pts1) ]
+
+                ax = axs[iti,fti]
+                ax.scatter(pts[0],pts[1],label='{}: {}'.
+                           format(rawnames[rawi], len(fns_cur) ), alpha=0.6)
+                ax.set_title('{}: {}'.format(feat_type,int_type))
+
+                ax.legend(loc='upper right')
+                ax.set_xlabel('(mean - glob_mean) / glob std')
+                ax.set_ylabel('std / glob std')
+
+    for ax in axs.ravel():
+        ax.axvline(x=0,ls=':')
+        ax.axhline(y=1,ls=':')
+
+    plt.tight_layout()
+    if save_fig:
+        figfn = '{}:{}_{}_Feat_stats_across.pdf'.format(','.join(sind_strs), figname_prefix, len(rawnames))
+        print('Saving fig to',figfn)
+        plt.savefig(figfn)
+
+
+def gatherFeatStats(rawnames, X_pri, featnames_pri, wbd_pri,
+                 sfreq, times_pri, int_types, main_side=None,
+                 side_rev_pri = None,
+                 minlen_bins = 5 * 256 / 32, combine_within='no',
+                    require_all_intervals_present=True,
+                    ann_MEGartif_prefix_to_use = '_ann_MEGartif_flt',
+                    printLog=True, artif_handling = 'reject' ):
+    '''
+    it assumes that featnams are constant across datasets WITHIN indset.
+        So I cannot apply it to raws from different subjects really. But from the same subject I can
+    int_types should be same (after reversal) across all datasets
+    main_side -- AFTER reversal (because I pass side_rev to concatAnns)
+    usually notrem_<sidelet>
+
+    returns indsets,means,stds each is a list of dicts (key = interval type)
+    '''
+    if int_types is None:
+        int_types = [ 'entire' ]
+    for int_type in int_types:
+        assert int_type.find('{}') < 0  # it should not be a template
+
+    assert len(rawnames) == len(X_pri)
+    assert len(rawnames) == len(side_rev_pri)
+
+    assert artif_handling in ['reject', 'no', 'impute']
+
+    if isinstance( X_pri[0], mne.io.BaseRaw):
+        featnames_pri = len(X_pri) * [0]
+        wbd_pri = len(X_pri) * [0]
+        times_pri = len(X_pri) * [0]
+        X_pri_new = len(X_pri) * [0]
+        for rawi,raw in enumerate(X_pri):
+            if sfreq is None:
+                sfreq = int( raw.info['sfreq'] )
+            assert int( raw.info['sfreq'] ) == int(sfreq)
+            assert set( raw.ch_names ) == set(featnames_pri[0] )
+            tmp = np.vstack( [raw.times,raw.times] )
+            tmp[1] += 1 / sfreq
+            wbd_pri[rawi]   = [ tmp ]
+            times_pri[rawi] = [raw.times]
+            X_pri_new[rawi] =  raw.get_data()
+            featnames_pri[rawi] = raw.ch_names
+    else:
+        if (isinstance(featnames_pri,list) or isinstance(featnames_pri,np.ndarray) ) and\
+                isinstance(featnames_pri[0],str):
+            featnames_pri = [ featnames_pri ] * len(rawnames)
+        assert len(rawnames) == len(featnames_pri)
+
+        for i in range(len(X_pri) ):
+            assert len(featnames_pri[i]) == X_pri[i].shape[1],  ( len(featnames_pri[i]),  X_pri[i].shape )
+
+    import globvars as gv
+
+    if wbd_pri is None:
+        wbd_pri = []
+        for times in times_pri:
+            # wbd is bin indices, not times!
+            temp = np.vstack([times*sfreq,times*sfreq] ).astype(int)
+            temp[1] += 1
+            wbd_pri += [temp]
+    assert len(rawnames) == len(wbd_pri)
+
+    assert len(rawnames) == len(wbd_pri)
+    assert len(rawnames) == len(times_pri)
+    assert combine_within in gv.rawnames_combine_types
+    #['subject', 'medcond', 'task', 'no', 'medcond_across_subj', 'task_across_subj',
+                              #'across_everything']
+
+    if isinstance(int_types,str):
+        int_types = [int_types]
+
+    if main_side is None:
+        main_side = int_types[0][-1].upper()
+
+    # get indsets based on combination strategy
+    indsets = genCombineIndsets(rawnames, combine_within)
+
+    # collect annotations
     ib_MEG_perit_perraw = {}
     ib_LFP_perit_perraw = {}
     ib_mvt_perit_perraw = {}
     for rawi,rn in enumerate(rawnames):
         #ib_MEG_perit = getCleanIntervalBins(rn,sfreq, times,['_ann_MEGartif'] )
         #ib_LFP_perit = getCleanIntervalBins(rn,sfreq, times,['_ann_LFPartif'] )
-        main_side = main_side_pri[rawi]
         wrong_brain_sidelet = main_side[0].upper()
 
         wbd = wbd_pri[rawi]
         times = times_pri[rawi]
+        side_rev = side_rev_pri[rawi]
 
         anns_mvt, anns_artif_pri, times2, dataset_bounds = \
-        utsne.concatAnns([rn],[times] )
+        utsne.concatAnns([rn],[times],side_rev_pri=[side_rev])
         #ivalis_mvt = utils.ann2ivalDict(anns_mvt)
+        lens_mvt = utils.getIntervalsTotalLens(anns_mvt, include_unlabeled =False,
+                                               times=times_pri[rawi])
+        print(rn,lens_mvt)
+        #import pdb; pdb.set_trace()
         ib_mvt_perit_merged = \
         utils.getWindowIndicesFromIntervals(wbd,utils.ann2ivalDict(anns_mvt) ,
                                             sfreq,ret_type='bins_contig',
@@ -231,8 +507,12 @@ def rescaleFeats(rawnames, X_pri, featnames, wbd_pri,
                                             ret_indices_type =
                                                 'window_inds', nbins_total=len(times) )
 
+
         anns_MEGartif, anns_artif_pri, times2, dataset_bounds = \
-            utsne.concatAnns([rn],[times],['_ann_MEGartif'] )
+            utsne.concatAnns([rn],[times],[ann_MEGartif_prefix_to_use], side_rev_pri=[side_rev] )
+        lens_MEGartif = utils.getIntervalsTotalLens(anns_MEGartif, include_unlabeled =False,
+                                               times=times_pri[rawi])
+        print(rn,lens_MEGartif)
         # here I don't want to remove artifacts from "wrong" brain side because
         # we use ipsilateral CB
         ib_MEG_perit_merged = \
@@ -243,7 +523,10 @@ def rescaleFeats(rawnames, X_pri, featnames, wbd_pri,
                                                 'window_inds', nbins_total=len(times) )
 
         anns_LFPartif, anns_artif_pri, times2, dataset_bounds = \
-            utsne.concatAnns([rn],[times],['_ann_LFPartif'] )
+            utsne.concatAnns([rn],[times],['_ann_LFPartif'], side_rev_pri=[side_rev] )
+        lens_LFPartif = utils.getIntervalsTotalLens(anns_LFPartif, include_unlabeled =False,
+                                               times=times_pri[rawi])
+        print(rn,lens_LFPartif)
         anns_LFPartif = utils.removeAnnsByDescr(anns_LFPartif, ['artif_LFP{}'.format(wrong_brain_sidelet) ])
         ib_LFP_perit_merged = \
             utils.getWindowIndicesFromIntervals(wbd,utils.ann2ivalDict(anns_LFPartif) ,
@@ -252,82 +535,206 @@ def rescaleFeats(rawnames, X_pri, featnames, wbd_pri,
                                             ret_indices_type =
                                                 'window_inds', nbins_total=len(times) )
 
+
+
         #import pdb; pdb.set_trace()
 
         ib_MEG_perit_perraw[rn] = ib_MEG_perit_merged
         ib_LFP_perit_perraw[rn] = ib_LFP_perit_merged
         ib_mvt_perit_perraw[rn] = ib_mvt_perit_merged
 
-        it = int_type_pri[rawi]
-        print('rescaleFeats: Rescaling features for raw {} accodring to data in interval {}'.format(rn,it ) )
+        #it = int_type_pri[rawi]
+        print('rescaleFeats: Rescaling features for raw {} accodring to data in interval {}, combining within {}'.format(rn,
+                                                                                                    int_types,combine_within  ) )
 
-    rescale_separately = True
-
-    for rawindseti_cur,indset_cur in enumerate(indsets):
-        stat_perchan = {}
-        for feati,featn in enumerate(featnames):
-            dats_forstat = []
-            # for each dataset separtely we rescale features accodring to an
-            # interval
+    for int_type_cur in int_types:
+        for rawindseti_cur,indset_cur in enumerate(indsets):
+            int_found_within_indset = False
             for rawi in indset_cur:
-                #if mod == 'src':
-                #    chnames_nicened = utils.nicenMEGsrc_chnames(chnames, roi_labels, srcgrouping_names_sorted,
-                #                                    prefix='msrc_')
-                rn = rawnames[rawi]
-                ib_MEG_perit =  ib_MEG_perit_perraw[rn]
-                ib_LFP_perit =  ib_LFP_perit_perraw[rn]
-                ib_mvt_perit =  ib_mvt_perit_perraw[rn]
-
-                dat =  X_pri[rawi][:,feati]
-                l = len(dat)
-
-                it = int_type_pri[rawi]
-                if it == 'entire':
-                    dat_forstat = dat
+                rawn = rawnames[rawi]
+                if int_type_cur == 'entire':
+                    int_found_within_indset = True
+                    break
+                elif int_type_cur in ib_mvt_perit_perraw[rawn ]:
+                    int_found_within_indset = True
+                    break
+            if not int_found_within_indset:
+                #s = "Warning, not data collected for interval {}".format(int_type_cur)
+                s = "gatherFeatStats: in {} there is no intervals in the indeset {} for interval {}".\
+                    format(rawn, rawindseti_cur, int_type_cur)
+                if require_all_intervals_present:
+                    raise ValueError(s)
                 else:
-                    #ib_MEG = ib_MEG_perit[it]
-                    #ib_LFP = ib_LFP_perit[it]
-                    ib_mvt = ib_mvt_perit[it]
+                    print('Warninig ',s)
 
-                    mask = np.zeros(l, dtype=bool)
-                    mask[ib_mvt] = 1
 
-                    if featn.find('LFP' ) >= 0:
-                        for bins in ib_LFP_perit.values():
-                            #print('LFP artif nbins ',len(bins))
-                            mask[bins] = 0
-                    if featn.find('msrc' ) >= 0:
-                        for bins in ib_MEG_perit.values():
-                            #print('MEG artif nbins ',len(bins))
-                            mask[bins] = 0
+    means_per_indset = []
+    stds_per_indset = []
+    stats_per_indset = []
+    for rawindseti_cur,indset_cur in enumerate(indsets):
+        mean_per_int_type = {}
+        std_per_int_type  = {}
+        stat_per_int_type = {}
+        for int_type_cur in int_types:
+            stat_perchan = {}
+            featnames = featnames_pri[ indset_cur[0] ]  # they are supposed to be constant within indset
+            me_perchan  = np.zeros( len(featnames) )
+            std_perchan = np.zeros( len(featnames) )
+            for feati,featn in enumerate(featnames):
+                dats_forstat = []
+                # for each dataset separtely we rescale features accodring to an
+                # interval
+                for rawi in indset_cur:
+                    assert len(featnames) == len(featnames_pri[rawi] )
+                    #if mod == 'src':
+                    #    chnames_nicened = utils.nicenMEGsrc_chnames(chnames, roi_labels, srcgrouping_names_sorted,
+                    #                                    prefix='msrc_')
+                    rn = rawnames[rawi]
+                    ib_MEG_perit =  ib_MEG_perit_perraw[rn]
+                    ib_LFP_perit =  ib_LFP_perit_perraw[rn]
+                    ib_mvt_perit =  ib_mvt_perit_perraw[rn]
 
-                    n = np.sum(mask)
-                    assert n  > minlen_bins, (n, n/ mask.size)
+                    if (int_type_cur != 'entire') and (int_type_cur not in ib_mvt_perit):
+                        if printLog:
+                            print('gatherFeatStats: interval {} is not present in {}'.format(int_type_cur,rn) )
+                        continue
 
-                    dat_forstat = dat[mask]
+                    dat =  X_pri[rawi][:,feati]
+                    lendat= len(dat)
+
+                    if int_type_cur == 'entire':
+                        dat_forstat = dat
+                    else:
+                        ib_mvt = ib_mvt_perit[int_type_cur]
+
+                        mask = np.zeros(lendat, dtype=bool)
+                        mask[ib_mvt] = 1
+                        nbinstot_mvt = np.sum(mask)
+
+                        nbinstot_LFP_artif = 0
+                        nbinstot_MEG_artif = 0
+                        if artif_handling == 'reject':
+                            if featn.find('LFP' ) >= 0:
+                                for bins in ib_LFP_perit.values():
+                                    #print('LFP artif nbins ',len(bins))
+                                    mask[bins] = 0
+                                nbinstot_LFP_artif = nbinstot_mvt - np.sum(mask)
+                            if featn.find('msrc' ) >= 0:
+                                for bins in ib_MEG_perit.values():
+                                    #print('MEG artif nbins ',len(bins))
+                                    mask[bins] = 0
+                                nbinstot_MEG_artif = nbinstot_mvt - nbinstot_LFP_artif - np.sum(mask)
+                        elif artif_handling == 'impute':
+                            raise ValueError('not implemented')
+
+                        n = np.sum(mask)
+                        if n  < minlen_bins:
+                            print('feature {}, nremaining bins {}, percentage {}, total in interval {} LFPaftif {} MEGartif'.
+                                format(featn, n, n/mask.size, nbinstot_mvt,
+                                       nbinstot_LFP_artif, nbinstot_MEG_artif) )
+                            raise ValueError('too few bins to compute stats')
+
+                        dat_forstat = dat[mask]
                     dats_forstat += [dat_forstat]
 
-                mn,std = utsne.robustMean(dat_forstat,ret_std=1)
-                assert abs(std) > 1e-20
+                if len(dats_forstat) > 0:
+                    # here I would for normalization stats gather from all
+                    # participating datasets from the group
+                    dats_forstat = np.hstack(dats_forstat)  # over datasets
+                    if artif_handling == 'reject':
+                        me,std = utsne.robustMean(dats_forstat,ret_std=1)
+                    else:
+                        me = np.mean(dats_forstat, axis=0)
+                        std = np.std(dats_forstat, axis=0)
+                    assert abs(std) > 1e-20
+                else:
+                    if printLog:
+                        print('gatherFeatStats: Nothing found of {} in {}'.format(int_type_cur,rn) )
+                    me,std = np.nan, np.nan
+                stat_perchan[featn] = (me,std)
+                me_perchan [feati] = me
+                std_perchan[feati] = std
 
-                if rescale_separately:
-                    X_pri[rawi][:,feati] -= mn
-                    X_pri[rawi][:,feati] /= std
+            mean_per_int_type[int_type_cur] = me_perchan
+            std_per_int_type [int_type_cur] = std_perchan
+            stat_per_int_type[int_type_cur] = stat_perchan
 
+        means_per_indset += [mean_per_int_type]
+        stds_per_indset   += [std_per_int_type ]
+        stats_per_indset += [stat_per_int_type]
 
-            # here I would for normalization stats gather from all
-            # participating datasets from the group
-            if not rescale_separately:
-                dats_forstat = np.hstack(dats_forstat)
-                mn,std = utsne.robustMean(dats_forstat,ret_std=1)
-                assert abs(std) > 1e-20
-                stat_perchan[featn] = (mn,std)
+    return indsets, means_per_indset, stds_per_indset
 
-                for rawi in indset_cur:
-                    X_pri[rawi][:,feati] -= mn
-                    X_pri[rawi][:,feati] /= std
+def rescaleFeats(rawnames, X_pri, featnames_pri, wbd_pri,
+                 sfreq, times_pri, int_type, main_side=None,
+                 side_rev_pri = None,
+                 minlen_bins = 5 * 256 / 32, combine_within='no',
+                 means=None, stds=None, indsets=None, stat_fname_full=None,
+                 artif_handling = 'reject' ):
+    '''
+    rescales in-place
+    usually notrem_<sidelet>
+    modifies raws in place. Rescales to zero mean, unit std
+    '''
+    assert isinstance(int_type,str)
+        #int_type_pri = [ 'entire' ] * len(rawnames)
+    assert int_type.find('{}') < 0  # it should not be a template
 
-    return X_pri
+    assert artif_handling in ['reject', 'no', 'impute']
+
+    assert len(rawnames) == len(featnames_pri)
+    for i in range(len(X_pri) ):
+        assert len(featnames_pri[i]) == X_pri[i].shape[1],  ( len(featnames_pri[i]),  X_pri[i].shape )
+
+    assert len(rawnames) == len(X_pri)
+    assert len(rawnames) == len(times_pri)
+    assert len(rawnames) == len(side_rev_pri)
+
+    if wbd_pri is None:
+        wbd_pri = []
+        for times in times_pri:
+            # wbd is bin indices, not times!
+            temp = np.vstack([times*sfreq,times*sfreq] ).astype(int)
+            temp[1] += 1
+            wbd_pri += [temp]
+    assert len(rawnames) == len(wbd_pri)
+
+    assert combine_within in gv.rawnames_combine_types
+
+    if main_side is None:
+        main_side = int_type[-1].upper()
+    main_side = main_side[0].upper()
+
+    #print('Start raws rescaling for modality {} based on interval type {}'.format(mod,int_type_templ) )
+    #import utils_tSNE as utsne
+    #rwnstr = ','.join(rawnames)
+
+    if means is None or stds is None or indsets is None:
+        if stat_fname_full is not None:
+            f = np.load( stat_fname_full)
+            means = f['means']
+            stds = f['stds']
+            indsets = f['indsets']
+        else:
+            indsets, means, stds = \
+                gatherFeatStats(rawnames, X_pri, featnames_pri, wbd_pri, sfreq, times_pri,
+                        int_type, side_rev_pri = side_rev_pri,
+                        combine_within = combine_within, minlen_bins = minlen_bins,
+                                artif_handling=artif_handling)
+    else:
+        assert len(means) == len(stds)
+        assert len(means) == len(indsets)
+
+    for rawindseti_cur,indset_cur in enumerate(indsets):
+        # rescale everyone within indset according to the stats
+        mn = means[rawindseti_cur][int_type]
+        std = stds[rawindseti_cur][int_type]
+        for rawi in indset_cur:
+            #rn = rawnames[rawi]
+            X_pri[rawi] -= mn[None,:]
+            X_pri[rawi] /= std[None,:]
+
+    return X_pri, indsets, means, stds
     #fname_stats = rwnstr + '_stats.npz'
     #np.savez(fname_stats, dat_forstat_perchan=dat_forstat_perchan,
     #         combine_within_medcond=combine_within_medcond,
@@ -335,7 +742,8 @@ def rescaleFeats(rawnames, X_pri, featnames, wbd_pri,
 
 def rescaleRaws(raws_permod_both_sides, mod='LFP',
                 int_type_templ = 'notrem_{}', minlen_sec = 5, combine_within_medcond=True,
-                roi_labels=None, srcgrouping_names_sorted = None, src_labels_ipsi = ['Cerebellum']):
+                roi_labels=None, srcgrouping_names_sorted = None, src_labels_ipsi = ['Cerebellum'],
+                ann_MEGartif_prefix_to_use = '_ann_MEGartif_flt' ):
     '''
     modifies raws in place. Rescales to zero mean, unit std
     roi_labels are there only for ipsilateral cerebellum essentially
@@ -343,36 +751,7 @@ def rescaleRaws(raws_permod_both_sides, mod='LFP',
     if mod == 'src':
         assert roi_labels is not None
         assert srcgrouping_names_sorted is not None
-# intbins_per_raw = {}
 
-#     for rawname_ in raws_permod_both_sides:
-#         raw = raws_permod_both_sides[rawname_][mod]
-#         ib = upre.getCleanIntervalBins(rn,raws_permod_both_sides[rn]['LFP'])
-
-#     #     side = None
-#     #     if side_to_use == 'main_trem':
-#     #         side = gv.gen_subj_info[subj]['tremor_side']
-#     #     elif side_to_use == 'main_move':
-#     #         side = gv.gen_subj_info[subj].get('move_side',None)
-#     #     if side is None:
-#     #         print('{}: {} is None'.format(rawname_, side_to_use))
-#     #     side_letter = side[0].upper()
-
-#     #     sidelet_per_raw[rawname_] = side_letter
-
-#         for sidelets in ['R', 'L']:
-#             it = int_type_templ.format(side_letter)
-#             assert len(ib[it]) / sfreq > minlen_sec
-
-#         intbins_per_raw[rawname_] = ib
-
-    # defrn = rawnames[0]
-    # defraw = raws_permod_both_sides[defrn][mod]
-    # defchn = 'LFPL01'
-    # defdat,_ = defraw[defchn]
-    # ib = intbins_per_raw[defrn][int_type_templ.format('L')]
-    # defdat_forstat = defdat[0,ib]
-    # def_mn,def_std = utsne.robustMean(defdat_forstat,ret_std=1)
     print('Start raws rescaling for modality {} based on interval type {}'.format(mod,int_type_templ) )
     import utils_tSNE as utsne
     rawnames = list( sorted(raws_permod_both_sides.keys() ) )
@@ -383,7 +762,72 @@ def rescaleRaws(raws_permod_both_sides, mod='LFP',
     if mod in ['LFP', 'LFP_hires']:
         chn_name_side_ind = 3
 
+    if combine_within_medcond:
+        combine_within = 'medcond'
+    else:
+        combine_within = 'no'
+    indsets = genCombineIndsets(rawnames, combine_within)
 
+    assert combine_within in ['medcond','task','subj','no'] # we cannot do across subj
+
+
+    for rawindseti_cur,indset_cur in enumerate(indsets):
+        rn0 = rawnames[indset_cur[0] ]
+        chnames = raws_permod_both_sides[rn0][mod].ch_names
+
+        dat_forstat_perchan = {}
+
+        if mod == 'src':
+            chnames_nicened = utils.nicenMEGsrc_chnames(chnames, roi_labels, srcgrouping_names_sorted,
+                                            prefix='msrc_')
+        for chni,chn in enumerate(chnames):
+            dats_forstat = []
+            sidelet = chn[chn_name_side_ind]
+            opsidelet = utils.getOppositeSideStr(sidelet)
+            for rawi in indset_cur:
+                rn = rawnames[rawi]
+                raw = raws_permod_both_sides[rn][mod]
+                sfreq = raw.info['sfreq']
+
+                if mod in ['LFP', 'LFP_hires']:
+                    suffixes = ['_ann_LFPartif']
+                elif mod == 'src':
+                    suffixes = [ ann_MEGartif_prefix_to_use ]
+                ib_perit = getCleanIntervalBins(rn, raw.info['sfreq'], raw.times,suffixes)
+
+                dat,_ = raw[chn]
+
+                if mod == 'src' and chnames_nicened[chni].find('Cerebellum') >= 0:
+                    it = int_type_templ.format(sidelet)
+                else:
+                    it = int_type_templ.format(opsidelet)
+                assert len(ib_perit[it]) / sfreq > minlen_sec
+
+                ib = ib_perit[it]
+                dat_forstat = dat[0,ib]
+                dats_forstat += [dat_forstat]
+
+            dats_forstat = np.hstack(dats_forstat)
+
+            mn,std = utsne.robustMean(dats_forstat,ret_std=1)
+            assert abs(std) > 1e-20
+
+            dat_forstat_perchan[chn] = (mn,std)
+
+        for rawi in indset_cur:
+            rn = rawnames[rawi]
+            raw = raws_permod_both_sides[rn][mod]
+            for chni,chn in enumerate(raw.ch_names):
+                # rescale each raw individually based on common stats
+                mn,std = dat_forstat_perchan[chn]
+                fun = lambda x: (x-mn) /std
+                raw = raws_permod_both_sides[rn][mod]
+                raw.load_data()
+                raw.apply_function(fun,picks=[chn])
+
+
+
+    '''
     subjs_analyzed = getRawnameListStructure(rawnames)
     dat_forstat_perchan = {}
     if combine_within_medcond:
@@ -486,11 +930,12 @@ def rescaleRaws(raws_permod_both_sides, mod='LFP',
                 #print(mn,std)
                 assert abs(mn-0) < 1e-10
                 assert abs(std-1) < 1e-10
+    '''
 
     fname_stats = rwnstr + '_stats.npz'
     np.savez(fname_stats, dat_forstat_perchan=dat_forstat_perchan,
              combine_within_medcond=combine_within_medcond,
-             subjs_analyzed=subjs_analyzed)
+             rawnames=rawnames)
 
 
 def getCleanIntervalBins(rawname_,sfreq, times, suffixes = ['_ann_LFPartif'],verbose=False):
@@ -540,12 +985,15 @@ def getCleanIntervalBins(rawname_,sfreq, times, suffixes = ['_ann_LFPartif'],ver
 
 
 def loadRaws(rawnames,mods_to_load, sources_type = None, src_type_to_use=None,
-             src_file_grouping_ind=None, use_saved = True, highpass_lfreq = None):
+             src_file_grouping_ind=None, use_saved = True, highpass_lfreq = None,
+             input_subdir=""):
     '''
     use_saved means using previously done preproc
     '''
     import globvars as gv
     data_dir = gv.data_dir
+
+    print('Loading following raw types ',mods_to_load)
 
     raws_permod_both_sides = {}
     for rawname_ in rawnames:
@@ -577,7 +1025,8 @@ def loadRaws(rawnames,mods_to_load, sources_type = None, src_type_to_use=None,
             raw_permod_both_sides_cur['FTraw'] = f
 
         if 'resample' in mods_to_load or (not use_saved and 'EMG' in mods_to_load or "MEG" in mods_to_load):
-            rawname_resample = rawname_ + '_resample_raw.fif'
+            #rawname_resample = rawname_ + '_resample_raw.fif'
+            rawname_resample = rawname_ + '_resample_notch_highpass.fif'
             rawname_resample_full = os.path.join(data_dir, rawname_resample)
             raw_resample = mne.io.read_raw_fif(rawname_resample_full)
             if 'resample' in mods_to_load:
@@ -605,11 +1054,11 @@ def loadRaws(rawnames,mods_to_load, sources_type = None, src_type_to_use=None,
             assert src_file_grouping_ind is not None
             src_fname_noext = 'srcd_{}_{}_grp{}'.format(rawname_,sources_type,src_file_grouping_ind)
             if src_type_to_use == 'center':
-                newsrc_fname_full = os.path.join( data_dir, 'cnt_' + src_fname_noext + '.fif' )
+                newsrc_fname_full = os.path.join( data_dir, input_subdir, 'cnt_' + src_fname_noext + '.fif' )
             elif src_type_to_use == 'mean_td':
-                newsrc_fname_full = os.path.join( data_dir, 'av_' + src_fname_noext + '.fif' )
+                newsrc_fname_full = os.path.join( data_dir, input_subdir, 'av_' + src_fname_noext + '.fif' )
             elif src_type_to_use == 'parcel_ICA':
-                newsrc_fname_full = os.path.join( data_dir, 'pcica_' + src_fname_noext + '.fif' )
+                newsrc_fname_full = os.path.join( data_dir, input_subdir, 'pcica_' + src_fname_noext + '.fif' )
             else:
                 raise ValueError('Wrong src_type_to_use {}'.format(src_type_to_use) )
             raw_srconly =  mne.io.read_raw_fif(newsrc_fname_full, None)
@@ -634,18 +1083,25 @@ def loadRaws(rawnames,mods_to_load, sources_type = None, src_type_to_use=None,
 
         if 'afterICA' in mods_to_load:
             rawname_afterICA = rawname_ + '_resample_afterICA_raw.fif'
-            rawname_afterICA_full = os.path.join(data_dir, rawname_afterICA)
+            rawname_afterICA_full = os.path.join(data_dir, input_subdir, rawname_afterICA)
             raw_afterICA = mne.io.read_raw_fif(rawname_afterICA_full)
             raw_permod_both_sides_cur['afterICA'] = raw_afterICA
 
         if 'SSS' in mods_to_load:
-            rawname_SSS = rawname_ + '_notch_SSS_raw.fif'
-            rawname_SSS_full = os.path.join(data_dir, rawname_SSS)
+            #rawname_SSS = rawname_ + '_notch_SSS_raw.fif'
+            #rawname_SSS = rawname_ + '_notch_SSS_raw.fif'
+            #rawname_SSS = rawname_ + '_SSS_notch_resample_raw.fif'
+            rawname_SSS = rawname_ + '_SSS_notch_highpass_resample_raw.fif'
+            rawname_SSS_full = os.path.join(data_dir, input_subdir, rawname_SSS)
             raw_SSS = mne.io.read_raw_fif(rawname_SSS_full)
             raw_permod_both_sides_cur['SSS'] = raw_SSS
 
         if highpass_lfreq is not None:
             for mod in raw_permod_both_sides_cur:
+                if mod == "resample" and rawname_resample.find('highpass') >= 0:
+                    continue
+                if mod == "SSS" and rawname_SSS.find('highpass') >= 0:
+                    continue
                 raw_permod_both_sides_cur[mod].\
                 filter(l_freq=highpass_lfreq, h_freq=None,picks='all',
                        n_jobs = 6)
@@ -659,14 +1115,20 @@ def loadRaws(rawnames,mods_to_load, sources_type = None, src_type_to_use=None,
 
 def saveLFP(rawname_naked, f_highpass = 2, skip_if_exist = 1,
                          n_free_cores = 2, ret_if_exist = 0, notch=1, highpass=1,
-            raw_FT=None, sfreq=1024, filter_artif_care=1, save_with_anns = 0):
+            raw_FT=None, sfreq=1024, raw_resampled = None,
+            filter_artif_care=1, save_with_anns = 0):
     import globvars as gv
     import multiprocessing as mpr
-    lowest_freq_to_preserve = 1.
+    lowest_freq_to_preserve = f_highpass
 
     data_dir = gv.data_dir
 
-    lfp_fname_full = os.path.join(data_dir, '{}_LFP_1kHz.fif'.format(rawname_naked) )
+    if sfreq in [1000, 1024]:
+        lfp_fname_full = os.path.join(data_dir, '{}_LFP_1kHz.fif'.format(rawname_naked) )
+    elif sfreq == 256:
+        lfp_fname_full = os.path.join(data_dir, '{}_LFPonly.fif'.format(rawname_naked) )
+    else:
+        lfp_fname_full = os.path.join(data_dir, '{}_LFPonly_{}Hz.fif'.format(rawname_naked,sfreq) )
     if os.path.exists(lfp_fname_full) :
         #subraw = mne.io.read_raw_fif(lfp_fname_full, None)
         #return subraw
@@ -686,13 +1148,16 @@ def saveLFP(rawname_naked, f_highpass = 2, skip_if_exist = 1,
         assert raw_FT.info['sfreq'] > 1500
         raw = raw_FT
     else:
-        fname = rawname_naked + '.mat'
-        fname_full = os.path.join(data_dir,fname)
-        if not os.path.exists(fname_full):
-            raise ValueError('wrong naked name' + rawname_naked )
-        #raw = mne.io.read_raw_fieldtrip(fname_full, None)
-        raw = read_raw_fieldtrip(fname_full, None)
-        print('Orig sfreq is {}'.format(raw.info['sfreq'] ) )
+        if raw_resampled is not None and abs(raw_resampled.info['sfreq'] - sfreq) < 1e-10:
+            raw = raw_resampled
+        else:
+            fname = rawname_naked + '.mat'
+            fname_full = os.path.join(data_dir,fname)
+            if not os.path.exists(fname_full):
+                raise ValueError('wrong naked name' + rawname_naked )
+            #raw = mne.io.read_raw_fieldtrip(fname_full, None)
+            raw = read_raw_fieldtrip(fname_full, None)
+            print('Orig sfreq is {}'.format(raw.info['sfreq'] ) )
 
 
     subraw = getSubRaw(rawname_naked, picks = ['LFP.*'], raw=raw )
@@ -700,28 +1165,34 @@ def saveLFP(rawname_naked, f_highpass = 2, skip_if_exist = 1,
     import gc; gc.collect()
 
 
-    y = {}
-    for chname in subraw.ch_names:
-        y[chname] = 'eeg'
-    subraw.set_channel_types(y)
+    set_channel_types = True # needed of for real but not test datasets
+    if set_channel_types:
+        y = {}
+        for chname in subraw.ch_names:
+            y[chname] = 'eeg'
+        subraw.set_channel_types(y)
 
 
     num_cores = mpr.cpu_count() - 1
     nj = max(1, num_cores-n_free_cores)
-    subraw.resample(sfreq, n_jobs= nj )
+    if abs(subraw.info['sfreq'] - sfreq) > 0.1:
+        print('saveLFP: Resample {} to {}'.format(subraw.info['sfreq'],sfreq) )
+        subraw.resample(sfreq, n_jobs= nj )
 
-    artif_fname = os.path.join(data_dir , '{}_ann_LFPartif.txt')
+    artif_fname = os.path.join(data_dir , '{}_ann_LFPartif.txt'.format(rawname_naked) )
     if os.path.exists(artif_fname ) and filter_artif_care:
         anns = mne.read_annotations(artif_fname)
-        subraw.set_annotations(artif_fname)
+        subraw.set_annotations(anns)
     else:
         print('saveLFP: {} does not exist'.format(artif_fname) )
 
     if notch:
         freqsToKill = np.arange(50, sfreq//2, 50)  # harmonics of 50
+        print('saveLFP: Resample')
         subraw.notch_filter(freqsToKill,  n_jobs= nj)
 
     if highpass:
+        print('saveLFP: highpass')
         subraw.filter(l_freq=lowest_freq_to_preserve, h_freq=None,skip_by_annotation='BAD_LFP', n_jobs= nj,
                       pad='symmetric')
 
@@ -757,11 +1228,14 @@ def saveRectConv(rawname_naked, raw=None, rawname = None, maxtremfreq=9, skip_if
     assert len(emgonly.ch_names) == 4
     chdata = emgonly.get_data()
 
-    y = {}
-    for chname in emgonly.ch_names:
-        y[chname] = 'eeg'
-    emgonly.set_channel_types(y)
+    set_channel_types = True # needed of for real but not test datasets
+    if set_channel_types:
+        y = {}
+        for chname in emgonly.ch_names:
+            y[chname] = 'eeg'
+        emgonly.set_channel_types(y)
 
+    print('saveRectConv: highpass')
     emgonly.filter(l_freq=lowfreq, h_freq=None, pad='symmetric')
 
     windowsz = int(emgonly.info['sfreq'] / maxtremfreq)
@@ -996,12 +1470,16 @@ def extractEMGData(raw, rawname_=None, skip_if_exist = 1, tremfreq = 9):
     print(emgonly.ch_names)
     #help(emgonly.filter)
 
-    y = {}
-    for chname in emgonly.ch_names:
-        y[chname] = 'eeg'
-    emgonly.set_channel_types(y)
+    set_channel_types = True # needed of for real but not test datasets
+    if set_channel_types:
+        y = {}
+        for chname in emgonly.ch_names:
+            y[chname] = 'eeg'
+        emgonly.set_channel_types(y)
+    highpass_freq = 10
 
-    emgonly.filter(l_freq=10, h_freq=None, picks='all',pad='symmetric')
+    print('extractEMGData: {} Hz highpass'.format(highpass_freq) )
+    emgonly.filter(l_freq=highpass_freq, h_freq=None, picks='all',pad='symmetric')
 
     sfreq = raw.info['sfreq']
     windowsz = int( sfreq / tremfreq )
@@ -1140,7 +1618,8 @@ def concatRaws(raws,rescale=True,interval_for_stats = (0,300) ):
     #rectconvraw_perside[side] = tmp
 
 
-def getGenIntervalInfoFromRawname(rawname_, interval=None):
+def getGenIntervalInfoFromRawname(rawname_, crop=None):
+    # crop -- crop range in seconds
     import utils
     import globvars as gv
 
@@ -1165,14 +1644,14 @@ def getGenIntervalInfoFromRawname(rawname_, interval=None):
     raw = mne.io.read_raw_fif(fname_full, None, verbose=0)
 
     times = raw.times
-    if interval is None:
-        interval = (times[0],times[-1])
+    if crop is None:
+        crop = (times[0],times[-1])
     else:
-        assert len(interval) == 2 and max(interval) <= times[-1] \
-        and min(interval)>=0 and interval[1] > interval[0]
+        assert len(crop) == 2 and max(crop) <= times[-1] \
+        and min(crop)>=0 and crop[1] > crop[0]
 
-    begtime = max(times[0], interval[0] )
-    endtime = min(times[-1], interval[1] )
+    begtime = max(times[0], crop[0] )
+    endtime = min(times[-1], crop[1] )
     ##########
 
     ots_letter = utils.getOppositeSideStr(mts_letter)
@@ -1205,13 +1684,13 @@ def getGenIntervalInfoFromRawname(rawname_, interval=None):
     ann_len_dict = {}
     meaningful_totlens = {}
     for ann_name in ann_dict:
-        #print('{} interval lengths'.format(ann_name))
+        #print('{} crop lengths'.format(ann_name))
         #display(anns_cnv_Jan.description)
         anns = ann_dict[ann_name]
         if anns is None:
             continue
         lens = utils.getIntervalsTotalLens(anns, True, times=raw.times,
-                                           interval=interval)
+                                           crop=crop)
 
         lens_keys = list(sorted(lens.keys()) )
         for lk in lens_keys:
@@ -1251,6 +1730,30 @@ def getGenIntervalInfoFromRawname(rawname_, interval=None):
     # #display(anns_cnv.description)
     # if mts_trem_str not in anns_cnv.description:
     #     print('!! There is no tremor, accdording to prev me')
+
+
+def getIndsetMask(indsets):
+    allinds = []
+    for iset in indsets:
+        allinds += list(iset)
+    allinds = sorted(allinds)
+    mask = -1 * np.ones( len(allinds), dtype=int)
+    for ind in allinds:
+        for iseti,iset in enumerate(indsets):
+            if ind in iset:
+                mask[ind] = iseti
+    assert np.all(mask >=0 )
+    return mask,allinds
+
+def valsPerIndset2PerInd(indsets,vals):
+    assert len(vals) == len(indsets)
+    mask,allinds = getIndsetMask(indsets)
+    r = [0] * len(allinds)
+    for i in range(len(mask) ):
+        #ind = allinds[i]
+        iseti = mask[i]
+        r[i] = vals[iseti]
+    return r
 
 #Coord frames:  1  -- device , 4 -- head,
 

@@ -12,6 +12,7 @@ function output = srcrec(subjstr,datall,data_cleaned,hdmf,roi_type,bads,S,srs,ma
   %tstart = 300;
   %tend = 400;
 
+  % merge all trials into one before computing covariance matrix
   ntrials = size( data_cleaned.trial, 2 );  %number of segments after separations by artifact placements
   if ntrials > 1
     data = [];
@@ -54,9 +55,11 @@ function output = srcrec(subjstr,datall,data_cleaned,hdmf,roi_type,bads,S,srs,ma
     data.time = {time_concat};
     data.sampleinfo = [[1 nbinstot ] ];
 
-    data_cleaned = data;
+    data_cleaned_concat = data;
   end
-  data_cleaned
+  data_cleaned_concat
+  
+  %data_cleaned_concat2 = ft_appenddata([], data_cleaned)  % does not merge trials :(
 
   %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
@@ -74,19 +77,19 @@ function output = srcrec(subjstr,datall,data_cleaned,hdmf,roi_type,bads,S,srs,ma
     %m1 = ft_read_atlas('HMAT_Right_M1.nii')  % goes deeper in the sulcus
 
 
-    if strcmp(roi_type{1} , "HirschPt2011,2013direct" ) == 1 || strcmp(roi_type{1} , "HirschPt2011" ) == 1 
+    if strcmp(roi_type{1} , "HirschPt2011,2013" ) == 1 || strcmp(roi_type{1} , "HirschPt2011" ) == 1 
 
       % places where cortico-muscular coherence (at trem freq) changed during tremor
       %
       %They were located in the primary motor cortex (MNI coordinates:
       % 60, 15, 50), premotor cortex (MNI coordinates:  30, 10, 70)
       %and posterior parietal cortex (MNI coordinates:  20, 75, 50).
-      fn = strcat( subjstr, '_modcoord.mat');
+      fn = strcat( subjstr, '_modcoord_HirschPt.mat');
       if exist(fn,'file') > 0
         sprintf('Loading %s',fn)
         load(fn);
       else
-        sprintf('CoordFile %s does not exist',fn)
+        sprintf('CoordFile %s does not exist, exiting',fn)
         exit(0)
 
         load('coordsJan.mat')
@@ -133,7 +136,7 @@ function output = srcrec(subjstr,datall,data_cleaned,hdmf,roi_type,bads,S,srs,ma
       srcpos = coords_Jan_actual;
       srcpos = surroundPts;
 
-    elseif strcmp(roi_type{1}, "parcel_aal") == 1
+    elseif strcmp(roi_type{1}, "parcel_aal_surf") == 1
       fn = strcat( subjstr, '_modcoord_parcel_aal.mat');
       sprintf('Loading %s',fn)
       load(fn);
@@ -260,10 +263,10 @@ function output = srcrec(subjstr,datall,data_cleaned,hdmf,roi_type,bads,S,srs,ma
           cfg_bp.hpfreq = fband_cur(1);
           %cfg_bp.hpfiltord
         end
-        datall_cleaned_cur = ft_preprocessing(cfg_bp, data_cleaned);
+        datall_cleaned_cur = ft_preprocessing(cfg_bp, data_cleaned_concat);
         datall_cur = ft_preprocessing(cfg_bp, datall);
       else
-        datall_cleaned_cur = data_cleaned;
+        datall_cleaned_cur = data_cleaned_concat;
         datall_cur = datall;
       end
 

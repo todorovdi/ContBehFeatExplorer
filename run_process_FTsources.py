@@ -71,9 +71,13 @@ do_save = 1
 nPCA_comp = 0.95
 algType = 'PCA+ICA' #'PCA' # 'mean'
 
+input_subdir = ""
+output_subdir = ""
+
 helpstr = 'Usage example\nrun_process_FTsources.py --rawname <rawname_naked> --sources_type <srct> '
 opts, args = getopt.getopt(effargv,"hr:s:",
-        ["rawnames=", 'sources_type=', 'groupings=', 'alg_type=', 'do_save='])
+        ["rawnames=", 'sources_type=', 'groupings=', 'alg_type=', 'do_save=',
+         "input_subdir=", "output_subdir="])
 print(sys.argv, opts, args)
 for opt, arg in opts:
     print(opt)
@@ -84,6 +88,18 @@ for opt, arg in opts:
         groupings_to_use = arg.split(',')
     elif opt == '--do_save':
         do_save = int(arg)
+    elif opt == "--input_subdir":
+        input_subdir = arg
+        if len(input_subdir) > 0:
+            subdir = os.path.join(gv.data_dir,input_subdir)
+            assert os.path.exists(subdir )
+    elif opt == "--output_subdir":
+        output_subdir = arg
+        if len(output_subdir) > 0:
+            subdir = os.path.join(gv.data_dir,output_subdir)
+            if not os.path.exists(subdir ):
+                print('Creating output subdir {}'.format(subdir) )
+                os.makedirs(subdir)
     elif opt == '--alg_type':
         algType = arg
         assert algType in ['PCA', 'PCA+ICA', 'mean', 'all_sources']
@@ -122,7 +138,9 @@ coords_pri = len(rawnames) * [0]
 for rawni,rawname_ in enumerate(rawnames):
     sind_str,medcond,task = utils.getParamsFromRawname(rawname_)
 
-    rawname = rawname_ + '_resample_notch_highpass_raw.fif'
+    # this one does not have to be from the subdir
+    #rawname = rawname_ + '_resample_notch_highpass_raw.fif'
+    rawname = rawname_ + '_LFPonly.fif'
     fname_full = os.path.join(data_dir,rawname)
 
     #rawname = rawname_ + '_resample_raw.fif'
@@ -140,7 +158,7 @@ for rawni,rawname_ in enumerate(rawnames):
     src_fname_noext = 'srcd_{}_{}'.format(rawname_, sources_type)
 
     src_fname = src_fname_noext + '.mat'
-    src_fname_full = os.path.join(data_dir,src_fname)
+    src_fname_full = os.path.join(data_dir,input_subdir,src_fname)
     print(src_fname_full)
     src_ft = h5py.File(src_fname_full, 'r')
     ff = src_ft
@@ -385,7 +403,7 @@ for rawni,rawname_ in enumerate(rawnames):
     ##################
 
     if sources_type == 'HirschPt2011':
-        newsrc_fname_full = os.path.join( data_dir, 'cnt_' + src_fname_noext + '.fif' )
+        newsrc_fname_full = os.path.join( data_dir, output_subdir, 'cnt_' + src_fname_noext + '.fif' )
         print( newsrc_fname_full )
 
         custom_raws['centers'].save(newsrc_fname_full, overwrite=1)
@@ -645,7 +663,7 @@ if do_save:
     for rawname_ in rawnames:
         src_rec_info_fn = '{}_{}_grp{}_src_rec_info'.\
             format(rawname_,sources_type,  grp_id_str  )
-        src_rec_info_fn_full = os.path.join(gv.data_dir, src_rec_info_fn + '.npz')
+        src_rec_info_fn_full = os.path.join(gv.data_dir, output_subdir, src_rec_info_fn + '.npz')
         print(src_rec_info_fn_full)
         np.savez(src_rec_info_fn_full,
                  srcgroups_dict=srcgroups_dict,
@@ -747,7 +765,7 @@ if do_save:
 
         #  Save
         #newsrc_fname_full = os.path.join( data_dir, 'av_' + src_fname_noext + '.fif' )
-        newsrc_fname_full = os.path.join( data_dir, 'pcica_' + src_fname_noext + '.fif' )
+        newsrc_fname_full = os.path.join( data_dir, output_subdir, 'pcica_' + src_fname_noext + '.fif' )
         print( newsrc_fname_full )
 
         newraw_cur.save(newsrc_fname_full, overwrite=1)

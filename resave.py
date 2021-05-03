@@ -18,15 +18,15 @@ import sys
 import getopt
 mpl.use('Agg')
 
-subdir = ''
-# subdir = '/new'
+input_subdir = ''
+# input_subdir = '/new'
 subdir_fig = '/preproc'
 
 if os.environ.get('DATA_DUSS') is not None:
-    data_dir_input = os.path.expandvars('$DATA_DUSS') + subdir
+    data_dir_input = os.path.expandvars('$DATA_DUSS') + input_subdir
     data_dir_output = os.path.expandvars('$DATA_DUSS')
 else:
-    data_dir_input = '/home/demitau/data'   + subdir
+    data_dir_input = '/home/demitau/data'   + input_subdir
     data_dir_output = '/home/demitau/data'
 
 if os.environ.get('OUTPUT_OSCBAGDIS') is not None:
@@ -45,8 +45,6 @@ crosstalk_file = os.path.join(data_dir_input, 'ct_sparse.fif')
 read_type = []
 to_perform = ['resample', 'notch', 'highpass']
 
-print('read_type',read_type)
-print('to_perform',to_perform)
 
 overwrite_res = 1
 
@@ -126,8 +124,9 @@ do_plot_helmet = 0
 plot_ICA_prop = 0
 ICA_exclude_EOG = 0
 ICA_exclude_ECG = 1
-#If no, use artif got from unfiltered (and unresampled). If yes, I may exclude too little
-use_MEGartif_flt_for_ICA = 0
+#If no, use artif got from unfiltered (and unresampled). If yes, I may exclude
+#too little. But on the other hand I apply it to the filtered thing...
+use_MEGartif_flt_for_ICA = 1
 do_recalc_MEGartif_flt = 1
 
 freqResample = 256
@@ -140,6 +139,7 @@ skip_existing_EMG = 0
 
 badchans_SSS = 'recalc'  # or 'no', 'load'
 
+output_subdir = ""
 ##############################
 
 print('sys.argv is ',sys.argv)
@@ -151,13 +151,14 @@ helpstr = 'Usage example\nresave.py --rawname <rawname_naked> '
 opts, args = getopt.getopt(effargv,"hr:",
         ["rawname=", "to_perform=" , "read_type=", "tSSS_duration=",
          "frame_SSS=", "do_ICA_only=", "badchans_SSS=", "freq_resample=",
-         "freq_resample_high=", "lowest_freq_to_keep=" ])
+         "freq_resample_high=", "lowest_freq_to_keep=", "recalc_LFPEMG=",
+         "output_subdir=" ])
 print('opts is ',opts)
 print('args is ',args)
 
 
 for opt, arg in opts:
-    print(opt)
+    print(opt,arg)
     if opt == '-h':
         print (helpstr)
         sys.exit(0)
@@ -171,8 +172,13 @@ for opt, arg in opts:
         if len(rawnames) > 1:
             print('Using {} datasets at once'.format(len(rawnames) ) )
         #rawname_ = arg
+    elif opt == '--output_subdir':
+        output_subdir = arg
     elif opt == '--to_perform':
         to_perform = arg.split(',')
+    elif opt == '--recalc_LFPEMG':
+        skip_existing_LFP = not bool(arg)
+        skip_existing_EMG = not bool(arg)
     elif opt == '--read_type':
         read_type = arg.split(',')
     elif opt == '--tSSS_duration':
@@ -195,12 +201,20 @@ for opt, arg in opts:
         raise ValueError(s)
 
 
+data_dir_output = os.path.join(data_dir_output, output_subdir)
+if not os.path.exists(data_dir_output):
+    print('Creating {}'.format(data_dir_output) )
+    os.makedirs(data_dir_output)
+
+print('read_type',read_type)
+print('to_perform',to_perform)
+
 read_resampled = 'resample' in read_type
 
 do_removeMEG = 0
 do_resample = 'resample' in to_perform
 do_notch =  'notch' in to_perform
-do_SSS = 'SSS' in to_perform
+do_tSSS = 'tSSS' in to_perform
 do_SSP = 'SSP' in to_perform
 do_ICA   = 'ICA' in to_perform
 do_highpass = 'highpass' in to_perform  #highpass taking care of artifacts if annotation were saved before
@@ -209,8 +223,11 @@ if do_ICA_only:
     assert read_resampled #and to_perform
 
 assert not (do_resample and read_resampled)
-assert (not do_SSS) or (not do_SSP)   # not both together!
+assert (not do_tSSS) or (not do_SSP)   # not both together!
 
+tSSS_anns_type = 'MEG_flt'
+
+do_highpass_after_SSS = 1
 
 ################ Start doing things
 
@@ -233,7 +250,16 @@ for rawname_ in rawnames:
     print('Reading {}'.format(fname) )
 
 
-    addStr = ''
+    if read_resampled:
+        # +addStr
+        rtstr=''
+        for s in read_type:
+            rtstr += '_' + s
+        effname = fname_noext + rtstr
+        addStr = rtstr
+    else:
+        addStr = ''
+
     if do_removeMEG:
         addStr += '_noMEG'
     if do_resample:
@@ -242,8 +268,13 @@ for rawname_ in rawnames:
         addStr += '_{:d}'.format(freqResample)
     if do_notch:
         addStr += '_notch'
-    if do_SSS:
-        addStr += '_SSS'
+    if do_tSSS:
+        #addStr += '_SSS'
+        #addStr += '_SSS_notch_resample'
+        addStr += '_SSS_notch'
+        if do_highpass_after_SSS:
+            addStr += '_highpass'
+        addStr += '_resample'
     if do_SSP:
         addStr += '_SSP'
     if do_highpass:
@@ -254,10 +285,6 @@ for rawname_ in rawnames:
     print('addStr = ',addStr)
 
     if read_resampled:
-        # +addStr
-        effname = fname_noext
-        for s in read_type:
-            effname += '_' + s
         fname_full = os.path.join(data_dir_output,effname + '_raw.fif')
     else:
         print('--- Starting reading big 2kHz file!')
@@ -286,8 +313,11 @@ for rawname_ in rawnames:
         mod_info, infos = upre.readInfo(fname_noext, f)
         f.info = mod_info
 
-        raw_lfp = upre.saveLFP(fname_noext, skip_if_exist = skip_existing_LFP,sfreq=freqResample, raw_FT=f)
-        raw_lfp_highres = upre.saveLFP(fname_noext, skip_if_exist = skip_existing_LFP,sfreq=freqResample_high, raw_FT=f)
+        raw_lfp = upre.saveLFP(fname_noext, skip_if_exist =
+                               skip_existing_LFP,sfreq=freqResample, raw_FT=f)
+        raw_lfp_highres = upre.saveLFP(fname_noext, skip_if_exist =
+                                       skip_existing_LFP,sfreq=freqResample_high,
+                                       raw_FT=f)
 
     upre.extractEMGData(f,fname_noext, skip_if_exist = skip_existing_EMG)  #saves emg_rectconv
     #continue
@@ -336,8 +366,13 @@ for rawname_ in rawnames:
 
     anns_MEG_artif, cvl_per_side = utils.findRawArtifacts(f , thr_mult = MEG_artif_thr_mult,
         thr_use_mean = MEG_thr_use_mean)
-    anns_MEG_artif.save(os.path.join(data_dir_output, '{}_ann_MEGartif.txt'.format(fname_noext) ) )
-    print('Artif found ',anns_MEG_artif)
+    anns_MEG_artif.save(os.path.join(data_dir_input, '{}_ann_MEGartif.txt'.format(fname_noext) ) )
+    if len(anns_MEG_artif) > 0:
+        print('Artif found in UNfilt {}, maxlen {:.3f} totlen {:.3f}'.
+                format(anns_MEG_artif, np.max(anns_MEG_artif.duration),
+                        np.sum(anns_MEG_artif.duration) ) )
+    else:
+        print('Artif found in UNfilt {} is NONE'.  format(anns_MEG_artif) )
 
 
     #By default, MNE does not load data into main memory to conserve resources. adding, dropping,
@@ -359,7 +394,7 @@ for rawname_ in rawnames:
                                                                                 allow_missing=True)
         f.set_annotations(anns_artif)
         f.filter(l_freq=lowest_freq_to_keep,
-                        h_freq=None, n_jobs=num_cores, skip_by_annotation='BAD_')
+                        h_freq=None, n_jobs=num_cores, skip_by_annotation='BAD_', pad='symmetric')
         f.set_annotations(mne.Annotations([],[],[]) )
 
     if do_resample and not read_resampled:
@@ -370,7 +405,7 @@ for rawname_ in rawnames:
 
 
     if do_recalc_MEGartif_flt:
-        assert f.info['sfreq'] < 1500
+        #assert f.info['sfreq'] < 1500
         filt_raw = f.copy()
         filt_raw.load_data()
         # if I don't filter raw artifcats, they will be found again
@@ -382,14 +417,20 @@ for rawname_ in rawnames:
         #############################  Plot
         anns_MEG_artif_flt, cvl_per_side = utils.findRawArtifacts(filt_raw , thr_mult = MEG_flt_artif_thr_mult,
             thr_use_mean = MEG_flt_thr_use_mean)
-        anns_MEG_artif_flt.save(os.path.join(data_dir_output, '{}_ann_MEGartif_flt.txt'.format(fname_noext) ) )
-        print('Artif found in filtered ',anns_MEG_artif_flt)
+        anns_MEG_artif_flt.save(os.path.join(data_dir_input, '{}_ann_MEGartif_flt.txt'.format(fname_noext) ) )
+        if len( anns_MEG_artif_flt ) > 0:
+            print('Artif found in filtered {}, maxlen {:.3f} totlen {:.3f}'.
+                format(anns_MEG_artif_flt, np.max(anns_MEG_artif_flt.duration),
+                        np.sum(anns_MEG_artif_flt.duration) ) )
+        else:
+            print('Artif found in filtered {} is NONE'.  format(anns_MEG_artif_flt) )
 
     if not do_removeMEG and not do_ICA_only:
         mod_info, infos = upre.readInfo(fname_noext, f)
         radius, origin, _ = mne.bem.fit_sphere_to_headshape(mod_info, dig_kinds=('cardinal','hpi'))
         sphere = mne.make_sphere_model(info=mod_info, r0=origin, head_radius=radius)
         src = mne.setup_volume_source_space(sphere=sphere, pos=10.)
+
 
         if do_plot_helmet:
             import mayavi
@@ -402,14 +443,19 @@ for rawname_ in rawnames:
 
         f.info = mod_info
 
-        if do_SSS:
+        if do_tSSS:
+            # apparently it is better to do tSSS before notching and perhaps
+            # even before resampling
+            assert ( len(read_type ) == 0 ) or (len(read_type) == 1 and len(read_type[0]) == 0 )
+            assert ( len(to_perform) == 1 and to_perform[0] == 'tSSS'  ) or\
+                (len(to_perform) == 2 and to_perform[0] == 'tSSS' and to_perform[1] == 'ICA')
             if frame_SSS == 'meg':
                 origin = None
 
             fname_bads = '{}_MEGch_bads_upd.npz'.format(fname_noext)
             fname_bads_mat = '{}_MEGch_bads_upd.mat'.format(fname_noext)
-            fname_bads_full = os.path.join( data_dir_output, fname_bads)
-            fname_bads_mat_full = os.path.join( data_dir_output, fname_bads_mat)
+            fname_bads_full = os.path.join( data_dir_input, fname_bads)
+            fname_bads_mat_full = os.path.join( data_dir_input, fname_bads_mat)
             ex  = os.path.exists(fname_bads_full)
             if badchans_SSS == 'load' and ex:
                 print('Reading additinal bad channes from ',fname_bads_full)
@@ -445,11 +491,31 @@ for rawname_ in rawnames:
 
 
             print('Start tSSS for MEG!')
+            # I will work only with highpassed data later
+            # so makes sense to use those artifacts. I am not sure, maybe I'd
+            # like tSSS to actually remove those artifacts
+            if tSSS_anns_type == 'MEG_flt':
+                f.set_annotations( anns_MEG_artif_flt)
+            elif tSSS_anns_type == 'MEG':
+                f.set_annotations( anns_MEG_artif)
+            else:
+                print('Not setting any artifact annotations for maxwell_filter')
             f_sss = mne.preprocessing.maxwell_filter(f , cross_talk=crosstalk_file,
                     calibration=fine_cal_file, coord_frame=frame_SSS,
                                                     origin=origin,
                                                     st_duration=tSSS_duration,
-                                                        skip_by_annotation='BAD_')
+                                                        skip_by_annotation='BAD_MEG')
+
+            f_sss.set_annotations( anns_MEG_artif_flt)
+            f_sss.notch_filter(freqsToKill, n_jobs=num_cores)
+
+            if do_highpass_after_SSS:
+                f_sss.filter(l_freq=lowest_freq_to_keep, h_freq=None,
+                            n_jobs=num_cores, skip_by_annotation='BAD_MEG',
+                            pad='symmetric')
+
+            f_sss.resample(freqResample, n_jobs=num_cores)
+            f_sss.set_annotations(mne.Annotations([],[],[]) )
             f = f_sss
 
         if do_SSP:
@@ -457,13 +523,16 @@ for rawname_ in rawnames:
             f.apply_proj()
 
     if not do_ICA_only:
+        print('Saving ',resfn)
         f.save(resfn,overwrite=True)
     #else:
     #    f = mne.io.read_raw_fif(resfn, None)
 
     if do_ICA:  # we don't want to apply ICA right away, I have to look at it first
-        addstr_ica = ''
-        icafname = '{}_{}resampled-ica.fif.gz'.format(fname_noext,addstr_ica)
+        #addstr_ica = ''
+        #icafname = '{}_{}resampled-ica.fif.gz'.format(fname_noext,addstr_ica)
+        addstr_ica = addStr
+        icafname = '{}{}-ica.fif.gz'.format(fname_noext,addstr_ica)
         icafname_full = os.path.join(data_dir_output,icafname)
 
         filt_raw2 = f.copy()  # now do it again but filtering with skipping annotations
@@ -472,9 +541,10 @@ for rawname_ in rawnames:
         else:
             filt_raw2.set_annotations(anns_MEG_artif)
         filt_raw2.load_data()
-        filt_raw2.filter(l_freq=lowest_freq_to_keep,
-                            h_freq=None, n_jobs=num_cores, skip_by_annotation='BAD_MEG',
-                            pad='symmetric')
+        if ('highpass' not in read_type) or ('tSSS' in to_perform and not do_highpass_after_SSS):
+            filt_raw2.filter(l_freq=lowest_freq_to_keep,
+                                h_freq=None, n_jobs=num_cores, skip_by_annotation='BAD_MEG',
+                                pad='symmetric')
 
 
         plt.savefig(os.path.join(dir_fig,('{}_MEG_deviation_before_ICA.png'.
@@ -488,6 +558,7 @@ for rawname_ in rawnames:
             eog_epochs = mne.preprocessing.create_eog_epochs(filt_raw2)  # get single EOG trials
             eog_inds, scores = ica.find_bads_eog(eog_epochs)
             ica.exclude += eog_inds
+        # I don't want to save ECG here, better I select it by hand in jupyter
         if ICA_exclude_ECG:
             icacomp = ica.get_sources(filt_raw2)
             ecg_inds,ratios,ecg_intervals = upre.getECGindsICAcomp(icacomp)

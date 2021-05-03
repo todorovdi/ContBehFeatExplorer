@@ -1,4 +1,5 @@
 #!/usr/bin/python3
+# it collects the data that will NOT be used for source reconstruction
 
 import os
 import mne
@@ -24,7 +25,8 @@ from os.path import join as pjoin
 rawnames = ['S01_off_move', 'S01_on_hold']
 
 #ann_types = ['beh_states', 'MEGartif', 'LFPartif']
-ann_types = ['beh_states', 'MEGartif']
+#ann_types = ['beh_states', 'MEGartif']
+ann_types = ['beh_states', 'MEGartif_flt']
 
 import sys
 import getopt
@@ -37,11 +39,11 @@ if sys.argv[0].find('ipykernel_launcher') >= 0:
     effargv = sys.argv[3:]  # to skip first three
 
 helpstr = 'Usage example\nrun_collect_artifacts.py --rawname <rawname_naked> '
-opts, args = getopt.getopt(effargv,"hr:", ["ann_types=","rawname="])
+opts, args = getopt.getopt(effargv,"hr:", ["ann_types=","rawname=","min_dur="])
 print(sys.argv, opts, args)
 
 for opt, arg in opts:
-    print(opt)
+    print(opt,arg)
     if opt == '-h':
         print (helpstr)
         sys.exit(0)
@@ -53,13 +55,25 @@ for opt, arg in opts:
         if len(rawnames) > 1:
             print('Using {} datasets at once'.format(len(rawnames) ) )
         #rawname_ = arg
-    elif opt == "--mods":
+    elif opt == "--ann_types":
         ann_types = arg.split(',')
+    elif opt == "--min_dur":
+        min_duration_remaining = float(arg)
+    else:
+        raise ValueError('Unknown option {} with arg {}'.format(opt,arg) )
 
 
 print('ann_types', ann_types)
 
 raws_permod_both_sides = upre.loadRaws(rawnames,['EMG'], None, None, None)
+
+beh_state_types_not_to_exclude = ['notrem_{}']
+# if I use notrem from both sides, I am still merging all non-quiet periods
+# together from both sides. So the remaining will be essentially an
+# intersection of both untrem_L and untrem_R
+# if I use only one notrem, then I will essentially subtract one notrem
+# from another and it is not what I want
+keep_only_main_side = False
 
 for rawname_ in rawnames:
 
@@ -68,6 +82,7 @@ for rawname_ in rawnames:
     sfreq = int(raw.info['sfreq'])
 
     anns_fnames = []
+    # TODO: maybe add filtering of beh_states (e.g. specifically tremor and so)
     if 'beh_states' in ann_types:
         fname = '{}_anns.txt'.format(rawname_)
         anns_fnames += [fname]
@@ -89,10 +104,46 @@ for rawname_ in rawnames:
         ann_list += [anns_cur]
         print(ann_fname, anns_cur,anns_cur.onset,anns_cur.duration,anns_cur.description)
 
-    merged_anns = utils.mergeAnns(ann_list,duration,sfreq,out_descr='BAD_intervals')
-    print(merged_anns,merged_anns.onset,merged_anns.duration)
 
-    assert( duration -  np.sum(  merged_anns.duration ) > min_duration_remaining )
+    subj_cur,medcond_cur,task_cur  = utils.getParamsFromRawname(rawname_)
+
+
+    # define main_side. If move_side is present, we use it, otherwise we use
+    # tremor side
+    sinfo = gv.gen_subj_info[subj_cur]
+    mainmoveside_cur = sinfo.get('move_side',None)
+    maintremside_cur = sinfo.get('tremor_side',None)
+    main_side = None
+    if mainmoveside_cur  is not None:
+        main_side = mainmoveside_cur
+    else:
+        main_side = maintremside_cur
+    assert main_side is not None
+
+    # description to skip from being included for exclusion. So we will KEEP
+    # only these desriptions
+    descr_to_skip = []
+    for bst in beh_state_types_not_to_exclude :
+        if keep_only_main_side:
+            descr_to_skip += [ bst.format(main_side[0].upper() ) ]
+        else:
+            descr_to_skip += [ bst.format('L') ]
+            descr_to_skip += [ bst.format('R') ]
+    assert len(descr_to_skip) > 0
+    print('descr_to_skip = ',descr_to_skip)
+
+
+    # merge all annotations, except non-tremor ones
+    merged_anns = utils.mergeAnns(ann_list,duration,sfreq,out_descr='BAD_intervals',
+                    descr_to_skip=descr_to_skip)
+    print('Anns to be excluded for src reconstruction',merged_anns,merged_anns.onset,merged_anns.duration)
+
+    dur_merged = np.sum(  merged_anns.duration )
+    print('Duration of the excluded data {}, of total {}'.format(dur_merged,duration) )
+
+    # skip the assertiong for testing data (it is shorter)
+    if subj_cur != 'S99':
+        assert( duration -  np.sum(  merged_anns.duration ) > min_duration_remaining ), (duration,dur_merged,min_duration_remaining)
 
     fn = '{}_ann_srcrec_exclude.txt'.format(rawname_)
     fn_full = pjoin(gv.data_dir,fn)

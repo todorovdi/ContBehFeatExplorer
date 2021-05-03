@@ -1,5 +1,4 @@
 import numpy as np
-import udus_dataproc as mdp # main data proc
 import re
 
 import globvars as gv
@@ -1292,11 +1291,13 @@ def getIntervals(bininds,width=100,thr=0.1, percentthr=0.8,inc=5, minlen=50,
 
 def fillBinsFromAnns(anns,  duration, sfreq=256,
                      descr_to_skip=['notrem_L', 'notrem_R'], printLog=0):
+    # returns bin mask, where everything that belongs to at least one of the
+    # annotations from the list (except descr_to_skip), is marked with 1
     if isinstance(anns,mne.Annotations):
         anns = [anns]
 
     nbins = int(duration * sfreq)
-    bins = np.zeros(nbins)
+    binmask = np.zeros(nbins)
 
     for anns_cur in anns:
         ivalis = ann2ivalDict(anns_cur)
@@ -1310,8 +1311,8 @@ def fillBinsFromAnns(anns,  duration, sfreq=256,
                 if printLog:
                     print('fillBinsFromAnns :',start,end)
                 sl = slice(int(start*sfreq),int(end*sfreq),None )
-                bins[sl] = 1
-    return bins
+                binmask[sl] = 1
+    return binmask
 
 def mergeAnns(anns, duration, sfreq=256, descr_to_skip=['notrem_L', 'notrem_R'],
              out_descr = 'merged'):
@@ -1332,6 +1333,7 @@ def mergeAnns(anns, duration, sfreq=256, descr_to_skip=['notrem_L', 'notrem_R'],
     for s,e in pairs:
         ss,ee = s/sfreq,e/sfreq
         ivals += [(ss,ee,out_descr)]
+
     return intervals2anns(ivals)
 
 
@@ -2034,623 +2036,7 @@ def getBandHilbDat(data, sfreq, l_freq,h_freq, ret_flt=0):
     else:
         return ang, instfreq, instampl
 
-# found on stackoverflow by someone called NaN
-def stride(a, win=(3, 3), stepby=(1, 1)):
-    """Provide a 2D sliding/moving view of an array.
-    There is no edge correction for outputs. Use the `pad_` function first."""
-    err = """Array shape, window and/or step size error.
-    Use win=(3,) with stepby=(1,) for 1D array
-    or win=(3,3) with stepby=(1,1) for 2D array
-    or win=(1,3,3) with stepby=(1,1,1) for 3D
-    ----    a.ndim != len(win) != len(stepby) ----
-    cuts away last edge bins
 
-    if for 2-D array given win(1,wsz) then return array of shape nchans x nwindows x wsz
-    """
-    from numpy.lib.stride_tricks import as_strided
-    a_ndim = a.ndim
-    if isinstance(win, int):
-        win = (win,) * a_ndim
-    if isinstance(stepby, int):
-        stepby = (stepby,) * a_ndim
-    assert (a_ndim == len(win)) and (len(win) == len(stepby)), err
-    shp = np.array(a.shape)    # array shape (r, c) or (d, r, c)
-    win_shp = np.array(win)    # window      (3, 3) or (1, 3, 3)
-    ss = np.array(stepby)      # step by     (1, 1) or (1, 1, 1)
-    newshape = tuple(((shp - win_shp) // ss) + 1) + tuple(win_shp)
-    newstrides = tuple(np.array(a.strides) * ss) + a.strides
-    a_s = as_strided(a, shape=newshape, strides=newstrides, subok=True).squeeze()
-    return a_s
-
-def H_difactmob(dat,dt, windowsz = None, dif = None, skip=None, stride_ver = True):
-    import pandas as pd
-    # last axis is time axis
-    if dif is None:
-        dif = np.diff(dat,axis=-1, prepend=dat[:,0][:,None] ) / dt
-    if windowsz is None:
-        activity = np.var(dat, axis=-1)
-        vardif = np.var(dif, axis=-1)
-    else:
-        #raise ValueError('not implemented yet')
-        if dat.ndim > 1:
-            if stride_ver:
-                win = (1,windowsz)
-                step = (1,skip)
-                stride_view_dat = stride(dat, win=win, stepby=step )
-                activity = np.var(stride_view_dat,axis=-1, ddof=1)  #ddof=1 to agree with pandas version
-
-                #print(dat.shape, activity.shape, win, step)
-
-                stride_view_dif = stride(dif, win=win, stepby=step )
-                vardif = np.var(stride_view_dif,axis=-1, ddof=1)
-            else:
-                activity = []
-                vardif = []
-                for dim in range(dat.shape[0]):
-                    act = pd.Series(dat[dim]).rolling(windowsz).var()
-                    var   = pd.Series(dif[dim]).rolling(windowsz).var()  # there is one-bin shift here, better to remove..
-                    activity += [act]
-                    vardif += [var]
-                activity = np.vstack(activity)
-                vardif = np.vstack(vardif)
-        else:
-            raise ValueError('wrong ndim, shape = {}'.format(dat.shape) )
-
-    bad_act = np.abs(activity) < 1e-10
-    activity_bettered = activity[:]
-    activity_bettered[bad_act] = 1e-10
-    mobility = np.sqrt( vardif / activity_bettered )
-    mobility[bad_act] = 0
-    if (skip is not None) and not stride_ver:
-        #dif       = dif[:,::skip]  # DON'T touch it!!
-        activity  = activity[:,::skip]
-        mobility  = mobility[:,::skip]
-
-    return dif,activity, mobility
-
-def Hjorth(dat, dt, windowsz = None, skip=None,stride_ver=True, remove_invalid = False):
-    if isinstance(dat,list):
-        acts, mobs, compls, wbds = [],[],[], []
-        for subdat in dat:
-            a,m,c,wbd = Hjorth(subdat,dt,windowsz,skip,stride_ver, remove_invalid=remove_invalid)
-            acts += [a]
-            mobs += [m]
-            compls += [c]
-            wbds += [wbd]
-        #acts = np.concatenate(acts,axis=-1)
-        #mobs = np.concatenate(mobs,axis=-1)
-        #compls = np.concatenate(compls,axis=-1)
-        return acts, mobs, compls, wbds
-    elif not isinstance(dat,np.ndarray):
-        raise ValueError('Wrong type {}'.format(type(dat) ) )
-
-    #print(dat.shape)
-
-    ndb = dat.shape[-1]
-    padlen = windowsz-skip
-    #if  int(ndb / windowsz) * windowsz - ndb == 0:  # dirty hack to agree with pandas version
-    #    padlen += 1
-
-    if stride_ver:
-        #print('Using Hjorth stride ver for dat type {}'.format( type(dat) ) )
-        assert dat.ndim == 2, dat.shape
-        dat = np.pad(dat, [(0,0), (padlen,0) ], mode='edge' )
-    else:
-        raise ValueError('lost validity')
-    dif = np.diff(dat,axis=-1, prepend=dat[:,0][:,None] ) / dt
-    dif2 = np.diff(dif,axis=-1, prepend=dif[:,0][:,None] ) / dt
-
-    dif, activity, mobility = H_difactmob(dat,dt, windowsz=windowsz, dif=dif, skip=skip, stride_ver=stride_ver)
-    import gc;gc.collect()
-    dif2, act2, mob2 = H_difactmob(dif,dt, windowsz=windowsz, dif=dif2, skip=skip, stride_ver=stride_ver)
-    del dif
-    del dif2
-    del act2
-
-    bad_mob = np.abs(mobility) < 1e-10
-    mobility_bettered = mobility[:]
-    mobility_bettered[bad_mob] = 1e-10
-    complexity = mob2 / mobility_bettered
-    complexity[bad_mob] = 0
-    #complexity = mob2 / mobility
-
-    n = windowsz // skip
-    #n = padlen-1
-    if stride_ver and not remove_invalid:               # dirty hack to agree with pandas version
-        activity[:,:n] = np.nan
-        mobility[:,:n] = np.nan
-        complexity[:,:n] = np.nan
-
-    if not stride_ver and remove_invalid:
-        activity   = activity[:,n:]
-        mobility   = mobility[:,n:]
-        complexity = complexity[:,n:]
-
-    nbins_orig = ndb
-    wsz = windowsz
-    decim = skip
-
-    pred = np.arange(ndb + padlen)
-    wnds = stride(pred, (windowsz,), (decim,) )
-    window_boundaries = np.vstack( [ wnds[:,0], wnds[:,-1] + 1 ] )
-    #print(window_boundaries)
-
-    if remove_invalid:
-        #window_boundaries_st =  np.arange(0,nbins_orig - wsz, decim )
-        #window_boundaries_end = window_boundaries_st + wsz
-        #window_boundaries = np.vstack( [ window_boundaries_st, window_boundaries_end] )
-
-
-        #mobility = mobility[    :,0:-windowsz//decim]
-        #activity = activity[    :,0:-windowsz//decim]
-        #complexity = complexity[:,0:-windowsz//decim]
-        sl = slice(windowsz//decim - 1,None,None)
-        mobility = mobility[    :,sl]
-        activity = activity[    :,sl]
-        complexity = complexity[:,sl]
-        window_boundaries = window_boundaries[:,sl] - padlen
-        #print(window_boundaries)
-    #else:
-    #    strt = 0
-    #    window_boundaries_st =  np.arange(strt - wsz + 1,nbins_orig, decim ) # we start from zero if wsz divide 2 and decim well
-    #    #window_boundaries_st = np.maximum( window_boundaries_st - wsz, 0)
-    #    window_boundaries_end = window_boundaries_st + wsz
-    #    window_boundaries_end = np.minimum( window_boundaries_st, nbins_orig)
-    #    window_boundaries = np.vstack( [ window_boundaries_st, window_boundaries_end] )
-
-    if window_boundaries.shape[-1] != activity.shape[-1]:
-        s = 'dat {}, padlen {} act {}, wbd {}'.format(dat.shape, padlen, activity.shape, window_boundaries.shape)
-        raise ValueError(s)
-
-    return activity, mobility, complexity, window_boundaries
-
-
-def selectIndPairs(chnames_nice, chnames_short ,include_pairs,upper_diag=True,inc_same=True,
-                   LFP2LFP_only_self=True, cross_within_parcel=False):
-    '''
-    include_pairs -- pairs of regex
-    chnames_nice -- msrc_<roi_label>_c<component ind>
-    inc_same -- whether we include self couplings (only makes sense if upper_diag is True)
-
-    returns
-    ind_pairs -- list of lists of channel indices coupled to a given channel ind
-    ind_pairs_parcelis -- dict (key=parcel ind) of dictionaries (keys=channel ind) of channel inds
-    ind_pairs_parcelsLFP -- dict (key=LFP chname) of lists of src channel inds
-    parcel_couplings -- dict (key=pair of parcel inds) of lists of pairs of channel inds
-    LFP2parcel_couplings -- dict (key=pair LFP chname, parcel ind) of lists of pairs (LFP channel ind, source ind)
-    '''
-    assert len(chnames_nice) == len(chnames_short)
-    N = len(chnames_nice)
-    ind_pairs = [0] * N
-    parcel_couplings = {}
-    LFP2parcel_couplings = {}
-    LFP2LFP_couplings = {}
-
-    sides_,groupis_,parcelis_,compis_ = parseMEGsrcChnamesShortList(chnames_short)
-
-    ind_pairs_parcelsLFP = {}
-    #len( set(parcelis_) )
-    ind_pairs_parcelis = {}
-    # look at all upper diag (or entire matrix) combinations
-    for i in range(N):
-        chn1 = chnames_nice[i]
-        inds = []
-        #ind_of_ind = 0
-        if upper_diag:
-            if inc_same:
-                sl = range(i,N)
-            else:
-                sl = range(i+1,N)
-        else:
-            sl = range(0,N)
-        # cycle over channel indices
-        for j in sl:
-            chn2 = chnames_nice[j]
-            wasSome = False
-            if ( ('LFP_self','LFP_self') in include_pairs) and \
-                    (chn1.startswith('LFP') and chn2.startswith('LFP')):
-                if j == i and LFP2LFP_only_self:
-                    wasSome = True
-
-                    pair = (chn1,chn2)
-                    if pair not in LFP2LFP_couplings:
-                        LFP2LFP_couplings[pair] = [ ]
-                    #LFP2parcel_couplings[pair] += [ (i,ind_of_ind) ]
-                    LFP2LFP_couplings[pair] += [ (i,j) ]
-            else:
-                # check if given upper diag combination is good (belongs to any
-                # of the type crossings
-                for pairing_ind,(s1,s2) in enumerate(include_pairs):
-                    # first we decide if we process this pair or skip it
-                    parcel_ind1 = parcelis_[i]
-                    parcel_ind2 = parcelis_[j]
-
-                    r1,r2 =  None,None
-                    if s1 == 'msrc_self' and s2 == 'msrc_self':
-                        cond_chans_same = (chn1==chn2)
-                        cond_parcels_same = (parcel_ind1==parcel_ind2)
-                        if cross_within_parcel:
-                            cond = cond_parcels_same
-                        else:
-                            cond = cond_chans_same
-                        if chn1.startswith('msrc') and cond:
-                            r1,r2 = 1,1 #anything that is not None
-                    else:
-                        r1 = re.match(s1,chn1)
-                        r2 = re.match(s2,chn2)
-                    #if j == N - 1 and i == 1 and s1.find('LFP') < 0:
-                    #    print(r1,r2)
-                    #    print(chn1, chn2, s1, s2)
-
-                    if r1 is None or r2 is None:
-                        continue
-
-
-                    #print(s1,s2,chn1,chn2,parcel_ind1,parcel_ind1)
-                    #print(pairing_ind,chn1,chn2,parcel_ind1,parcel_ind2)
-
-                    wasSome = True
-                    if chn1.startswith('msrc') and chn2.startswith('msrc'):
-                        #print(pairing_ind,chn1,chn2,parcel_ind1,parcel_ind2)
-
-                        #side1, gi1, parcel_ind1, si1  = parseMEGsrcChnameShort(chnames_short[i])
-                        #side2, gi2, parcel_ind2, si2  = parseMEGsrcChnameShort(chnames_short[j])
-                        pair = (parcel_ind1,parcel_ind2)
-
-                        if pair not in parcel_couplings:
-                            parcel_couplings[pair] = []
-                        #parcel_couplings[pair] += [ (i,ind_of_ind) ]
-                        parcel_couplings[pair] += [ (i,j) ]
-
-                        if parcel_ind1 not in ind_pairs_parcelis:
-                            dd =  {i:[] }
-                            ind_pairs_parcelis[parcel_ind1] = dd
-                        if i not in ind_pairs_parcelis[parcel_ind1]:
-                            ind_pairs_parcelis[parcel_ind1][i] = []
-                        ind_pairs_parcelis[parcel_ind1][i] += [j]
-                    else:
-                        parcel_ind_valid = None
-                        lfp_chn = None
-                        msrc_chi = None
-                        lfp_chi  = None
-                        if chn1.startswith('LFP') and chn2.startswith('msrc'):
-                            #side2, gi2, parcel_ind2, si2  = parseMEGsrcChnameShort(chnames_short[j])
-                            lfp_chn = chn1
-                            parcel_ind_valid = parcel_ind2
-                            msrc_chi = j
-                            lfp_chi  = i
-                        elif chn1.startswith('msrc') and chn2.startswith('LFP'):
-                            #side1, gi1, parcel_ind1, si1  = parseMEGsrcChnameShort(chnames_short[i])
-                            lfp_chn = chn2
-                            parcel_ind_valid = parcel_ind1
-                            msrc_chi = i
-                            lfp_chi  = j
-                        else:
-                            raise ValueError('Weird channel names {} {}'.format(chn1,chn2) )
-                        pair = (lfp_chn,parcel_ind_valid)
-                        assert pair[0] is not None and pair[1] is not None, '2 Weird channel names {} {}'.format(chn1,chn2)
-
-                        #print('pair {}, lfp_chi {} ,msrc_chi {}, i {},j {},chn1 {},chn2 {}'.
-                        #      format(pair, lfp_chi,msrc_chi, i,j,chn1,chn2) )
-
-                        if pair not in LFP2parcel_couplings:
-                            LFP2parcel_couplings[pair] = []
-                        #LFP2parcel_couplings[pair] += [ (i,ind_of_ind) ]
-                        #LFP2parcel_couplings[pair] += [ ( i,j) ]
-                        LFP2parcel_couplings[pair] += [ (lfp_chi,msrc_chi) ]
-
-                        if lfp_chn not in ind_pairs_parcelsLFP:
-                            ind_pairs_parcelsLFP[lfp_chn] = []
-                        #if i not in ind_pairs_parcelsLFP[lfp_chn]:
-                        #    ind_pairs_parcelsLFP[lfp_chn][lfp_chi] = []
-                        ind_pairs_parcelsLFP[lfp_chn] += [msrc_chi]
-
-                        #break
-            if wasSome:
-                inds += [j]
-                #ind_of_ind += 1
-        ind_pairs[i] = inds
-    return ind_pairs, ind_pairs_parcelis, ind_pairs_parcelsLFP, \
-        parcel_couplings, LFP2parcel_couplings, LFP2LFP_couplings
-
-def tfr2csd(dat, sfreq, returnOrder = False, skip_same = [], ind_pairs = None,
-            parcel_couplings=None, LFP2parcel_couplings=None, LFP2LFP_couplings=None,
-            oldchns = None, newchns = None,
-            normalize = False, res_group_id=9, log=False):
-
-    #ind_pairs_parcels = None,  ind_pairs_parcelsLFP = None,
-    ''' csd has dimensions Nchan x nfreax x nbins
-
-    sum over couplings of same kind
-    for couplings of parcels it computes absolute value of imag coherence
-    for LFP-parcel couplings, just abs of CSD
-
-    returns n x (n+1) / 2  x nbins array
-    skip same = indices of channels for which we won't compute i->j correl (usually LFP->LFP)
-      note that it ruins getCsdVals
-    ind_paris -- list of pairs (index, list of indces)
-
-
-    parcel_couplings -- dict pair of indices of parcels -> list of pairs
-    '''
-    assert dat.ndim == 3
-    n_channels = dat.shape[0]
-    csds = []
-    order  = []
-
-    # get info corresponding to every source
-    sides_,groupis_,parcelis_,compis_ = parseMEGsrcChnamesShortList(oldchns)
-
-    fast_ver = False
-    if fast_ver:
-        raise ValueError('Needs debugging!')
-
-    if ind_pairs is not None:
-        assert len(ind_pairs) == n_channels
-        for chi in range(n_channels):
-            good_sec_inds = ind_pairs[chi]
-            if len(good_sec_inds):
-                r = np.conj ( dat[[chi]] ) *  ( dat[good_sec_inds] )    # upper diagonal elements only, same freq cross-channels
-                if normalize:
-                    norm = np.abs(r)
-                    r /= norm
-                csds += [r  ]
-
-                secarg = np.array( good_sec_inds, dtype=int )
-                firstarg = np.ones(len(secarg), dtype=int ) * chi
-                curindPairs = np.vstack( [firstarg,secarg] )
-                order += [curindPairs]
-
-    else:
-        if parcel_couplings is None:
-            for chi in range(n_channels):
-                if len(skip_same) > 0:
-                    good_sec_inds = [chi]
-                    for chi2 in range(chi+1,n_channels):
-                        if not ( (chi in skip_same) and (chi2 in skip_same) ):
-                            good_sec_inds += [chi2]
-                    r = np.conj ( dat[[chi]] ) *  ( dat[good_sec_inds] )    # upper diagonal elements only, same freq cross-channels
-                    secarg = np.array( good_sec_inds, dtype=int )
-                else:
-                    r = np.conj ( dat[[chi]] ) *  ( dat[chi:] )    # upper diagonal elements only, same freq cross-channels
-                    secarg   = np.arange(chi,n_channels)
-                firstarg = np.ones(len(secarg), dtype=int ) * chi
-                curindPairs = np.vstack( [firstarg,secarg] )
-                order += [curindPairs]
-
-                if normalize:
-                    norm = np.abs(r)
-                    r /= norm
-                #print(r.shape)
-                csds += [r  ]
-        else:
-            for pc in parcel_couplings:
-                (pi1,pi2) = pc
-                firstarg = []
-                secarg = []
-                chn1,chn2 = None,None
-                r = np.zeros( (1, dat.shape[1], dat.shape[2] ), dtype=np.complex )
-                rimabs = np.zeros( (1, dat.shape[1], dat.shape[2] ), dtype=np.complex )
-
-                if fast_ver:
-                    # which sources belong to the parcel with given index
-                    chis_cur_parcel = np.where(parcelis_ == pi1)[0]
-                    ntot =0
-                    for chi in chis_cur_parcel:
-                        good_sec_inds_ = ind_pairs[chi]  # channel indices
-                        good_sec_inds = good_sec_inds_(parcelis_[ good_sec_inds_  ] == pi2 ) #selecting a subset
-                        ntot += len(good_sec_inds)
-                        if len(good_sec_inds):
-                            rtmp = np.conj ( dat[[chi]] ) *  ( dat[good_sec_inds] )    # upper diagonal elements only, same freq cross-channels
-                            if normalize:
-                                norm = np.abs(rtmp)
-                                rtmp /= norm
-                            r      += np.sum(np.abs(rtmp),      axis=0) #TODO: NOOO! this way we get 1 here always
-                            rimabs += np.sum(np.abs(rtmp.imag), axis=0)
-
-                            #secarg = np.array( good_sec_inds, dtype=int )
-                            #firstarg = np.ones(len(secarg), dtype=int ) * chi
-                            #curindPairs = np.vstack( [firstarg,secarg] )
-                            #order += [curindPairs]
-                        side1 =  sides_[chi]
-                        side2 =  sides_[good_sec_inds[0] ]
-                    r /= ntot
-                    rimabs /= ntot
-                else:
-                    ind_pairs = parcel_couplings[pc]
-                    #ip_from = [ ip[0] for ip in ind_pairs ]
-                    #ip_to =   [ ip[1] for ip in ind_pairs ]
-
-                    #print('starting parcel pair ',pc)
-                    r = np.zeros( (1, dat.shape[1], dat.shape[2] ), dtype=np.complex )
-                    rimabs = np.zeros( (1, dat.shape[1], dat.shape[2] ), dtype=np.complex )
-
-                    #for ifrom from ip_from:
-                    #    rtmp = np.conj ( dat[[ifrom]] ) *  ( dat[ip_to] )  # upper diagonal elements only, same freq cross-channels
-                    ninds_counted = 0
-
-                    for (i,j) in ind_pairs:
-                        rtmp = np.conj ( dat[[i]] ) *  ( dat[[j]] )    # upper diagonal elements only, same freq cross-channels
-
-                        if normalize:
-                            norm = np.abs(rtmp)
-                            rtmp /= norm
-
-                        r_cur = rtmp / len(ind_pairs)
-                        rimabs_cur = np.abs(rtmp.imag) / len(ind_pairs)
-                        if log:
-                            r_cur = np.log(r_cur)
-                            if pi1 != pi2:  # otherwise we won't use it anyway
-                                m = np.min(rimabs_cur)
-                                if m < 1e-14:
-                                    numsmall = np.sum(rimabs_cur <  1e-14)
-                                    print('tfr2csd Warning: in rimabs_cur min is {}, total num of small bins {}={:.2f}%. Using mixumim'.
-                                          format(m,numsmall, (numsmall/rimabs_cur.size) * 100) )
-                                    rimabs_cur = np.maximum(1e-14, rimabs_cur)
-                                    #import ipdb; ipdb.set_trace()
-                                rimabs_cur = np.log(rimabs_cur)
-                        r +=  r_cur
-                        rimabs += rimabs_cur
-                        ninds_counted += 1
-
-                        # DEBUG
-                        #print('pc={} pair={}; mins dat[i]={:.4f}, dat[j]={:.4f}, rtmp={:.8f}, rtmpi={}'.format(
-                        #    pc,(i,j), np.min(np.abs(dat[i]) ), np.min(np.abs(dat[j]) ),
-                        #    np.min(np.abs(rtmp) ), np.min(np.abs(rtmp.imag) ) ) )
-
-                        # we don't really care which particular sources for
-                        # chnames, we only need parcel indices to know which
-                        # new channel it corresponds to
-                        chn1 = oldchns[i]
-                        chn2 = oldchns[j]
-
-                    assert ninds_counted > 0
-
-                    # we don't need parcel inds (we know them) but we need
-                    # sides
-                    side1, gi1, parcel_ind1, si1  = parseMEGsrcChnameShort(chn1)
-                    side2, gi2, parcel_ind2, si2  = parseMEGsrcChnameShort(chn2)
-                    assert pi1 == parcel_ind1 and pi2 == parcel_ind2
-
-                newchn1 = 'msrc{}_{}_{}_c{}'.format(side1,res_group_id,pi1,0)
-                newchn2 = 'msrc{}_{}_{}_c{}'.format(side2,res_group_id,pi2,0)
-
-                newi = newchns.index(newchn1)
-                newj = newchns.index(newchn2)
-
-                firstarg += [newi]
-                secarg   += [newj]
-
-                curindPairs = np.vstack( [firstarg,secarg] )
-                order += [curindPairs]
-
-                #print(r.shape)
-                if pi1 == pi2:
-                    csds += [r  ]
-                else:
-                    csds += [rimabs  ]
-
-                if np.max(np.abs(csds[-1].imag)) > 1e-10:
-                    print('nonzero imag for parcel pair ',pc)
-
-            for pc in LFP2parcel_couplings:
-                (chn1,pi2) = pc
-                ind_pairs = LFP2parcel_couplings[pc]
-
-                firstarg = []
-                secarg = []
-                chn2 = None
-
-                r = np.zeros( (1, dat.shape[1], dat.shape[2] ), dtype=np.complex )
-                #rimabs = np.zeros( (1, dat.shape[1], dat.shape[2] ), dtype=np.complex )
-
-                if fast_ver:
-                    chi = np.where(oldchns == chn1)[0][0]
-                    ntot =0
-                    good_sec_inds_ = ind_pairs[chi]  # channel indices
-                    good_sec_inds = good_sec_inds_(parcelis_[ good_sec_inds_  ] == pi2 ) #selecting a subset
-                    ntot += len(good_sec_inds)
-                    if len(good_sec_inds):
-                        rtmp = np.conj ( dat[[chi]] ) *  ( dat[good_sec_inds] )    # upper diagonal elements only, same freq cross-channels
-                        if normalize:
-                            norm = np.abs(rtmp)
-                            rtmp /= norm
-                        r      += np.sum(np.abs(rtmp),      axis=0)
-                        #rimabs += np.sum(np.abs(rtmp.imag), axis=0)
-
-                        #secarg = np.array( good_sec_inds, dtype=int )
-                        #firstarg = np.ones(len(secarg), dtype=int ) * chi
-                        #curindPairs = np.vstack( [firstarg,secarg] )
-                        #order += [curindPairs]
-                    side2 =  sides_[good_sec_inds[0] ]
-                    r /= ntot
-                    #rimabs /= ntot
-                else:
-                    ninds_counted = 0
-                    for (i,j) in ind_pairs:
-                        rtmp = np.conj ( dat[[i]] ) *  ( dat[[j]] )    # upper diagonal elements only, same freq cross-channels
-
-                        if normalize:
-                            norm = np.abs(rtmp)
-                            rtmp /= norm
-
-                        r_cur = rtmp / len(ind_pairs)
-                        if log:
-                            r_cur = np.log(r_cur)
-                        r += r_cur
-                        ninds_counted += 1
-
-                        # we don't really care which particular sources, we only need parcel indices
-                        chn2 = oldchns[j]
-                    #print(i,j,chn1,chn2)
-                    side2, gi2, parcel_ind2, si2  = parseMEGsrcChnameShort(chn2)
-
-                    assert ninds_counted > 0
-
-                newchn1 = chn1
-                newchn2 = 'msrc{}_{}_{}_c{}'.format(side2,res_group_id,parcel_ind2,0)
-
-                newi = newchns.index(newchn1)
-                newj = newchns.index(newchn2)
-
-                firstarg += [newi]
-                secarg   += [newj]
-
-                curindPairs = np.vstack( [firstarg,secarg] )
-                order += [curindPairs]
-
-                #print(r.shape)
-                csds += [r  ]
-            for pc in LFP2LFP_couplings:
-                (chn1,chn2) = pc
-                ind_pairs = LFP2LFP_couplings[pc]
-
-                firstarg = []
-                secarg = []
-
-                ninds_counted = 0
-                r = np.zeros( (1, dat.shape[1], dat.shape[2] ), dtype=np.complex )
-                for (i,j) in ind_pairs:
-                    rtmp = np.conj ( dat[[i]] ) *  ( dat[[j]] )    # upper diagonal elements only, same freq cross-channels
-
-                    if normalize:
-                        norm = np.abs(rtmp)
-                        rtmp /= norm
-
-                    r_cur = rtmp / len(ind_pairs)
-                    if log:
-                        r_cur = np.log(r_cur)
-
-                    r += r_cur
-                    ninds_counted += 1
-
-                    # we don't really care which particular sources, we only need parcel indices
-                assert ninds_counted > 0
-                newchn1 = chn1
-                newchn2 = chn2
-
-                newi = newchns.index(newchn1)
-                newj = newchns.index(newchn2)
-
-                firstarg += [newi]
-                secarg   += [newj]
-
-                curindPairs = np.vstack( [firstarg,secarg] )
-                order += [curindPairs]
-
-                #print(r.shape)
-                csds += [r  ]
-
-
-    order = np.hstack(order)
-
-    csd = np.vstack( csds )
-    csd /= sfreq
-
-    ret = csd
-    if returnOrder:
-        ret = csd, order
-    return ret
 
 def getCsdVals(csd,i,j, n_channels, updiag = 0):
     #swap
@@ -2694,6 +2080,8 @@ def removeAnnsByDescr(anns, anns_descr_to_remove, printLog=True):
     full equality is searched for
     '''
     #anns_descr_to_remove = ['endseg', 'initseg', 'middle', 'incPost' ]
+    if isinstance(anns_descr_to_remove,str):
+        anns_descr_to_remove = [anns_descr_to_remove]
     assert isinstance(anns_descr_to_remove,list)
     anns_upd = anns.copy()
 
@@ -2729,7 +2117,8 @@ def removeAnnsByDescr(anns, anns_descr_to_remove, printLog=True):
 #                            duration = duration_upd,
 #                            description=descrs_upd,
 #                            orig_time=None)
-    print('Overall removed {} annotations: {}'.format(Nbads, set(remtype) ) )
+    print('removeAnnsByDescr: Overall with basestr={} removed {} annotations: {}'.
+          format( anns_descr_to_remove, Nbads, set(remtype) ) )
 
     return anns_upd
 
@@ -3467,18 +2856,18 @@ def changeRawInfoSides(raw,roi_labels=None, srcgrouping_names_sorted=None):
             templ_str = 'msrc'
             #sidelet = oldchn[ len(templ_str)]
 
-            sidelet,srcgroup_ind, ind, subind = parseMEGsrcChnameShort(chn)
+            sidelet,srcgroup_ind, ind, subind = parseMEGsrcChnameShort(oldchn)
             opsidelet = getOppositeSideStr(sidelet)
 
             rl = roi_labels[srcgrouping_names_sorted[srcgroup_ind] ]
             lab = rl[ind]
             lab_l = list(lab)
-            assert labl_l[-1] == sidelet
+            assert lab_l[-1] == sidelet
             lab_l[-1] = opsidelet
-            oplab = str(lab_l)
+            oplab = ''.join(lab_l)
             indop = rl.index(oplab)
 
-            newchn = genMEGsrcChnameShort(opsidelet, grouping_ind, opind, subind)
+            newchn = genMEGsrcChnameShort(opsidelet, srcgroup_ind, indop, subind)
 
             #newchn = newchn.replace(templ_str + sidelet , templ_str + opsidelet)
         elif oldchn.find('MEG') == 0:
@@ -3505,7 +2894,7 @@ def changeRawInfoSides(raw,roi_labels=None, srcgrouping_names_sorted=None):
 
         info['chs'][chni]['ch_name'] = newchn
         info['ch_names'][chni] = newchn
-        print(oldchn,newchn)
+        #print('changeRawInfoSides:',oldchn,newchn)
 
     # do NOT change the data order, only channel names
     rnew = mne.io.RawArray(raw.get_data() ,info)
@@ -3749,6 +3138,7 @@ def intervalJSON2Anns(rawname_, use_new_intervals = True, maintremside=None, ret
     return r
 
 def getIntervalsTotalLens(ann, include_unlabeled = False, times=None, interval=None):
+    # interval is bascially crop range
     if isinstance(ann,dict):
         ivalis = ann
     else:
@@ -3800,7 +3190,6 @@ def getIntervalsTotalLens(ann, include_unlabeled = False, times=None, interval=N
 def getWindowIndicesFromIntervals(wbd,ivalis,sfreq, ret_type='bins_list',
                                   wbd_type='contig', ret_indices_type = 'window_inds',
                                   nbins_total=None, nwins_total=None):
-                                  #skip = None):
     '''
     wbd are bin indices bounds in original timebins array
     ivalis count from zero, time bounds
@@ -3843,6 +3232,7 @@ def getWindowIndicesFromIntervals(wbd,ivalis,sfreq, ret_type='bins_list',
     bin_bounds = {}
     time_bounds = {}
     for it in ivalis:
+        total_bindins_found = 0
         intervals = ivalis[it]
         binscur       = []
         bin_boundscur = []
@@ -3860,8 +3250,12 @@ def getWindowIndicesFromIntervals(wbd,ivalis,sfreq, ret_type='bins_list',
             #cond = np.logical_or(cond,cond3)
 
             inds = np.where(cond)[0]   # indices of windows
+            total_bindins_found += len(inds)
+            #print(it,s,e, len(inds) )
+
             if len(inds) == 0:
-                print('getWindowIndicesFromIntervals: EMPTY {},{},{}'.format(it_,s,e))
+                print('getWindowIndicesFromIntervals: EMPTY {}, start {}, end {}'.format(it_,s,e))
+                import pdb; pdb.set_trace()
                 empty = True
                 continue
             ws,we = inds[0],inds[-1]
@@ -3896,6 +3290,9 @@ def getWindowIndicesFromIntervals(wbd,ivalis,sfreq, ret_type='bins_list',
             bin_bounds[it] = bin_boundscur
             time_bounds[it] = time_boundscur
 
+        if total_bindins_found == 0:
+            print('getWindowIndicesFromIntervals: EMPTY COMPLETELY {}'.format(it_))
+
     if ret_type == 'time_bounds_list':
         r = time_bounds
     elif ret_type == 'bin_bounds_list':
@@ -3908,17 +3305,17 @@ def setArtifNaN(X, ivalis_artif_tb_indarrays_merged, feat_names, ignore_shape_wa
     '''
     copies input array
     '''
-    assert X.shape[1] == len(feat_names), (X.shape[1], len(feat_names) )
-    assert isinstance(X,np.ndarray)
-    if not ignore_shape_warning:
-        assert X.shape[0] > X.shape[1]
-    assert isinstance(ivalis_artif_tb_indarrays_merged, dict)
     if feat_names is None:
         mode_all_chans = True
         feat_names = ['*&rAnDoM*&'] * X.shape[1]
     else:
         mode_all_chans = False
         assert isinstance(feat_names[0], str)
+    assert X.shape[1] == len(feat_names), (X.shape[1], len(feat_names) )
+    assert isinstance(X,np.ndarray)
+    if not ignore_shape_warning:
+        assert X.shape[0] > X.shape[1]
+    assert isinstance(ivalis_artif_tb_indarrays_merged, dict)
     Xout = X.copy()
     for interval_name in ivalis_artif_tb_indarrays_merged:
         templ = 'BAD_(.+)'
@@ -4294,7 +3691,8 @@ def vizGroup(sind_str,positions,labels,srcgroups, show=True, labels_to_skip = ['
              show_legend=True):
     '''
     visualize src group
-    positions
+    positions -- 3D coords of ALL sources (not just subgroups)
+    srcgroups -- for each coord index an index from the list of an item in the labels list
     '''
     import pymatreader as pymr
     import os
@@ -4308,6 +3706,7 @@ def vizGroup(sind_str,positions,labels,srcgroups, show=True, labels_to_skip = ['
                                         'headmodel_grid_{}_surf.mat'.format(sind_str)) )
     tris = headfile['hdm']['bnd']['tri'].astype(int)
     rr_mm = headfile['hdm']['bnd']['pos']
+    rr_mm -= 1
     mam.triangular_mesh(rr_mm[:,0], rr_mm[:,1], rr_mm[:,2],
                         tris-1, color=(0.5,0.5,0.5),
                         opacity = 0.3, transparent=False)
@@ -4347,172 +3746,93 @@ def vizGroup(sind_str,positions,labels,srcgroups, show=True, labels_to_skip = ['
     #mam.close()"
     return clrs
 
-
-def bandAverage(freqs,freqs_inc_HFO,csd_pri,csdord_pri,csdord_LFP_HFO_pri,
-               csd_LFP_HFO_pri, fbands,fband_names, fband_names_inc_HFO,
-               newchnames, subfeature_order_lfp_highres, log_before_bandaver = True):
+def vizGroup2(sind_str,positions,labels,srcgroups, show=True, labels_to_skip = ['unlabeled'],
+             show_legend=True, alpha=0.1, seed=None, figsize_mult = 1, msz=15, printLog=0):
     '''
-    csd -- num csds x num freqs x time dim OR  list of such things
-    csdord -- 2 x num csds (  csdord[0,csdi] -- index of first channel in newchnames
-    \<csdord_bandwise\> -- concat of csdord with corresp band
+    visualize src group. Slower than vizGroup, but allows to save things normally and legends as well
+    positions -- 3D coords of ALL sources (not just subgroups)
+    srcgroups -- for each coord index an index from the list of an item in the labels list
     '''
-    print('Averaging over freqs within bands')
-    #if bands_only in ['fine', 'crude']:
-    #    if bands_only == 'fine':
-    #        fband_names = fband_names_fine
-    #    else:
-    #        fband_names = fband_names_crude
-
-    bpow_abscsd_pri = []
-    csdord_strs_pri = []
-
-    if isinstance(csd_pri,np.ndarray):
-        csd_pri = [csd_pri]
-    if isinstance(csd_LFP_HFO_pri,np.ndarray):
-        csd_LFP_HFO_pri = [csd_LFP_HFO_pri]
+    import pymatreader as pymr
+    import os
+    import mayavi.mlab as mam
+    import globvars as gv
+    import matplotlib as mpl
 
 
-    for dati  in range(len(csd_pri)):
-        csdord_strs = []
-        csd_ = csd_pri[dati]
-        csdord = csdord_pri[dati]
-        bpow_abscsd_curband = []
-        for bandi,bandname in enumerate(fband_names):
-            # get necessary freq indices
-            low,high = fbands[bandname]
-            freqis = np.where( (freqs >= low) * (freqs <= high) )[0]
-            assert len(freqis) > 0, bandname
+    #print('    ', sgdn)
+    fig = plt.figure(figsize=(14*figsize_mult,5*figsize_mult))
+    main_shape = 120
+    if show_legend:
+        main_shape = 130
+    ax_top = fig.add_subplot(main_shape+1,projection='3d', proj_type='ortho')
+    ax_side = fig.add_subplot(main_shape+2,projection='3d', proj_type='ortho')
 
-            #for dati  in range(len(csd_pri)):
-            # average over these freqs
-            csdcur = csd_[:,freqis,:]
-            vals_to_aver = np.abs(csdcur  )
-            if log_before_bandaver:
-                assert np.min( vals_to_aver ) > 1e-15
-                vals_to_aver = np.log(vals_to_aver)
-            bandpow = np.mean(vals_to_aver   , axis=1 )
+    headfile = pymr.read_mat(os.path.join(gv.data_dir,
+                                        'headmodel_grid_{}_surf.mat'.format(sind_str)) )
+    tris = headfile['hdm']['bnd']['tri'].astype(int)
+    rr_mm = headfile['hdm']['bnd']['pos']
+#     mam.triangular_mesh(rr_mm[:,0], rr_mm[:,1], rr_mm[:,2],
+#                         tris-1, color=(0.5,0.5,0.5),
+#                         opacity = 0.3, transparent=False)
+    print(tris.shape)
+    #x,y,z = positions[inds].T
+    ax_top.view_init(90,-90)
+    ax_top.plot_trisurf(rr_mm[:,0], rr_mm[:,1], rr_mm[:,2], triangles=tris-1,
+                    alpha=alpha)
+    ax_top.set_zticks([])
+    #ax_top.set_top_view()
 
-            # put into resulting list
-            bpow_abscsd_curband += [bandpow[:,None,:]]
-
-
-            #csdord_bandwise += [ np.concatenate( [csdord.T,  np.ones(csd.shape[0], \
-            #    dtype=int)[:,None]*bandi  ] , axis=-1) [:,None,:] ]
-
-            # currently it does not make sense because I already put in csd abs of
-            # imag CSD for parcel 2 parcel couplings
-            #bandaver_imagcoh = np.mean(   csdcur.imag  , axis=1 )
-            #bpow_imagcsd +=  [ bandaver_imagcoh [:,None,:] ]
-
-            for csdi in range(bandpow.shape[0]):
-                k1,k2 = csdord[:,csdi]
-                k1 = int(k1); k2=int(k2)
-                s = '{}_{},{}'.format( bandname, newchnames[k1] , newchnames[k2] )
-                csdord_strs += [s]
-
-            #bandpow2 = np.concatenate(bpow_abscsd_curband, axis=-1  )  # over time
-            #bpow_abscsd += [bandpow2]
-        bpow_abscsd = np.concatenate(bpow_abscsd_curband, axis=1)  # over bands
-        csdord_strs_pri += [csdord_strs]
-        bpow_abscsd_pri += [bpow_abscsd]
+    ax_side.view_init(0,0)
+    ax_side.plot_trisurf(rr_mm[:,0], rr_mm[:,1], rr_mm[:,2], triangles=tris-1,
+                    alpha=alpha)
+    ax_side.set_xticks([])
+    #ax_side.set_top_view()
 
 
-    del csd_
-    del vals_to_aver
-    del bandpow
-    del bpow_abscsd_curband
-    import gc; gc.collect()
-    #bpow_imagcsd = np.concatenate(bpow_imagcsd, axis=1)
+    if seed is not None:
+        np.random.seed(seed)
+    # create random colors for various labels
+    labels_cur = labels#_dict[sgdn]
+    clrs = np.random.uniform(low=0.3,size=(len(labels_cur),3))
+    # for clri in range(len(clrs) ):
+    #     colcur= clrs[clri]
+    #     ii = np.argmin(colcur)
+    #     colcur[ii] = max(colcur[ii], 0.7 )
 
+    msz = msz * figsize_mult
+    for grpi in range(len(labels_cur)):
+        lab = labels_cur[grpi]
+        if printLog:
+            print(lab)
+        #inds = np.where(srcgroups_dict[sgdn] == grpi)
+        inds = np.where(srcgroups == grpi)
+        if lab in labels_to_skip:
+            print('  skipping {} {} points'.format(len(inds),lab) )
+            continue
+        x,y,z = positions[inds].T
+        #mam.points3d(x,y,z, scale_factor=0.5, color = tuple(clrs[grpi]) )
+        ax_top.scatter(x,y,z,color=tuple(clrs[grpi]), s=msz)
+        ax_side.scatter(x,y,z,color=tuple(clrs[grpi]), s=msz)
 
-    #for bandi,bandname in enumerate(fband_names):
-    #    csdord_bandwise += [ np.concatenate( [csdord.T,  np.ones(csd.shape[0], \
-    #        dtype=int)[:,None]*bandi  ] , axis=-1) [:,None,:] ]
+    if show_legend:
+        ax_leg = fig.add_subplot(main_shape+3,projection='3d', proj_type='ortho')
+        legels = []
+        s = 12
+        for i in range(len(labels)):
+            if labels[i] in labels_to_skip:
+                continue
+            legel = mpl.lines.Line2D([0], [0], marker='o', color='w', label=labels[i],
+                                            markerfacecolor=clrs[i], markersize=s)
+            legels += [legel]
+        ax_leg.legend(handles = legels,loc='center')
+        ax_leg.set_xticks([])
+        ax_leg.set_yticks([])
+        ax_leg.set_zticks([])
+        ax_leg.view_init(90,-90)
+        ax_leg.grid(0)
 
-    # last dimension is index of band
-    #csdord_bandwise = np.concatenate(csdord_bandwise,axis=1)
-    #csdord_bandwise.shape
-
-    use_lfp_HFO = csd_LFP_HFO_pri is not None
-    csdord_strs_HFO_pri = []
-    bpow_abscsd_LFP_HFO_pri = []
-    if use_lfp_HFO:
-        #if bands_only in ['fine', 'crude']:
-        assert fband_names_inc_HFO is not None
-        fband_names_HFO = fband_names_inc_HFO[len(fband_names):]  # that HFO names go after
-        #bpow_abscsd_LFP_HFO = []
-        freqs_HFO = freqs_inc_HFO[ len(freqs): ]
-
-        for dati in range(len(csd_LFP_HFO_pri)):
-
-            csdord_strs_HFO = []
-            csd_LFP_HFO_ = csd_LFP_HFO_pri[dati]
-            csdord_LFP_HFO = csdord_LFP_HFO_pri[dati]
-            bpow_abscsd_curband = []
-            for bandi,bandname in enumerate(fband_names_HFO):
-                low,high = fbands[bandname]
-                freqis = np.where( (freqs_HFO >= low) * (freqs_HFO <= high) )[0]
-                assert len(freqis) > 0, bandname
-
-                csdcur = csd_LFP_HFO_[:,freqis,:]
-                vals_to_aver = np.abs(csdcur  )
-                if log_before_bandaver:
-                    assert np.min( vals_to_aver ) > 1e-15
-                    vals_to_aver = np.log(vals_to_aver)
-
-                bandpow = np.mean( vals_to_aver  , axis=1 )
-                bpow_abscsd_curband += [bandpow[:,None,:]]
-
-                #bandpow2 = np.concatenate(bpow_abscsd_curband, axis=-1  )  # over time
-                #bpow_abscsd_LFP_HFO += [bandpow2]
-
-                for csdi in range(bandpow.shape[0]):
-                    k1,k2 = csdord_LFP_HFO[:,csdi]
-                    k1 = int(k1); k2=int(k2)
-                    s = '{}_{},{}'.format( bandname, subfeature_order_lfp_highres[k1] ,
-                                        subfeature_order_lfp_highres[k2] )
-                    csdord_strs_HFO += [s]
-
-
-                #bpow_abscsd_LFP_HFO += [bpow_abscsd_curband]
-            bpow_abscsd_LFP_HFO = np.concatenate(bpow_abscsd_curband, axis=1) # over bands
-
-            csdord_strs_HFO_pri += [csdord_strs_HFO]
-            bpow_abscsd_LFP_HFO_pri += [ bpow_abscsd_LFP_HFO ]
-
-        #csdord_bandwise_LFP_HFO = []
-        #for bandi,bandname in enumerate(fband_names_HFO):
-        #    csdord_bandwise_LFP_HFO += [ np.concatenate( [csdord_LFP_HFO.T,  np.ones(csd_LFP_HFO.shape[0], dtype=int)[:,None]*bandi  ] , axis=-1) [:,None,:] ]
-
-        #csdord_bandwise_LFP_HFO = np.concatenate(csdord_bandwise_LFP_HFO,axis=1)
-        #csdord_bandwise_LFP_HFO.shape
-
-    ###################################
-
-    #print('Preparing csdord_strs')
-    #csdord_strs = []
-    ##for csdord_cur in csdords:
-    #csdord_cur = csdord
-    #for bandi in range(csdord_bandwise.shape[1] ):
-    #    for i in range(csdord_cur.shape[1]):
-    #        k1,k2 = csdord_cur[:,i]
-    #        k1 = int(k1); k2=int(k2)
-    #        s = '{}_{},{}'.format( fband_names[bandi], newchnames[k1] , newchnames[k2] )
-    #        csdord_strs += [s]
-
-
-    #if use_lfp_HFO:
-    #    csdord_cur = csdord_LFP_HFO
-    #    for bandi in range(csdord_bandwise_LFP_HFO.shape[1] ):
-    #        for i in range(csdord_cur.shape[1]):
-    #            k1,k2 = csdord_cur[:,i]
-    #            k1 = int(k1); k2=int(k2)
-    #            s = '{}_{},{}'.format( fband_names_HFO[bandi],
-    #                                subfeature_order_lfp_highres[k1] , subfeature_order_lfp_highres[k2] )
-    #            csdord_strs += [s]
-
-    bpow_imagcsd = None
-    return bpow_abscsd_pri, bpow_imagcsd, csdord_strs_pri, csdord_strs_HFO_pri, bpow_abscsd_LFP_HFO_pri
+    return clrs
 
 def parseMEGsrcChnamesShortList(chnames):
     sides = []
@@ -4530,385 +3850,82 @@ def parseMEGsrcChnamesShortList(chnames):
         compis += [compi]
     return sides,groupis,parcelis,compis
 
-def collectDataFromMultiRaws(rawnames, raws_permod_both_sides, sources_type,
-                             src_file_grouping_ind, src_grouping, use_main_LFP_chan,
-                             side_to_use, new_main_side, data_modalities,
-                             only_load_data,crop_start,crop_end,msrc_inds,
-                             mainLFPchans_pri=None, mainLFPchan_newname=None):
-    '''
-    side_to_use can be 'tremor_side', 'move_side' , 'both', 'left' , 'right'
-    rawnames are important to have because they give ordering
-    '''
-
-    assert new_main_side in ['left','right']
-    dat_pri = []
-    times_pri = []
-    times_hires_pri = []
-    dat_lfp_hires_pri = []
-    ivalis_pri = []
-
-    extdat_pri = []
-    anns_pri = []
-    raws_permod_pri = []
-    rec_info_pri = []
-    subfeature_order_pri = []
-    subfeature_order_lfp_hires_pri = []
-
-    use_ipsilat_CB = True
-
-    data_dir = gv.data_dir
-    aux_info_per_raw = {}
-    for rawind in range(len(rawnames) ):
-        gen_subj_info = gv.gen_subj_info
-        subj,medcond,task  = getParamsFromRawname(rawnames[rawind])
-        maintremside = gen_subj_info[subj]['tremor_side']
-        mainmoveside = gen_subj_info[subj].get('move_side',None)
-        if mainLFPchans_pri is not None:
-            mainLFPchan =  mainLFPchans_pri[rawind]
-        else:
-            mainLFPchan =  gen_subj_info[subj].get('lfpchan_used_in_paper',None)
-
-        rawname_ = rawnames[rawind]
-
-        src_rec_info_fn = '{}_{}_grp{}_src_rec_info'.format(rawname_,sources_type,src_file_grouping_ind)
-        src_rec_info_fn_full = os.path.join(gv.data_dir, src_rec_info_fn + '.npz')
-        rec_info = np.load(src_rec_info_fn_full, allow_pickle=True)
-        rec_info_pri += [rec_info]
-
-        roi_labels = rec_info['label_groups_dict'][()]      # dict of (orderd) lists
-        srcgrouping_names_sorted = rec_info['srcgroups_key_order'][()]  # order of grouping names
-        assert set(roi_labels.keys() ) == set(srcgrouping_names_sorted )
-        assert len(roi_labels) == 1, 'several groupings in single run -- not implmemented'
-        # assuming we have only one grouping present
-        roi_labels_cur = roi_labels[srcgrouping_names_sorted[src_grouping ]  ]
-
-
-
-        anns_fn = rawname_ + '_anns.txt'
-        anns_fn_full = os.path.join(data_dir, anns_fn)
-        anns = mne.read_annotations(anns_fn_full)
-        if crop_end is not None:
-            anns.crop(crop_start,crop_end)
-        anns_pri += [anns]
-
-        ivalis_pri += [ ann2ivalDict(anns) ]
-
-        #############################################################
-
-        raws = raws_permod_both_sides[rawname_]
-
-        if side_to_use == 'tremor_side':
-            main_body_side = maintremside
-        elif side_to_use == 'move_side':
-            main_body_side = mainmoveside
-        elif side_to_use in ['left', 'right']:
-            main_body_side = side_to_use
-        elif side_to_use == 'both':
-            main_body_side = ['left', 'right']
-        else:
-            raise ValueError('wrong side name')
-
-        if main_body_side != new_main_side:
-            side_switch_needed = True
-            print('WE WILL BE SWITCHING SIDES for {}'.format(rawname_) )
-        else:
-            side_switch_needed = False
-
-        aux_info_per_raw[rawname_] = {}
-        aux_info_per_raw[rawname_]['side_switched'] = side_switch_needed
-        aux_info_per_raw[rawname_]['main_body_side'] = main_body_side
-
-
-        import copy
-
-        assert isinstance(main_body_side,str)
-        ms_letter = main_body_side[0].upper()
-
-
-        raw_lfponly       = raws['LFP']
-        raw_lfp_hires     = raws.get('LFP_hires',None)
-        raw_srconly       = raws['src']
-        raw_emg_rectconv  = raws['EMG']
-
-        raw_lfponly.load_data()
-        raw_srconly.load_data()
-        raw_lfp_hires.load_data()
-
-        # first we separate channels by sides (we will select one side only later)
-        brain_sides = ['L', 'R'] # brain sides   # this is just for construction of data, we will restrict later
-        hand_sides_all = ['L', 'R']  # hand sides
-
-        # first create copies
-        raws_lfp_perside = {'L': raw_lfponly.copy(), 'R': raw_lfponly.copy() }
-        raws_srconly_perside = {'L': raw_srconly.copy(), 'R': raw_srconly.copy() }
-        if raw_lfp_hires is not None:
-            raws_lfp_hires_perside = {'L': raw_lfp_hires.copy(), 'R': raw_lfp_hires.copy() }
-
-        # then pick channels from corresponding side
-        for side in brain_sides:
-            chis = mne.pick_channels_regexp(raw_lfponly.ch_names, 'LFP{}.*'.format(side))
-            chnames_lfp = [raw_lfponly.ch_names[chi] for chi in chis]
-            if use_main_LFP_chan:
-                assert mainLFPchan in chnames_lfp
-                chnames_lfp_to_use = [mainLFPchan]
-            else:
-                chnames_lfp_to_use = chnames_lfp
-
-            raws_lfp_perside[side].pick_channels(   chnames_lfp_to_use )
-            if raw_lfp_hires is not None:
-                raws_lfp_hires_perside[side].pick_channels(   chnames_lfp_to_use  )
-
-
-
-            chis =  mne.pick_channels_regexp(raw_srconly.ch_names, 'msrc{}_all_*'.format(side)  )
-            if len(chis) == 0:
-                chis =  mne.pick_channels_regexp(raw_srconly.ch_names, 'msrc{}_{}_[0-9]+_c[0-9]+'.
-                                                format(side, src_grouping)  )
-
-            if use_ipsilat_CB:
-                CB_contrahand_parcel_ind = roi_labels_cur.index('Cerebellum_{}'.format(side))
-                hand_side = getOppositeSideStr(side)
-                CB_ipsihand_parcel_ind = roi_labels_cur.index('Cerebellum_{}'.format(hand_side) )
-                CB_contrahand_inds = mne.pick_channels_regexp(raw_srconly.ch_names, 'msrc{}_{}_{}_c[0-9]+'.
-                                                            format(side,src_grouping,CB_contrahand_parcel_ind)  )
-                CB_ipsihand_inds = mne.pick_channels_regexp(raw_srconly.ch_names, 'msrc{}_{}_{}_c[0-9]+'.
-                                                        format(hand_side,src_grouping,CB_ipsihand_parcel_ind)  )
-                chis = np.setdiff1d(chis, CB_contrahand_inds)
-                chis = np.hstack( [chis, CB_ipsihand_inds])
-                #TODO: remove Cerbellum sources, add Cerebellum sources from the other side
-
-            assert len(chis) > 0
-            chnames_src = [raw_srconly.ch_names[chi] for chi in chis]
-            raws_srconly_perside[side].pick_channels(   chnames_src  )
-
-
-
-            print('{} side,  {} sources'.format(side, len(chis) ) )
-
-
-        if side_switch_needed:
-            raws_srconly_perside_new = {}
-            raws_lfp_perside_new = {}
-            raws_lfp_hires_perside_new = {}
-            for sidelet in brain_sides:
-                # we want to reassign the channels names (changing side),
-                # keeping the data in place. And we want to have the correct
-                # side assignment acoording to new channel naming
-                opsidelet = getOppositeSideStr(sidelet)
-                raws_srconly_perside_new[opsidelet] = \
-                    changeRawInfoSides(raws_srconly_perside[sidelet],roi_labels,
-                                       srcgrouping_names_sorted)
-                raws_lfp_perside_new[opsidelet] = changeRawInfoSides(raws_lfp_perside[sidelet])
-                if raw_lfp_hires is not None:
-                    raws_lfp_hires_perside_new[opsidelet] = changeRawInfoSides(raws_lfp_hires_perside[sidelet])
-
-            raw_emg_rectconv = changeRawInfoSides(raw_emg_rectconv)
-        print(raws_lfp_perside[side].ch_names)
-
-
-        ####################  Load emg
-
-        EMG_per_hand = gv.EMG_per_hand
-        if isinstance(main_body_side,str):
-            chnames_emg = EMG_per_hand[main_body_side]
-        else:
-            chnames_emg = raw_emg_rectconv.ch_names
-
-        print(rawname_,chnames_emg)
-
-        rectconv_emg, ts_ = raw_emg_rectconv[chnames_emg]
-        chnames_emg = [chn+'_rectconv' for chn in chnames_emg]
-
-
-        ############# Concatenate data
-        raws_permod = {'LFP' : raws_lfp_perside, 'msrc' : raws_srconly_perside }
-        if only_load_data:
-            raws_permod_pri += [raws_permod]
-        if isinstance(main_body_side,str):
-            hand_sides = [ms_letter ]
-        elif isinstance(main_body_side,list) and isinstance(main_body_side[0], str):
-            hand_sides = main_body_side
-        else:
-            raise ValueError('Wrong main_body_side',main_body_side)
-        print('main_body_side {}, hand_sides to construct features '.format(main_body_side) ,hand_sides)
-
-        if sources_type == 'HirschPt2011':
-            allowd_srcis_subregex = '[{}]'.format( ','.join( map(str, msrc_inds ) ))
-        #else:
-        #    allowd_srcis_subregex = '[{}]'.format( ','.join( map(str, msrc_inds ) ))
-        subfeature_order = []
-        dats = []
-        for side_hand in hand_sides:
-            for mod in data_modalities:
-                #sd = hand_sides_all[1-hand_sides.index(side_hand) ]  #
-                opside= getOppositeSideStr(side_hand)
-                #if mod in ['src','msrc']:  No! They are both in the brain, so both contralat!
-
-                curraw = raws_permod[mod][opside]
-
-                if mod == 'msrc':
-                    chns = curraw.ch_names
-                    # note that we want to allow all sides in regex here
-                    # because we might have ipsilateral structures as well (as
-                    # selected by siding previsouly)
-                    if sources_type == 'HirschPt2011':
-                        inds = mne.pick_channels_regexp(  chns  , 'msrc.*_{}'.format(allowd_srcis_subregex) )
-                    else:
-                        inds = mne.pick_channels_regexp(  chns  , 'msrc._{}.*'.format(src_grouping) )
-                    assert len(inds) > 0
-                    chns_selected = list( np.array(chns)[inds]  )
-                    curdat, times = curraw[chns_selected]
-                    #msrc_inds
-                    chnames_added = chns_selected
-                else:
-                    curdat = curraw.get_data()
-                    chnames_added = curraw.ch_names
-                dats += [ curdat ]
-
-                subfeature_order += chnames_added
-                print(mod,opside)
-
-        if mainLFPchan_newname is not None:
-            mainLFPchan_ind = subfeature_order.index(mainLFPchan)
-            subfeature_order[mainLFPchan_ind] = mainLFPchan_newname
-
-        subfeature_order_pri += [subfeature_order]
-        #dats = {'lfp': dat_lfp, 'msrc':dat_src}
-        dat = np.vstack(dats)
-        times = raw_srconly.times
-
-        dat_pri += [dat]
-        times_pri += [times]
-        times_hires_pri += [raw_lfp_hires.times]
-
-        if raw_lfp_hires is not None:
-            dats_lfp_hires = []
-            subfeature_order_lfp_hires = []
-            for side_hand in hand_sides:
-                opside= getOppositeSideStr(side_hand)
-                #sd = hand_sides_all[1-hand_sides.index(side_hand) ]  #
-                curraw = raws_lfp_hires_perside[opside]
-                curdat  = curraw.get_data()
-                chnames_added = curraw.ch_names
-                subfeature_order_lfp_hires += chnames_added
-                dats_lfp_hires += [ curdat]
-
-
-            if mainLFPchan_newname is not None:
-                mainLFPchan_ind = subfeature_order_lfp_hires.index(mainLFPchan)
-                subfeature_order_lfp_hires[mainLFPchan_ind] = mainLFPchan_newname
-            subfeature_order_lfp_hires_pri += [subfeature_order_lfp_hires]
-
-            dat_lfp_hires = np.vstack(dats_lfp_hires)
-            dat_lfp_hires_pri += [dat_lfp_hires]
-
-
-        ecg_fname = os.path.join(data_dir, '{}_ica_ecg.npz'.format(rawname_) )
-        if os.path.exists( ecg_fname ):
-            f = np.load( ecg_fname )
-            ecg = f['ecg']
-            #ecg_normalized = (ecg - np.min(ecg) )/( np.max(ecg) - np.min(ecg) )
-            ecg_normalized = (ecg - np.mean(ecg) )/( np.quantile(ecg,0.93) - np.quantile(ecg,0.01) )
-        else:
-            ecg = np.zeros( len(times) )
-            ecg_normalized = ecg
-
-        extdat_pri += [ np.vstack( [ecg, ecg_normalized] ) ]
-
-        #TODO: rename mainLFPchans to  mainLFPchan_newname if its is not None
-
-
-    extnames = ['ecg'] + chnames_emg
-
-
-
-    return dat_pri, dat_lfp_hires_pri, extdat_pri, anns_pri, ivalis_pri, rec_info_pri, times_pri,\
-    times_hires_pri, subfeature_order_pri, subfeature_order_lfp_hires_pri, aux_info_per_raw
-
-
-
-def _smoothData1D_proxy(arg):
-    ind, data,Tp,data_estim,state_noise_std,ic_mean=arg
-    smoothend = smoothData1D(data,Tp,data_estim,state_noise_std,ic_mean)
-    print('  {} smoothing finished'.format(ind) )
-    return  ind,smoothend
-
-def smoothData1D(data,Tp,data_estim=None,state_noise_std=None,ic_mean=None):
-    # data estim to be used as IC and also to get variance size
-    import simdkalman  # can work with NaNs
-    assert (data_estim is not None) or (state_noise_std is not None)
-
-    #Tp -- pred itnerval. Lower means smoother.
-    # Probably I can say that it is the time interval
-    # I want the true state to be approx linear in
-    if state_noise_std is None and data_estim is not None:
-        state_noise_std = np.var(data_estim)
-    meas_noise_std = 1
-
-
-    #kalman gain depends on the ratio of these two values
-    kf = simdkalman.KalmanFilter(
-        state_transition = [[1,Tp],[0,1]],        # matrix A
-        process_noise = state_noise_std * np.array( [[ Tp**3/3, Tp**2/2 ],
-                                 [Tp**2/2, Tp]]),    # Q
-        observation_model = np.array([[1,0]]),   # H
-        observation_noise = meas_noise_std)                 # R
-
-
-    # smoothed = kf.smooth(chd_test,
-    #                      initial_value = [np.mean(estim),0],
-    #                      initial_covariance = np.diag([np.std(estim), np.std(estim)]))
-
-    if ic_mean is None:
-        ic_mean = np.mean(data_estim)
-
-    #print(data_estim.shape,state_noise_std, ic_mean)
-    smoothed = kf.smooth(data,
-                         initial_value = [ic_mean,0],
-                         initial_covariance = np.diag([0,0]))
-
-    return smoothed
-
-#TODO: make paralel
-#NOTE: it won't be so slow because I will apply it to windows
-# not to the original data with many samples
-def smoothData(data,Tp,data_estim=None,state_noise_std=None,ic_mean=None,
-              n_jobs = 6):
-
-    import multiprocessing as mpr
-    assert data.ndim == data_estim.ndim
-    if data.ndim == 1:
-        data = data[None,:]
-        data_estim = data_estim[None,:]
-    assert data.ndim == 2
-
-    args = []
-
-    N = len(data)
-    r = [0]*N
-    rstates = [0]*N
-    for dim in range(N):
-        curdat = data[dim]
-
-        args += [(dim,curdat,Tp,data_estim[dim],None,None)]
-
-    print(n_jobs)
-    if n_jobs == 1:
-        for arg in args:
-            dim,curdat,Tp,data_estim_cur,_,_ = arg
-            cursmooth = smoothData1D(curdat,Tp,data_estim_cur)
-            r[dim] = cursmooth
-            rstates[dim] = cursmooth.states.mean[:,0]
+def genRecInfoFn(rawname_,sources_type,src_file_grouping_ind):
+    #if fntype == 'rec_info':
+    r = '{}_{}_grp{}_src_rec_info.npz'.format(rawname_,sources_type,src_file_grouping_ind)
+    return r
+
+def genPrepDatFn(rawn, new_main_side, data_modalities, use_main_LFP_chan, src_file_grouping_ind,
+                 src_grouping):
+    fn_suffix_dat = 'dat_{}_newms{}_mainLFP{}_grp{}-{}.npz'.format(','.join(data_modalities),
+                                                                   new_main_side[0].upper(),
+                                                                use_main_LFP_chan,
+                                                                src_file_grouping_ind, src_grouping)
+
+    fname = '{}_'.format(rawn) + fn_suffix_dat
+    return fname
+
+def genStatsFn(rawnames,
+               new_main_side, data_modalities, use_main_LFP_chan, src_file_grouping_ind,
+                 src_grouping, prefix=None):
+    fn_suffix_dat = 'dat_{}_newms{}_mainLFP{}_grp{}-{}.npz'.format(','.join(data_modalities),
+                                                                   new_main_side[0].upper(),
+                                                                use_main_LFP_chan,
+                                                                src_file_grouping_ind, src_grouping)
+
+    if rawnames is None and prefix is not None:
+        fname_stats = prefix + fn_suffix_dat
     else:
-        pool = mpr.Pool(n_jobs)
-        print('smoothData:  Sending {} tasks to {} cores'.format(len(args), mpr.cpu_count()))
-        res = pool.map(_smoothData1D_proxy, args)
+        nr = len(rawnames)
+        sind_str_list_sorted = list( sorted( set([rawn[0:3] for rawn in rawnames] ) ))
+        inds_str = ','.join(sind_str_list_sorted )
+        fname_stats = 'stats_{}_{}_'.format(inds_str,nr)  + fn_suffix_dat
+    return fname_stats
 
-        for dim,cursmooth in res:
-            r[dim] = cursmooth
-            rstates[dim] = cursmooth.states.mean[:,0]
+def genStatsMultiBandFn(rawnames,
+               new_main_side, data_modalities, use_main_LFP_chan, src_file_grouping_ind,
+                 src_grouping, bands_precision, prefix=None):
+    fn_suffix_dat = 'dat_{}_newms{}_mainLFP{}_grp{}-{}.npz'.format(','.join(data_modalities),
+                                                                   new_main_side[0].upper(),
+                                                                use_main_LFP_chan,
+                                                                src_file_grouping_ind, src_grouping)
 
-        pool.close()
-        pool.join()
-    return np.vstack(rstates)
+    if rawnames is None and prefix is not None:
+        fname_stats = prefix + fn_suffix_dat
+    else:
+        nr = len(rawnames)
+        l = list( sorted( set([rawn[0:3] for rawn in rawnames] ) ))
+        inds_str = ','.join(l )
+        fname_stats = 'stats_{}_{}_{}_'.format(inds_str,nr,bands_precision)  + fn_suffix_dat
+    return fname_stats
 
+def genMLresFn(rawnames, sources_type, src_file_grouping_ind, src_grouping,
+            prefix, n_channels, nfeats_used,
+                pcadim, skip, windowsz,use_main_LFP_chan,
+               grouping_key,int_types_key, nr=None, regex_mode=False):
+
+    if nr is None:
+        nr = len(rawnames)
+    sind_str_list_sorted = list( sorted( set([rawn[0:3] for rawn in rawnames] ) ))
+    sind_join_str = ','.join(sind_str_list_sorted )
+    out_name_templ = '_{}_grp{}-{}_{}ML_nr{}_{}chs_nfeats{}_pcadim{}_skip{}_wsz{}'
+    out_name = (out_name_templ ).\
+        format(sources_type, src_file_grouping_ind, src_grouping,
+            prefix, nr,
+            n_channels, nfeats_used,
+            pcadim, skip, windowsz)
+
+    if use_main_LFP_chan:
+        out_name += '_mainLFP'
+
+    a = grouping_key is not None
+    b = int_types_key is not None
+    if a or b:
+        assert a and b
+        if regex_mode:
+            out_name += "__\({},{}\)".format( grouping_key,int_types_key )
+        else:
+            out_name += "__({},{})".format( grouping_key,int_types_key )
+
+    out_name = '_{}{}.npz'.format(sind_join_str,out_name)
+    return out_name

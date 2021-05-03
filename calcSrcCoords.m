@@ -15,13 +15,29 @@ if ~exist("subjstr")
 end
 fprintf('Preparing source coordinates for subject %s',subjstr)
 
+
+if ~exist("project_alg")
+  %project_alg = 'ray'
+  project_alg = 'nearest'
+end
+
+if ~exist("desired_dist")
+  desired_dist=0.5; 
+end
+
+if ~exist("project_only_outside_points")
+  project_only_outside_points = 1;
+end
+
+
+
 basename_head = sprintf('/headmodel_grid_%s.mat',subjstr);
 fname_head = strcat(data_dir, basename_head );
 hdmf = load(fname_head);   %hdmf.hdm, hdmf.mni_aligned_grid
 
 figVis = 'off';
 %figVis = 'on';
-do_create_surround_pts = 1;
+do_create_surround_pts = 0;
 %surround_radius = 0.8;
 surround_radius = 1.2;
 %surround_radius = 1e-10;  
@@ -142,16 +158,18 @@ fprintf('dev = %d\n',devv)
 
 %return
 
-load('coordsJan.mat')    % contains labels besides other things
+coord_info = load('coordsJan.mat')    % contains labels besides other things
 %coords_Jan_MNI =  transpose( [ [33 -22 57] ; [-33 -22 57] ] ) / 10. ;
-coords_Jan_MNI = transpose( coords );
+coords_Jan_MNI = transpose( coord_info.coords );
 coords_Jan_MNI_t = [ coords_Jan_MNI; ones( 1, size(coords_Jan_MNI,2) ) ];
 yy = M * coords_Jan_MNI_t ;
 coords_Jan_actual = transpose( yy(1:3,:)  );
 
+
 %coords_Jan_actual
 %coords_Jan_actual_upd = coords_Jan_actual;
-coords_Jan_actual_upd = projectPtOnBrainSurf(hdmf.hdm, coords_Jan_actual, 1);
+coords_Jan_actual_noproj = coords_Jan_actual;
+coords_Jan_actual_upd = projectPtOnBrainSurf(hdmf.hdm, coords_Jan_actual_noproj, project_alg, desired_dist, project_only_outside_points, 1);
 
 coords_Jan_actual = coords_Jan_actual_upd;
 
@@ -159,65 +177,69 @@ coords_Jan_actual = coords_Jan_actual_upd;
 %%%%%%%%%  Marius's script for every cortical grid point gets which elements of the atlas it corresponds to 
 
 
-cfg = [];
-cfg.atlas = atlas;
-%cfg.roi = {'Brodmann area 4'};
-cfg.roi = {'Brodmann area 6'};      %6-M1, SMA, preSMA;  4-PMC
-cfg.roi = {'Brodmann area 6' 'Brodmann area 4'};
-cfg.roi = {'Brodmann area 6' 'Brodmann area 4' 'Brodmann area 5' 'Brodmann area 7'}; %5,7 -- PPC
-%cfg.roi = atlas.tissuelabel;
-cfg.inputcoord = 'mni';  % coord of the source
-%cfg.inputcoord = 'tal';
-mask_Brodmann_roi = ft_volumelookup(cfg,srsstd.sourcemodel);  % selecting only a subset
-mask_Brodmann_roi_1cm = ft_volumelookup(cfg,srsstd_1cm.sourcemodel);  % selecting only a subset
+if do_create_surround_pts
+  cfg = [];
+  cfg.atlas = atlas;
+  %cfg.roi = {'Brodmann area 4'};
+  cfg.roi = {'Brodmann area 6'};      %6-M1, SMA, preSMA;  4-PMC
+  cfg.roi = {'Brodmann area 6' 'Brodmann area 4'};
+  cfg.roi = {'Brodmann area 6' 'Brodmann area 4' 'Brodmann area 5' 'Brodmann area 7'}; %5,7 -- PPC
+  %cfg.roi = atlas.tissuelabel;
+  cfg.inputcoord = 'mni';  % coord of the source
+  %cfg.inputcoord = 'tal';
+  mask_Brodmann_roi = ft_volumelookup(cfg,srsstd.sourcemodel);  % selecting only a subset
+  mask_Brodmann_roi_1cm = ft_volumelookup(cfg,srsstd_1cm.sourcemodel);  % selecting only a subset
 
-% Creating string (just for visuatlization)
-roistr = '';
-for i=1:length(cfg.roi) 
-  roistr = [roistr ',' cfg.roi{i}(end-6:end)];
-end
+  % Creating string (just for visuatlization)
+  roistr = '';
+  for i=1:length(cfg.roi) 
+    roistr = [roistr ',' cfg.roi{i}(end-6:end)];
+  end
 
-% aux
-mask_roi_1cm                  = repmat(srsstd_1cm.sourcemodel.inside,1,1);
-mask_roi_1cm(mask_roi_1cm==1)     = 0;
-mask_roi_1cm(mask_Brodmann_roi_1cm)            = 1;
-roipts0_1cm = srsstd_1cm.sourcemodel.pos(mask_roi_1cm,:);     
-%roipts0_1cm = srsstd_1cm.sourcemodel.pos(srsstd_1cm.sourcemodel.inside,:);     
-
-
-mask_roi                  = repmat(srsstd.sourcemodel.inside,1,1);
-mask_roi(mask_roi==1)         = 0;
-mask_roi(mask_Brodmann_roi)   = 1;
-
-tmpstd = srsstd.sourcemodel.inside;
-%hdmf.mni_aligned_grid.inside -- mask of points with 0.5 spacing that are inside the head. 
-%It is a volume mask, not surface mask 
+  % aux
+  mask_roi_1cm                  = repmat(srsstd_1cm.sourcemodel.inside,1,1);
+  mask_roi_1cm(mask_roi_1cm==1)     = 0;
+  mask_roi_1cm(mask_Brodmann_roi_1cm)            = 1;
+  roipts0_1cm = srsstd_1cm.sourcemodel.pos(mask_roi_1cm,:);     
+  %roipts0_1cm = srsstd_1cm.sourcemodel.pos(srsstd_1cm.sourcemodel.inside,:);     
 
 
-roipts0 = hdmf.mni_aligned_grid.pos(mask_roi,:);     
-% I could take all grid points but than I will need to make sure 
-% that I don't have too many points after I project to the 
-% surface. I.e. projection of ball from 3D grid onto 2D surface will make non-uniform grid 
-% I could do it assining to each triangle minimum ditance of the intersection and then only taking 
-% the point with minimum distance
-%roipts0 = hdmf.mni_aligned_grid.pos(hdmf.mni_aligned_grid.inside,:);  
+  mask_roi                  = repmat(srsstd.sourcemodel.inside,1,1);
+  mask_roi(mask_roi==1)         = 0;
+  mask_roi(mask_Brodmann_roi)   = 1;
 
-do_project_all_roipts = 0;  %just a little bit more accurate but a lot slower
-if do_project_all_roipts
-  roipts =  projectPtOnBrainSurf(hdmf.hdm, roipts0, 1); 
-  if length(roipts) ~= sum(mask_roi)
-    fprintf('Non-unique projection happend (some rays intersect more than one triangle)\n')
-    exit(0)
+  tmpstd = srsstd.sourcemodel.inside;
+  %hdmf.mni_aligned_grid.inside -- mask of points with 0.5 spacing that are inside the head. 
+  %It is a volume mask, not surface mask 
+
+
+  roipts0 = hdmf.mni_aligned_grid.pos(mask_roi,:);     
+  % I could take all grid points but than I will need to make sure 
+  % that I don't have too many points after I project to the 
+  % surface. I.e. projection of ball from 3D grid onto 2D surface will make non-uniform grid 
+  % I could do it assining to each triangle minimum ditance of the intersection and then only taking 
+  % the point with minimum distance
+  %roipts0 = hdmf.mni_aligned_grid.pos(hdmf.mni_aligned_grid.inside,:);  
+
+  do_project_all_roipts = 0;  %just a little bit more accurate but a lot slower
+  if do_project_all_roipts
+    roipts =  projectPtOnBrainSurf(hdmf.hdm, roipts0, project_alg, project_alg, desired_dist, project_only_outside_points, 0); 
+    if length(roipts) ~= sum(mask_roi)
+      fprintf('Non-unique projection happend (some rays intersect more than one triangle)\n')
+      exit(0)
+    end
+  else
+    roipts = roipts0;
   end
 else
-  roipts = roipts0;
+  roipts = [];
 end
 
 %if do_create_surround_pts
 nsurrPts = 0;
+surroundPts = [];  % repopulate on each cycles run
+point_ind_corresp  = [];  % in final array which points corresp to which Jan point
 while nsurrPts < min_number_of_pts
-  surroundPts = [];  % repopulate on each cycles run
-  point_ind_corresp  = [];  % in final array which points corresp to which Jan point
   nrms = [];
   for i=1:length(coords_Jan_actual)
     ptJan_cur = coords_Jan_actual(i,:);
@@ -255,14 +277,19 @@ while nsurrPts < min_number_of_pts
   fprintf('Radius increased to %d\n',surround_radius);
 end
 fprintf('Num of surroundPts = %d, radius was %d\n',length(point_ind_corresp), surround_radius )
-surroundPts =  projectPtOnBrainSurf(hdmf.hdm, surroundPts, 0); 
+%surroundPts =  projectPtOnBrainSurf(hdmf.hdm, surroundPts, 0); 
+surroundPts =  projectPtOnBrainSurf(hdmf.hdm, surroundPts, project_alg, desired_dist, project_only_outside_points, 0); 
+
 %else
 %  surroundPts =  coords_Jan_actual
 %  point_ind_corresp = 1:length(coords_Jan_actual)
 %  surround_radius = 0
 %end
+labels=coord_info.labels % for saving consistency
 
-save( strcat(subjstr,'_modcoord'),  'coords_Jan_actual', 'labels', 'surroundPts', 'point_ind_corresp', 'surround_radius' );
+ss = strcat(subjstr,'_modcoord_HirschPt');
+save(ss ,  'coords_Jan_actual', 'labels', 'surroundPts', 'point_ind_corresp', 'surround_radius' );
+fprintf('Saving %s',ss)
 
 %TODO: so far it is shifted :( I guess I need to apply transform matrix
 % I'd need to find a fancier way to convert between resolutions because head 'inside' mesh is provided only for 5mm

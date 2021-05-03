@@ -75,9 +75,8 @@ pointlabel = cell(length(template_grid.pos),1);
 if exist('idx_multi_areas_aal.mat')
   load('idx_multi_areas_aal.mat')
 else
+  %iterate over surface grid points
   for k = 1:length(template_grid.pos)
-      
-      %go through points
       point.inside = template_grid.inside(k);
       point.pos = template_grid.pos(k,:); %The position units must match with the point.unit field
       point.mask = template_grid.mask(k);
@@ -85,6 +84,7 @@ else
       point.unit = 'cm';
       
       %save labels
+      % which parcel is the point related to (can be multiple)
       mask = ft_volumelookup(cfg,point);
       
       if ~isempty( mask.name(mask.count == 1) )
@@ -103,7 +103,6 @@ else
       else
           idx_out_of_range = [idx_out_of_range,k];
       end
-      
   end
   save('idx_multi_areas_aal.mat','idx_multi_areas','pointlabel');
 end
@@ -117,6 +116,10 @@ end
 pointlabel( cellfun(@isempty,pointlabel) ) = {'-'};
 %peal off one 'layer' of cell
 pointlabel = [pointlabel{:}];
+
+% TODO: make volumelookup for thalamus (Thalamus_L and Thalamus_R)
+% attach coordinates of the found points to the cortext grid
+% attached repeated thalamus labels to the pointlabel
 
 
 %% connect pointlabel with indices of area labels (depending on in which cell the pointlabel is located)
@@ -155,21 +158,19 @@ sgf = load([data_dir, sprintf('/headmodel_grid_%s_surf.mat',subjstr)] );
 subject_surf_grid = sgf.mni_aligned_grid;  % in cm
 
 
-
-M = get_transform_mat(subjstr);
-
 use_template_grid = 0;
-
 if use_template_grid
   grid_to_use = template_grid;
 else
   grid_to_use = subject_surf_grid;
 end
+%%%%%%%%%%%%%%%%%%% some old ver, make makes sense if I use template_grid instead of subject_surf_grid
+M = get_transform_mat(subjstr);
 coords_Jan_MNI = transpose( grid_to_use.pos );
 coords_Jan_MNI_t = [ coords_Jan_MNI; ones( 1, size(coords_Jan_MNI,2) ) ];
 yy = M * coords_Jan_MNI_t ;
 coords_Jan_actual = transpose( yy(1:3,:)  );
- 
+%%%%%%%%%%%%%%%% 
 
 coords_Jan_actual = grid_to_use.pos;
 
@@ -200,12 +201,21 @@ basename_head = sprintf('/headmodel_grid_%s.mat',subjstr);
 fname_head = strcat(data_dir, basename_head );
 hdmf = load(fname_head);   %hdmf.hdm, hdmf.mni_aligned_grid
 
+
+if ~exist("desired_dist")
+  desired_dist=0.5; 
+end
+
+if ~exist("project_only_outside_points")
+  project_only_outside_points = 1;
+end
+
 %%
 %project_on_surf = 'no' % 'ray', 'nearest'
 project_on_surf = 'nearest';
 %project_on_surf = 'no';
 
-coords_Jan_actual_upd = projectPtOnBrainSurf(hdmf.hdm, coords_Jan_actual, project_on_surf, 1);
+coords_Jan_actual_upd = projectPtOnBrainSurf(hdmf.hdm, coords_Jan_actual, project_on_surf, desired_dist, project_only_outside_points, 1);
 coords_Jan_actual_old = coords_Jan_actual;
 coords_Jan_actual = coords_Jan_actual_upd;
 
