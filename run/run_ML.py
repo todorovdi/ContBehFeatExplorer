@@ -12,7 +12,6 @@ import scipy.signal as sig
 
 import numpy as np
 from sklearn.preprocessing import RobustScaler
-from sklearn.manifold import TSNE
 from sklearn.decomposition import PCA
 from sklearn.discriminant_analysis import LinearDiscriminantAnalysis
 from sklearn.impute import SimpleImputer
@@ -30,6 +29,8 @@ from globvars import gp
 import datetime
 
 from xgboost import XGBClassifier
+
+from os.path import join as pjoin
 
 #nPCA_comp = 0.95
 nPCA_comp = 0.95
@@ -79,6 +80,7 @@ load_only = 0   # load and preproc to be precise
 do_LDA = 1
 n_feats = 609  # this actually depends on the dataset which may have some channels bad :(
 do_XGB = 1
+calc_MI = 1
 
 remove_crossLFP = 1
 ##############################
@@ -124,6 +126,9 @@ input_subdir = ""
 output_subdir = ""
 scale_feat_combine_type = 'medcond'
 
+allow_CUDA = True
+XGB_tree_method = 'hist'  # or 'exact' or 'gpu_hist'
+
 use_smoothened = 0
 
 #groupings_to_use = gp.groupings
@@ -131,24 +136,28 @@ groupings_to_use = [ 'merge_all_not_trem', 'merge_movements', 'merge_nothing' ]
 groupings_to_use = [ 'merge_nothing' ]
 #int_types_to_use = gp.int_types_to_include
 int_types_to_use = [ 'basic', 'trem_vs_quiet' ]
-featsel_shap = []
+featsel_methods = []
+featsel_methods_all_possible = ['interpret_EBM', 'XGB_Shapley', 'SHAP_XGB' ]
 
 params_read = {}
 params_cmd = {}
+
 
 helpstr = 'Usage example\nrun_ML.py --rawnames <rawname_naked1,rawnames_naked2> '
 opts, args = getopt.getopt(effargv,"hr:n:s:w:p:",
         ["rawnames=", "n_channels=",  "windowsz=", "pcexpl=",
          "show_plots=","discard=", 'feat_types=', 'use_HFO=', 'mods=',
-         'prefix=', 'load_only=', 'fbands=', 'n_feats=',
-         'single_core=', 'sources_type=',
-         'bands_type=', 'crop=', 'parcel_types=', "src_grouping=", "src_grouping_fn=",
-         'groupings_to_use=', 'int_types_to_use=', 'skip_XGB=', 'LFP_related_only=',
-         'parcel_group_names=', "subskip_fit=", "search_best_LFP=", "save_output=",
-        'rescale_feats=', "cross_couplings_only=", "LFPchan=", "heavy_fit_red_featset=",
-         "n_splits=", "input_subdir=", "output_subdir=", "artif_handling=", "plot_types=",
-         "skip_XGB_aux_int=", "max_XGB_step_nfeats=", "self_couplings_only=", "param_file=",
-         "scale_feat_combine_type=", "use_smoothened=", "featsel_shap=" ])
+         'prefix=', 'load_only=', 'fbands=', 'n_feats=', 'single_core=',
+         'sources_type=', 'bands_type=', 'crop=', 'parcel_types=',
+         "src_grouping=", "src_grouping_fn=", 'groupings_to_use=',
+         'int_types_to_use=', 'skip_XGB=', 'LFP_related_only=',
+         'parcel_group_names=', "subskip_fit=", "search_best_LFP=",
+         "save_output=", 'rescale_feats=', "cross_couplings_only=", "LFPchan=",
+         "heavy_fit_red_featset=", "n_splits=", "input_subdir=",
+         "output_subdir=", "artif_handling=", "plot_types=",
+         "skip_XGB_aux_int=", "max_XGB_step_nfeats=", "self_couplings_only=",
+         "param_file=", "scale_feat_combine_type=", "use_smoothened=",
+         "featsel_methods=", "allow_CUDA=", "XGB_tree_method=", "calc_MI="])
 print(sys.argv)
 print('Argv str = ',' '.join(sys.argv ) )
 print(opts)
@@ -159,7 +168,7 @@ for opt, arg in opts:
         print (helpstr)
         sys.exit(0)
     elif opt == "--param_file":
-        param_fname_full = os.path.join('params',arg)
+        param_fname_full = pjoin(gv.param_dir,arg)
         params_read = gv.paramFileRead(param_fname_full)
     else:
         if opt.startswith('--'):
@@ -181,8 +190,14 @@ for opt,arg in pars.items():
         n_feats_set_explicitly = True
     elif opt == "scale_feat_combine_type":
         scale_feat_combine_type = arg
+    elif opt == "allow_CUDA":
+        allow_CUDA = int(arg)
+    elif opt == "XGB_tree_method":
+        XGB_tree_method = arg
     elif opt == "skip_XGB":
         do_XGB = not bool(int(arg))
+    elif opt == "calc_MI":
+        calc_MI = int(arg)
     elif opt == "skip_XGB_aux_int":
         skip_XGB_aux_intervals = bool(int(arg))
     elif opt == "self_couplings_only":
@@ -198,17 +213,19 @@ for opt,arg in pars.items():
     elif opt == "input_subdir":
         input_subdir = arg
         if len(input_subdir) > 0:
-            subdir = os.path.join(gv.data_dir,input_subdir)
+            subdir = pjoin(gv.data_dir,input_subdir)
             assert os.path.exists(subdir ), subdir
     elif opt == "output_subdir":
         output_subdir = arg
         if len(output_subdir) > 0:
-            subdir = os.path.join(gv.data_dir,output_subdir)
+            subdir = pjoin(gv.data_dir,output_subdir)
             if not os.path.exists(subdir ):
                 print('Creating output subdir {}'.format(subdir) )
                 os.makedirs(subdir)
-    elif opt == "featsel_shap":
-        featsel_shap = arg.split(',')
+    elif opt == "featsel_methods":
+        featsel_methods = arg.split(',')
+        for fsh in featsel_methods:
+            assert fsh in featsel_methods_all_possible
     elif opt == "parcel_group_names":
         parcel_group_names = arg.split(',')
     elif opt == "artif_handling":
@@ -321,14 +338,16 @@ if bands_type == 'fine':
 else:
     fbands_def = fband_names_crude_inc_HFO
 
+
+allow_CUDA_MNE = mne.utils.get_config('MNE_USE_CUDA')
 print('nPCA_comp = ',nPCA_comp)
+
+print(f'''do_XGB={do_XGB}, XGB_tree_method={XGB_tree_method},
+          allow_CUDA={allow_CUDA}, allow_CUDA_MNE={allow_CUDA_MNE},
+          gpus found={gv.GPUs_list}''')
 
 ############################
 rn_str = ','.join(rawnames)
-
-with open('subj_info.json') as info_json:
-    #json.dumps({'value': numpy.int64(42)}, default=convert)
-    gen_subj_info = json.load(info_json)
 
 ##############################
 test_mode = ( int(rawnames[0][1:3]) > 10 ) or (prefix == 'test_')
@@ -373,13 +392,13 @@ for rawname_ in rawnames:
     if crop_end is not None:
         crp_str = '_crop{}-{}'.format(int(crop_start),int(crop_end) )
 
-    inp_sub = os.path.join(gv.data_dir, input_subdir)
+    inp_sub = pjoin(gv.data_dir, input_subdir)
     if sources_type == def_sources_type:
         a = '{}_feats_{}chs_nfeats{}_skip{}_wsz{}_grp{}-{}{}.npz'.\
             format(rawname_,n_channels, n_feats, skip, windowsz,
                    src_file_grouping_ind, src_grouping, crp_str)
         feat_fnames += [a]
-        fname_feat_full = os.path.join( inp_sub,a)
+        fname_feat_full = pjoin( inp_sub,a)
     else:
         regex = '{}_feats_{}_{}chs_nfeats{}_skip{}_wsz{}_grp{}-{}{}.npz'.\
             format(rawname_,sources_type,'[0-9]+', '[0-9]+', skip, windowsz,
@@ -390,14 +409,14 @@ for rawname_ in rawnames:
         if len(fnfound) > 1:
             fnt = [0] * len(fnfound)
             for fni in range(len(fnt) ):
-                fnfull = os.path.join(inp_sub, fnfound[fni])
+                fnfull = pjoin(inp_sub, fnfound[fni])
                 fnt[fni] = os.path.getmtime(fnfull)
             fni_max = np.argmax(fnt)
             fnfound = [ fnfound[fni_max] ]
 
 
         assert len(fnfound) == 1, 'For {} found not single fnames {}'.format(rawname_,fnfound)
-        fname_feat_full = os.path.join( inp_sub, fnfound[0] )
+        fname_feat_full = pjoin( inp_sub, fnfound[0] )
 
     fname_feat_full_pri += [fname_feat_full]
 
@@ -426,7 +445,7 @@ for rawname_ in rawnames:
     chnames_LFP_pri += [chnames_LFP]
 
     feat_info = f.get('feat_info',None)[()]
-    mts_letter = gen_subj_info[subj]['tremor_side'][0].upper()
+    mts_letter = gv.gen_subj_info[subj]['tremor_side'][0].upper()
     nedgeBins = feat_info['nedgeBins']
     assert skip_ == skip
 
@@ -461,7 +480,7 @@ for rawname_ in rawnames:
 
     # TODO: allow to use other mainLFPchans
     #mainLFPchan = gen_subj_info[subj]['lfpchan_used_in_paper']
-    mainLFPchan = gen_subj_info[subj].get('lfpchan_selected_by_pipeline',None)
+    mainLFPchan = gv.gen_subj_info[subj].get('lfpchan_selected_by_pipeline',None)
     if use_main_LFP_chan:
         assert mainLFPchan is not None
 
@@ -486,7 +505,7 @@ for rawname_ in rawnames:
 
     src_rec_info_fn = '{}_{}_grp{}_src_rec_info'.\
         format(rawname_,sources_type, src_file_grouping_ind)
-    src_rec_info_fn_full = os.path.join(gv.data_dir, input_subdir, src_rec_info_fn + '.npz')
+    src_rec_info_fn_full = pjoin(gv.data_dir, input_subdir, src_rec_info_fn + '.npz')
     rec_info = np.load(src_rec_info_fn_full, allow_pickle=True)
     src_rec_info_pri += [rec_info]
     roi_labels = rec_info['label_groups_dict'][()]
@@ -722,7 +741,7 @@ if show_plots:
     out_name_plot = rn_str + out_name + \
         'mainLFP{}_HFO{}_{}_{}'.\
         format(int(use_main_LFP_chan), int(use_lfp_HFO), str_mods, str_feats)
-    pdf= PdfPages(os.path.join(gv.dir_fig, output_subdir, out_name_plot + '.pdf' ))
+    pdf= PdfPages(pjoin(gv.dir_fig, output_subdir, out_name_plot + '.pdf' ))
 
 if rescale_feats:
     print('Rescaling features')
@@ -984,9 +1003,7 @@ if do_LDA:
     #int_types_R = ['trem_R', 'notrem_R', 'hold_R', 'move_R', 'undef_R', 'holdtrem_R', 'movetrem_R']
     # these are GLOBAL ids, they should be consistent across everything
 
-
     lda_output_pg = {}
-
 
     # over groupings of behavioral states
     for grouping_key in groupings_to_use:
@@ -1078,10 +1095,12 @@ if do_LDA:
                 sides_hand = [new_main_side[0].upper() ]
                 class_labels, class_labels_good, revdict, class_ids_grouped = \
                     utsne.makeClassLabels(sides_hand, grouping,
-                                        int_types_to_distinguish,
-                                        ivalis_tb_indarrays_merged, bininds_concat_good,
-                                        len(Xconcat_imputed), discard_remaining_int_types_during_fit )
+                        int_types_to_distinguish,
+                        ivalis_tb_indarrays_merged, bininds_concat_good,
+                        len(Xconcat_imputed),
+                        rem_neut = discard_remaining_int_types_during_fit)
                 if discard_remaining_int_types_during_fit:
+                    # then we have to remove the data points as well
                     neq = class_labels_good != gp.class_id_neut
                     inds_not_neut = np.where( neq)[0]
                     Xconcat_good_cur = Xsubset_to_fit[inds_not_neut]
@@ -1091,6 +1110,9 @@ if do_LDA:
                 #this is a string label
                 class_to_check = '{}_{}'.format(int_types_to_distinguish[0], new_main_side[0].upper() )
             class_ind_to_check = class_ids_grouped[class_to_check]
+
+            # check that the labels number don't have holes -- well, they do
+            #assert np.max (np.abs( np.diff(sorted(set(class_labels_good) )) )) == 0
 
             counts = utsne.countClassLabels(class_labels_good, class_ids_grouped=None, revdict=revdict)
             print('bincounts are ',counts)
@@ -1106,14 +1128,19 @@ if do_LDA:
                 lda_output_pit[int_types_key] = None
                 continue
 
-            print('  Computing MI')
-            MI_per_feati = utsne.getMIs(Xconcat_good_cur,class_labels_good,class_ind_to_check,
-                                        n_jobs=n_jobs_XGB)
-            high_to_low_MIinds = np.argsort(MI_per_feati)[::-1]
+            if calc_MI:
+                print('  Computing MI')
+                MI_per_feati = utsne.getMIs(Xconcat_good_cur,class_labels_good,class_ind_to_check,
+                                            n_jobs=n_jobs_XGB)
+                high_to_low_MIinds = np.argsort(MI_per_feati)[::-1]
 
-            n_MI_to_show = 8
-            for ii in high_to_low_MIinds[:n_MI_to_show]:
-                print('  {} MI = {:.5f}'.format(featnames_nice[ii], MI_per_feati[ii]  ) )
+                n_MI_to_show = 8
+                for ii in high_to_low_MIinds[:n_MI_to_show]:
+                    print('  {} MI = {:.5f}'.format(featnames_nice[ii], MI_per_feati[ii]  ) )
+            else:
+                print('  skipping computation of MI')
+                MI_per_feati = None
+
 
             # first axis gives best separation, second does the second best job, etc
             #X = np.array([[-1, -1], [-2, -1], [-3, -2], [1, 1], [2, 1], [3, 2]])
@@ -1142,12 +1169,14 @@ if do_LDA:
 
             nfeats = Xconcat_good_cur.shape[1]
             if use_low_var_feats_for_heavy_fits and nfeats > 40:
-                if highest_meaningful_thri < 0:
+                #thri = highest_meaningful_thri
+                thri = 0
+                if thri < 0:
                     feat_subset_heavy = np.arange(nfeats )
                 else:
                     print('Selecting only {}-q-variance-thresholded features for heavy fits'.format(
-                        feat_variance_q_thr[highest_meaningful_thri] ) )
-                    feat_subset_heavy = pca_derived_featinds_perthr[highest_meaningful_thri]
+                        feat_variance_q_thr[thri] ) )
+                    feat_subset_heavy = pca_derived_featinds_perthr[thri]
             else:
                 feat_subset_heavy = np.arange(nfeats )
             X_for_heavy = Xconcat_good_cur[::subskip_fit, feat_subset_heavy]
@@ -1228,7 +1257,8 @@ if do_LDA:
                             class_labels_for_heavy, class_ind_to_check,sortinds_LDA,
                                 n_splits=n_splits, verbose=2, check_CV_perf=True, nfeats_step=5,
                                                        nsteps_report=5, stop_if_boring=False)
-            _, best_inds_LDA , _, _ =   perfs_LDA_featsearch[-1]
+            #_, best_inds_LDA , _, _ =   perfs_LDA_featsearch[-1]
+            best_inds_LDA =   perfs_LDA_featsearch[-1]['featinds_present']
             best_inds_LDA = feat_subset_heavy[best_inds_LDA]
             gc.collect()
 
@@ -1243,31 +1273,45 @@ if do_LDA:
             gc.collect()
 
             ##################
+            from sklearn import preprocessing
+            lab_enc = preprocessing.LabelEncoder()
+            lab_enc.fit(class_labels_for_heavy)
+            class_labels_good_for_classif = lab_enc.transform(class_labels_for_heavy)
+
             do_XGB_cur =  do_XGB and not (int_types_key in gp.int_type_datset_rel and skip_XGB_aux_intervals  )
             if do_XGB_cur:
 
-                from sklearn import preprocessing
-                le = preprocessing.LabelEncoder()
-                le.fit(class_labels_for_heavy)
-                class_labels_good_for_classif = le.transform(class_labels_for_heavy)
 
                 # TODO: XGboost in future release wants set(class labels) to be
                 # continousely increasing from zero, they don't want to use
                 # sklearn version.. but I will anyway
-                add_clf_creopts={ 'n_jobs':n_jobs_XGB, 'use_label_encoder':False }
-                model = XGBClassifier(**add_clf_creopts)
-                # fit the model to get feature importances
+
+                add_clf_creopts={ 'n_jobs':n_jobs_XGB, 'use_label_encoder':False,
+                                 'importance_type': 'total_gain' }
+                tree_method = XGB_tree_method
+                method_params = {'tree_method': tree_method}
+
+                if (XGB_tree_method in ['hist', 'gpu_hist']) \
+                        and allow_CUDA \
+                        and len(gv.GPUs_list):
+                    tree_method = 'gpu_hist'
+
+                    method_params['gpu_id'] = gv.GPUs_list[0]
+
+                add_clf_creopts.update(method_params)
+                clf_XGB = XGBClassifier(**add_clf_creopts)
+                # fit the clf_XGB to get feature importances
                 print('Starting XGB on X.shape ', X_for_heavy.shape)
                 add_fitopts = { 'eval_metric':'logloss'}
-                model.fit(X_for_heavy, class_labels_good_for_classif, **add_fitopts)
+                clf_XGB.fit(X_for_heavy, class_labels_good_for_classif, **add_fitopts)
                 print('--- main XGB finished')
-                importance = model.feature_importances_
+                importance = clf_XGB.feature_importances_
                 sortinds = np.argsort( importance )
                 gc.collect()
 
                 step_XGB = min(max_XGB_step_nfeats, max(5, X_for_heavy.shape[1] // 20)  )
-                perfs_XGB = utsne.selMinFeatSet(model, X_for_heavy, class_labels_good_for_classif,
-                                    list(le.classes_).index(class_ind_to_check), sortinds,
+                perfs_XGB = utsne.selMinFeatSet(clf_XGB, X_for_heavy, class_labels_good_for_classif,
+                                    list(lab_enc.classes_).index(class_ind_to_check), sortinds,
                                                 n_splits=n_splits,
                                                 add_fitopts=add_fitopts, add_clf_creopts=add_clf_creopts,
                                                 check_CV_perf=True, nfeats_step= step_XGB,
@@ -1279,10 +1323,24 @@ if do_LDA:
                 for perf_ind in perf_inds_to_print:
                     if perf_ind >= len(perfs_XGB):
                         continue
-                    _, inds_XGB , perf_nocv, res_aver, clfs_CV =   perfs_XGB[perf_ind]
+                    smfs_output = perfs_XGB[perf_ind]
+                    inds_XGB = smfs_output['featinds_present']
+                    perf_nocv = smfs_output['perf_nocv']
+                    res_aver = smfs_output['perf_aver']
+
+
                     print('XGB CV perf on {} feats : sens {:.2f} spec {:.2f} F1 {:.2f}'.format(
                         len(inds_XGB), res_aver[0], res_aver[1], res_aver[2] ) )
-                _, best_inds_XGB_among_heavy , perf_nocv, res_aver, clfs_best_CV =   perfs_XGB[-1]
+
+                    shfl = smfs_output.get('fold_type_shuffled',None)
+                    if shfl is not None:
+                        _,_,perf_shuffled = shfl
+                        sens_sh,sepc_sh,F1_sh,confmat_sh = perf_shuffled
+                        print('  shuffled: XGB CV perf on {} feats : sens {:.2f} spec {:.2f} F1 {:.2f}'.format(
+                            len(inds_XGB), perf_shuffled[0], perf_shuffled[1],
+                            perf_shuffled[2] ) )
+
+                best_inds_XGB_among_heavy  =   perfs_XGB[-1]['featinds_present']
                 best_inds_XGB = feat_subset_heavy[best_inds_XGB_among_heavy]
 
                 best_nice = list( np.array(featnames_nice) [best_inds_XGB] )
@@ -1295,7 +1353,7 @@ if do_LDA:
                 print('Min number of features found by XGB is {}, PCA on them gives {}'.
                         format( len(best_inds_XGB), pca_XGBfeats.n_components_) )
             else:
-                model = None
+                clf_XGB = None
                 best_inds_XGB = None
                 perfs_XGB = None
                 pca_XGBfeats = None
@@ -1358,12 +1416,15 @@ if do_LDA:
                         'inds_important':inds_important,
                         'strong_inds_pc':strong_inds_pc,
                         'strongest_inds_pc':strongest_inds_pc,
-                            'XGBobj':model,
+                            'XGBobj':clf_XGB,
                             'strong_inds_XGB':best_inds_XGB,
                             'strong_inds_LDA':best_inds_LDA,
                             'perfs_XGB': perfs_XGB,
                             'pca_xgafeats': pca_XGBfeats,
-                           'MI_per_feati':MI_per_feati }
+                           'MI_per_feati':MI_per_feati,
+                           'revdict':revdict,
+                           'counts':counts,
+                           'class_ids_grouped':class_ids_grouped}
 
             #out_name_templ = '_{}_grp{}-{}_{}ML_nr{}_{}chs_nfeats{}_pcadim{}_skip{}_wsz{}__({},{})'
             #out_name = (out_name_templ ).\
@@ -1371,17 +1432,15 @@ if do_LDA:
             #        prefix, len(rawnames),
             #        n_channels, Xconcat_imputed.shape[1],
             #        pcapts.shape[1], skip, windowsz,grouping_key,int_types_key)
-            #fname_ML_full_intermed = os.path.join( gv.data_dir, output_subdir,
+            #fname_ML_full_intermed = pjoin( gv.data_dir, output_subdir,
             #                                       '_{}{}.npz'.format(sind_join_str,out_name))
 
             out_name =  utils.genMLresFn(rawnames,sources_type, src_file_grouping_ind, src_grouping,
                     prefix, n_channels, Xconcat_imputed.shape[1],
                     pcapts.shape[1], skip, windowsz, use_main_LFP_chan, grouping_key,int_types_key )
 
-            fname_ML_full_intermed = os.path.join( gv.data_dir, output_subdir, out_name)
+            fname_ML_full_intermed = pjoin( gv.data_dir, output_subdir, out_name)
 
-            featsel_shap_res = {}
-            results_cur['featsel_shap_res'] = featsel_shap_res
             # collect small non-system local variables
             #vv = locals().items()
             #for name,val in vv:
@@ -1415,9 +1474,16 @@ if do_LDA:
             else:
                 print('Skipping saving intermediate result')
 
-            for fsh in featsel_shap:
+            featsel_per_method = {}
+
+            if do_XGB_cur:
+                featsel_per_method[ 'XGB_total_gain'] = {'scores': clf_XGB.feature_importances_ }
+
+            for fsh in featsel_methods:
+                featsel_info = {}
                 shap_values = None
-                if fsh == 'XGB':
+                explainer = None
+                if fsh == 'SHAP_XGB':
                     import shap
                     #X = Ximp_per_raw[rncur][prefix]
                     #X_to_fit = X[gi]
@@ -1433,7 +1499,13 @@ if do_LDA:
 
                     print('Start computing Shapley values using Xsubset with shape',Xsubset.shape)
 
-                    clf_bestfeats = XGBClassifier(**add_clf_creopts)
+                    import copy
+                    add_clf_creopts_ = copy.deepcopy(add_clf_creopts)
+                    # SHAP doest not work well if GPU for some reason
+                    if XGB_tree_method == 'gpu_hist':
+                        add_clf_creopts_['tree_method'] = 'cpu_hist'
+
+                    clf_bestfeats = XGBClassifier(**add_clf_creopts_)
                     #clf_bestfeats.fit(X_for_heavy[:,best_inds_XGB_among_heavy],
                     #                  class_labels_good_for_classif, **add_fitopts)
                     clf_bestfeats.fit(X_to_analyze_feat_sign,
@@ -1443,17 +1515,106 @@ if do_LDA:
                     explainer= shap.Explainer(clf_bestfeats.predict, Xsubset,feature_names=featnames_sel)
                     #explainer= shap.Explainer(clf_bestfeats.predict, Xsubset)
                     shap_values = explainer(X_to_analyze_feat_sign)
+
+                    featsel_info['explainer'] = explainer
+                    featsel_info['scores'] = shap_values
                     #except ValueError as e:
                     #    print(str(e) )
                     #    shap_values = None
+                elif fsh == 'XGB_Shapley':
+                    import xgboost as xgb
+                    X = Xconcat_good_cur[::subskip_fit]
+                    #X = X_for_heavy
+                    y = class_labels_good_for_classif
+                    dmat = xgb.DMatrix(X, y)
+
+                    # TODO: perhaps I should select best hyperparameters above
+                    # before doing this
+                    clf_XGB2 = XGBClassifier(**add_clf_creopts)
+                    clf_XGB2.fit(X, y, **add_fitopts)
+
+                    bst = clf_XGB2.get_booster()
+
+                    if (XGB_tree_method in ['hist', 'gpu_hist']) \
+                            and allow_CUDA \
+                            and len(gv.GPUs_list):
+                        bst.set_param({"predictor": "gpu_predictor"})
+                    #TODO: perhaps I should try to predict not the entire training
+                    shap_values = bst.predict(dmat, pred_contribs=True)
+                    #shap_values.shape
+
+                    featsel_info['explainer'] = clf_XGB2
+                    featsel_info['scores'] = shap_values
+
+                elif fsh == 'interpret_EBM':
+                    import itertools
+                    import interpret
+                    from interpret.glassbox import ExplainableBoostingClassifier
+
+                    EBM_result_per_cp= {}
+                    indpairs_names = []
+                    # since EBM only works for binary, I treat each pair of classes separately
+                    uls = list(set(class_labels_for_heavy))
+                    class_pairs = list(itertools.combinations(uls, 2))
+                    print(class_pairs)
+                    EBM_seed = 0
+
+
+                    info_per_cp = {}
+
+                    #cpi = 0
+                    for cpi in range(len(class_pairs)):
+                        c1,c2 = class_pairs[cpi]
+                        inds = np.where( (class_labels_for_heavy == c1) | (class_labels_for_heavy == c2)  )[0]
+                        #inds2 = np.where(class_labels_good_for_classif == c2)[0]
+
+                        #ipo = lab_enc.inverse_transform([c1,c2])
+                        #indpair_names = ( revdict[ipo[0]], revdict[ipo[1]] )
+                        indpair_names = ( revdict[c1], revdict[c2] )
+
+                        print(f'Starting computing EBM for class pair {indpair_names}, in total {len(inds)}'+
+                            f'=({sum(class_labels_for_heavy == c1)}+{sum(class_labels_for_heavy == c2)}) data points')
+
+                        # filter classes
+                        X = Xconcat_good_cur[inds]
+                        y = class_labels_for_heavy[inds]
+
+                        ebm = ExplainableBoostingClassifier(random_state=EBM_seed, feature_names=featnames_nice, n_jobs=n_jobs_XGB)
+                        ebm.fit(X, y)
+                        global_exp = ebm.explain_global()
+
+                        sens,spec, F1, confmat  = utsne.getClfPredPower(ebm,X,y,class_ind_to_check, printLog=False)
+                        confmat_normalized = utsne.confmatNormalize(confmat) * 100
+                        print(f'confmat_normalized_true (pct) = {confmat_normalized}')
+
+                        EBM_result_per_cp[indpair_names] = global_exp
+                        indpairs_names += [indpair_names]
+
+                        # extracting data from explainer
+                        scores = global_exp.data()['scores']
+                        names  = global_exp.data()['names']
+                        sis = np.argsort(scores)[::-1]
+                        featnames_srt = np.array(names)[sis]
+                        print(f'EBM: Strongest feat is {featnames_srt[0]}')
+
+
+                        info_cur = {}
+                        info_cur['scores'] = scores
+                        info_cur['explainer'] = global_exp
+                        info_cur['perf'] = sens,spec, F1, confmat
+                        info_cur['confmat_normalized'] = global_exp
+
+                        info_per_cp[indpair_names ] = info_cur
+
+                    featsel_info['info_per_cp'] = info_per_cp
                 else:
                     raise ValueError('not implemented')
 
-                if shap_values is not None:
-                    featsel_shap_res[fsh] = shap_values
+                featsel_per_method[fsh] = featsel_info
+
+            results_cur['featsel_per_method'] = featsel_per_method
 
             if save_output:
-                results_cur['featsel_shap_res'] = featsel_shap_res
 
                 print('Saving intermediate result to {}'.format(fname_ML_full_intermed) )
                 np.savez(fname_ML_full_intermed, results_cur=results_cur,
@@ -1507,7 +1668,7 @@ if not single_fit_type_mode:
                 pcapts.shape[1], skip, windowsz)
         if use_main_LFP_chan:
             out_name += '_mainLFP'
-        fname_PCA_full = os.path.join( gv.data_dir, output_subdir, '{}{}.npz'.format(rawname_,out_name))
+        fname_PCA_full = pjoin( gv.data_dir, output_subdir, '{}{}.npz'.format(rawname_,out_name))
 
 
 

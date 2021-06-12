@@ -1,5 +1,5 @@
 import numpy as np
-import udus_dataproc as mdp # main data proc
+#import udus_dataproc as mdp # main data proc
 import re
 
 import globvars as gv
@@ -1738,41 +1738,81 @@ def getMIs(X,class_labels,class_ind,n_jobs = None):
         mic[inds] = mic_cur
     return mic
 
-def getClfPredPower(clf,X,class_labels,class_ind, printLog = False):
+def confmatNormalize(confmat, norm_type='true'):
+    res = None
+    if norm_type == 'true':
+        ## shoud be equiv to normalize = 'true' in sklearn.confusion_matrix
+        ## sum across columns to get total number of true i-th entries
+        totnums = np.sum(confmat, axis = 1)
+        ## confmat_ratio[i,j] = ratio of true i-th predicted as j-th among total
+        ## true i-th. I want diag elements to be close to 1 and off-diag to be close
+        ## to 0
+        confmat_ratio = confmat / totnums[:,None]
+        res = confmat_ratio
+
+    elif norm_type == 'all':
+        totnums = np.sum(confmat)
+        ## confmat_ratio[i,j] = ratio of true i-th predicted as j-th among total
+        ## true i-th. I want diag elements to be close to 1 and off-diag to be close
+        ## to 0
+        confmat_ratio = confmat / totnums
+        res = confmat_ratio
+    else:
+        raise ValueError('wrong norm_type')
+    return res
+
+def getClfPredPower(clf,X,class_labels,class_ind, label_ids_order = None,
+                    printLog = False):
     '''
     LDA perf in detecting class_ind
     - class_ind  is an interger class id
     '''
-    true_ind = class_ind
-    mask = (class_labels == true_ind)
+    if label_ids_order is None:
+        label_ids_order = list(sorted(set(class_labels) ) )
+
+    from sklearn.metrics import confusion_matrix
+    preds = clf.predict(X)
+    # Confusion matrix whose i-th row and j-th column entry indicates the number
+    # of samples with true label being i-th class and predicted label being j-th
+    # class.   confmat[i,j] -- true i'th predicted being j'th
+    # ordering: sorted(set()+set())
+    confmat = confusion_matrix(class_labels, preds, labels=label_ids_order)
+
+    #tn, fp, fn, tp = confusion_matrix([0, 1, 0, 1], [1, 1, 1, 0]).ravel()
+
+
+    ind_to_check = class_ind
+    mask = (np.array(class_labels,dtype=int) == np.array(ind_to_check,dtype=int ) )
     mask_inv = np.logical_not(mask)
 
     if np.sum(mask) == 0 or np.sum(mask_inv) == 0:
-        s = 'one of masks is bad '.format(np.sum(mask), np.sum(mask_inv) )
+        s = f'one of masks is bad {np.sum(mask)}, {np.sum(mask_inv)}'
         print('getClfPredPower: WARNING {}'.format(s) )
         #raise ValueError(s)
-        return np.nan, np.nan, np.nan
+        sens = np.nan
+        spec = np.nan
+        F1 = np.nan
+    else:
+        ntot = len(class_labels)
 
-    ntot = len(class_labels)
+        X_P = X[mask]
+        Pos = clf.predict(X_P)
+        TP = sum(Pos == ind_to_check)
+        sens = TP / len(Pos)
 
-    X_P = X[mask]
-    Pos = clf.predict(X_P)
-    TP = sum(Pos == true_ind)
-    sens = TP / len(Pos)
+        X_N = X[mask_inv]
+        Neg = clf.predict(X_N)
+        TN = sum(Neg != ind_to_check)
+        spec = TN / len(Neg)
+        #spec = specificity_score(y_true,y_pred)
 
-    X_N = X[mask_inv]
-    Neg = clf.predict(X_N)
-    TN = sum(Neg != true_ind)
-    spec = TN / len(Neg)
-    #spec = specificity_score(y_true,y_pred)
+        FP = len(Pos) - TP
+        FN = len(Neg) - TN
+        F1 =  TP / (TP + 0.5 * ( FP + FN ) )
 
-    FP = len(Pos) - TP
-    FN = len(Neg) - TN
-    F1 =  TP / (TP + 0.5 * ( FP + FN ) )
-
-    if printLog:
-        print('getClfPredPower: True pos {} ({:.3f}), all pos {} ({:.3f})'.format(TP, TP/ntot, len(Pos), len(Pos)/ntot ) )
-        print('getClfPredPower: True neg {} ({:.3f}), all neg {} ({:.3f})'.format(TN, TN/ntot, len(Neg), len(Neg)/ntot ) )
+        if printLog:
+            print('getClfPredPower: True pos {} ({:.3f}), all pos {} ({:.3f})'.format(TP, TP/ntot, len(Pos), len(Pos)/ntot ) )
+            print('getClfPredPower: True neg {} ({:.3f}), all neg {} ({:.3f})'.format(TN, TN/ntot, len(Neg), len(Neg)/ntot ) )
 
     #if n_KFold_splits is not None:
     #    from sklearn.model_selection import KFold
@@ -1782,11 +1822,11 @@ def getClfPredPower(clf,X,class_labels,class_ind, printLog = False):
     #    #KFold(n_splits=2, random_state=None, shuffle=False)
     #    for train_index, test_index in res:
 
-    return sens,spec, F1
+    return sens,spec, F1, confmat
 
 def _getPredPower_singleFold(arg):
     from numpy.linalg import LinAlgError
-    (clf,add_clf_creopts,add_fitopts,X_train,X_test,y_train,y_test,class_ind,printLog)  = arg
+    (fold_type,clf,add_clf_creopts,add_fitopts,X_train,X_test,y_train,y_test,class_ind,printLog)  = arg
     model_cur = type(clf)(**add_clf_creopts)  # I need num LDA compnents I guess
     try:
         model_cur.fit(X_train, y_train, **add_fitopts)
@@ -1799,16 +1839,17 @@ def _getPredPower_singleFold(arg):
         print( str(e) )
         model_cur, perf_cur = None, None
 
-    return model_cur,perf_cur
+    return fold_type, model_cur,perf_cur
 
 
 def getPredPowersCV(clf,X,class_labels,class_ind, printLog = False, n_splits=None,
                     ret_clf_obj=False, skip_noCV =False, add_fitopts={},
-                   add_clf_creopts ={} ):
+                   add_clf_creopts ={}, train_on_shuffled =True ):
     # clf is assumed to be already fitted on entire training data here
     # TODO: maybe I need to adapt for other classifiers
-    # ret = [perf_nocv, perfs_CV, perf_aver ] and maybe list of classif objects
+    # ret = [perf_nocv, perfs_CV, perf_aver, confmat_aver ] and maybe list of classif objects
     # obtained during CV
+    ret = []
     from globvars import gp
     if skip_noCV:
         assert n_splits is not None
@@ -1818,10 +1859,15 @@ def getPredPowersCV(clf,X,class_labels,class_ind, printLog = False, n_splits=Non
         if printLog:
             print('getPredPowersCV: perf_nocv ',perf_nocv, X.shape)
 
+
+    retcur = {}
+    retcur['perf_nocv'] = perf_nocv
+
     #for model_cur in cv_results['estimator']
     if n_splits is not None:
         #if n_KFold_splits is not None:
         from sklearn.model_selection import KFold
+        from sklearn.model_selection import train_test_split
         kf = KFold(n_splits=n_splits, shuffle=True)
         split_res = kf.split(X)
 
@@ -1832,25 +1878,51 @@ def getPredPowersCV(clf,X,class_labels,class_ind, printLog = False, n_splits=Non
         Xarr = np.array(X)
         models = []
         #indcv_indset = 0
+        confmats = []
+
         args = []
+
+        class_labels_u = np.unique(class_labels)
 
         for train_index, test_index in split_res:
             #print(train_index )
             X_train, X_test = Xarr[train_index], Xarr[test_index]
             y_train, y_test = class_labels[train_index], class_labels[test_index]
+
+            class_labels_test_u = np.unique(y_test)
+            assert len(class_labels_test_u) == len(class_labels_u)
             if len(set(y_train)) <= 1 or len(set(y_test)) <= 1:
                 continue
 
-            arg = (clf,add_clf_creopts,add_fitopts,X_train,X_test,y_train,y_test,class_ind, printLog)
+            fold_type = 'regular'
+            arg = (fold_type,clf,add_clf_creopts,add_fitopts,X_train,X_test,y_train,y_test,class_ind, printLog)
             args += [arg]
 
+        if train_on_shuffled:
+            # train on shuffled labels to check overfitting
+            class_labels_shuffled = class_labels.copy()
+            np.random.shuffle(class_labels_shuffled)
+            X_train, X_test, y_train, y_test = \
+                train_test_split(X, class_labels_shuffled, test_size=0.25,
+                                 random_state=0)
+
+            fold_type_shuffled = 'train_on_shuffled_labels'
+            fold_type = fold_type_shuffled
+            arg = (fold_type, clf,add_clf_creopts,add_fitopts,X_train,X_test,y_train,y_test,class_ind, printLog)
+            args += [arg]
+
+
+        res_fold_type_spec = None
         if n_jobs_perrun > 1:
             n_jobs = 1
             for arg in args:
                 r = _getPredPower_singleFold(arg)
-                model_cur,perfs_cur = r
-                models += [model_cur]
-                perfs_CV += [perfs_cur]
+                fold_type, model_cur,perfs_cur = r
+                if fold_type != 'regular':
+                    res_fold_type_spec = r
+                else:
+                    models += [model_cur]
+                    perfs_CV += [perfs_cur]
         else:
             n_jobs = max(1, min(len(args) , mpr.cpu_count()-gp.n_free_cores) )
 
@@ -1865,25 +1937,44 @@ def getPredPowersCV(clf,X,class_labels,class_ind, printLog = False, n_splits=Non
             res = Parallel(n_jobs=n_jobs)(delayed(_getPredPower_singleFold)(arg) for arg in args)
 
             for r in res:
-                model_cur,perfs_cur = r
-                if (model_cur is not None) and (perfs_cur is not None):
-                    models += [model_cur]
-                    perfs_CV += [perfs_cur]
-                    #indcv_indset += 1
+                # perfs_cur - 4-tuple
+                fold_type, model_cur,perfs_cur = r
+                if fold_type != 'regular':
+                    res_fold_type_spec = r
+                else:
+                    if (model_cur is not None) and (perfs_cur is not None):
+                        models += [model_cur]
+                        perfs_CV += [perfs_cur]
+                        #indcv_indset += 1
 
-        perfarr = np.vstack(perfs_CV)
+        # convert three performance measures to a single matrix for further
+        # averaging
+        perfarr = np.vstack( [ (p[0],p[1],p[2])  for p in perfs_CV]  )
+        confmats = [ p[-1]  for p in perfs_CV]
         not_nan_fold_inds = np.where(  np.max( np.isnan(perfarr).astype(int) , axis= 1) == 0 )[0]
         assert len(not_nan_fold_inds) > 0
         perf_aver = np.mean(perfarr[not_nan_fold_inds] , axis = 0)
-        ret = [perf_nocv, perfs_CV, perf_aver ]
+        confmat_aver =  np.mean( confmats, axis=0 )
+        #ret = [perf_nocv, perfs_CV, perf_aver, confmat_aver ]
+        retcur['perfs_CV'] = perfs_CV
+        retcur['perf_aver'] = perf_aver
+        retcur['confmat_aver'] = confmat_aver
         if ret_clf_obj:
-            ret += [models]
+            #ret += [models]
+            retcur['clf_objs'] = models
+        #ret += [retcur]
     else:
-        ret = perf_nocv, [perf_nocv] , perf_nocv
+        #ret = perf_nocv, [perf_nocv] , perf_nocv
+        retcur['perfs_CV'] = [perf_nocv]
+        retcur['perf_aver'] = perf_nocv
+        retcur['confmat_aver'] = None
         if ret_clf_obj:
-            ret += [ [clf] ]
+            retcur['clf_objs'] = [clf]
+        #    ret += [ [clf] ]
+    retcur['fold_type_shuffled' ] = res_fold_type_spec
 
-    return tuple(ret)
+    #return tuple(ret)
+    return retcur
 
 def calcLDAVersions(X_to_fit, X_to_transform, class_labels,n_components_LDA,
                     class_ind_to_check, revdict, n_splits=4, calcName = ''):
@@ -1904,46 +1995,53 @@ def calcLDAVersions(X_to_fit, X_to_transform, class_labels,n_components_LDA,
     #classification_report(y_true, y_pred, target_names=target_names)
 
     # Compute prediction on training (separability)
-    sens_train,spec_train,F1_train = getClfPredPower(lda,X_to_fit, class_labels, class_ind_to_check)
+    sens_train,spec_train,F1_train, confmat_train = getClfPredPower(lda,X_to_fit, class_labels, class_ind_to_check)
     print('-- LDA on train sens {:.2f} spec {:.2f} F1 {:.2f}'.format(sens_train,spec_train,F1_train) )
 
     subres = {}
     subres['ldaobj'] = lda
     subres['X_transformed'] = X_LDA
-    subres['perfs'] = sens_train,spec_train,F1_train
+    subres['perfs'] = sens_train,spec_train,F1_train,confmat_train
     res['fit_to_all_data'] = subres
 
     # Compute prediction on training, shuffled labels
     class_labels_shuffled = class_labels.copy()
     np.random.shuffle(class_labels_shuffled)
-    sens,spec,F1 = getClfPredPower(lda,X_to_fit, class_labels_shuffled, class_ind_to_check)
+    sens,spec,F1,confmat = getClfPredPower(lda,X_to_fit, class_labels_shuffled, class_ind_to_check)
     print('-- LDA check_on_shuffle sens {:.2f} spec {:.2f} F1 {:.2f}'.format(sens,spec,F1) )
 
     subres = {}
-    subres['perfs'] = sens,spec,F1
+    subres['perfs'] = sens,spec,F1,confmat
     res['fit_to_all_data_check_on_shuffle'] = subres
 
     ##################
     lda_shuffled = type(lda)()
     lda_shuffled.fit(X_to_fit, class_labels_shuffled)
-    sens,spec,F1 = getClfPredPower(lda_shuffled,X_to_fit, class_labels_shuffled, class_ind_to_check)
+    sens,spec,F1,confmat = getClfPredPower(lda_shuffled,X_to_fit, class_labels_shuffled, class_ind_to_check)
     print('-- LDA train_on_shuffle labels sens {:.2f} spec {:.2f} F1 {:.2f}'.format(sens,spec,F1) )
 
     subres = {}
-    subres['perfs'] = sens,spec,F1
+    subres['perfs'] = sens,spec,F1,confmat
     res['fit_to_all_data_train_on_shuffle'] = subres
 
     ########## Compute with CV
-    perf_noCV, perfs_CV, res_aver_LDA, ldas_CV = \
-        getPredPowersCV(lda, X_to_fit,  class_labels, class_ind_to_check,
+    r = getPredPowersCV(lda, X_to_fit,  class_labels, class_ind_to_check,
                                 printLog=False, n_splits=n_splits, ret_clf_obj=True,
-                        skip_noCV=1)
-    sens_cv,spec_cv,F1_cv = res_aver_LDA
+                        skip_noCV=1, train_on_shuffled=False)
+
+    #perf_noCV, perfs_CV, res_aver_LDA, confmat_aver_LDA, ldas_CV = \
+
+    sens_cv,spec_cv,F1_cv = r['perf_aver'] #res_aver_LDA
+    ldas_CV = r['clf_objs']
 
     subres = {}
+    #subres['ldaobjs']     = ldas_CV
+    #subres['CV_perfs']     = perfs_CV
+    #subres['CV_perf_aver'] = sens_cv,spec_cv,F1_cv, confmat_aver_LDA
     subres['ldaobjs']     = ldas_CV
-    subres['CV_perfs']     = perfs_CV
-    subres['CV_perf_aver'] = sens_cv,spec_cv,F1_cv
+    subres['CV_perfs']     = r['perfs_CV']
+    subres['CV_perf_aver'] = sens_cv,spec_cv,F1_cv, r['confmat_aver']
+
     subres['n_splits'] = n_splits
     res['CV'] = subres
 
@@ -1966,13 +2064,14 @@ def calcLDAVersions(X_to_fit, X_to_transform, class_labels,n_components_LDA,
     lda_aver.coef_ = coef_aver
     lda_aver.intercept_ = intercept_aver
 
-    sens_avCV,spec_avCV,F1_avCV = getClfPredPower(lda_aver,X_to_fit, class_labels, class_ind_to_check)
+    sens_avCV,spec_avCV,F1_avCV, confmat_avCV = getClfPredPower(lda_aver,X_to_fit, class_labels, class_ind_to_check)
     print('-- LDA avCV on train sens {:.2f} spec {:.2f} F1 {:.2f}'.format(sens_avCV,spec_avCV,F1_avCV) )
 
-    perf_nocv_LDA_avCV, results_LDA_avCV, res_aver_LDA_avCV, ldas_CV_avCV = \
-        getPredPowersCV(lda_aver, X_to_fit,class_labels, class_ind_to_check,
-                                printLog=False, n_splits=n_splits, ret_clf_obj=True, skip_noCV=1)
-    sens_cv_avCV,spec_cv_avCV,F1_cv_avCV = res_aver_LDA_avCV
+    #perf_nocv_LDA_avCV, results_LDA_avCV, res_aver_LDA_avCV, confmat_av_avCV, ldas_CV_avCV = \
+    r2 = getPredPowersCV(lda_aver, X_to_fit,class_labels, class_ind_to_check,
+                         printLog=False, n_splits=n_splits, ret_clf_obj=True,
+                         skip_noCV=1, train_on_shuffled = False)
+    sens_cv_avCV,spec_cv_avCV,F1_cv_avCV = r2['perf_aver'] #res_aver_LDA_avCV
 
     print('-- LDA CV _avCV sens {:.2f} spec {:.2f} F1 {:.2f}'.format(sens_cv_avCV,spec_cv_avCV,F1_cv_avCV) )
     X_LDA_CV = lda_aver.transform(X_to_transform)
@@ -1980,17 +2079,19 @@ def calcLDAVersions(X_to_fit, X_to_transform, class_labels,n_components_LDA,
     subres = {}
     subres['ldaobj'] = lda_aver
     subres['X_transformed'] = X_LDA_CV
-    subres['perfs'] = sens_avCV,spec_avCV,F1_avCV
+    #subres['perfs'] = sens_avCV,spec_avCV,F1_avCV, confmat_avCV
+    # here we save CV-performance of averaged LDA
+    subres['perfs'] = sens_cv_avCV,spec_cv_avCV,F1_cv_avCV, r2['confmat_aver'] #_av_avCV
     res['CV_aver'] = subres
 
     return res
 
-def selMinFeatSet(clf, X, class_labels, class_ind, sortinds,
-                  drop_perf_pct = 4, conv_perf_pct = 2,
-                  n_splits=4,
-                  verbose=1, add_fitopts={}, add_clf_creopts={}, check_CV_perf = False,
-                  nfeats_step = 3, nsteps_report=1, max_nfeats=100,
-                    stop_if_boring = True, ret_clf_obj=False):
+def selMinFeatSet(clf, X, class_labels, class_ind, sortinds, drop_perf_pct = 4,
+                  conv_perf_pct = 2, n_splits=4, verbose=1,
+                  add_fitopts={},
+                  add_clf_creopts={}, check_CV_perf = False, nfeats_step = 3,
+                  nsteps_report=1, max_nfeats=100, stop_if_boring = True,
+                  ret_clf_obj=False):
     '''
     sortinds -- sorted increasing importance (i.e. the most imporant is the last one, as given by argsort)
     it is assumed that clf.fit has already been made
@@ -2010,13 +2111,15 @@ def selMinFeatSet(clf, X, class_labels, class_ind, sortinds,
           format(s,X.shape,nfeats_step,max_nfeats,drop_perf_pct,conv_perf_pct) )
 
     r0 = getPredPowersCV(clf,X,class_labels,class_ind, verbose >=3,
-                           n_splits=n_splits, add_fitopts=add_fitopts, add_clf_creopts=add_clf_creopts,
-                                                      ret_clf_obj=ret_clf_obj)
-    perf_nocv_, results_, res_aver_ = r0[:3]
+                         n_splits=n_splits, add_fitopts=add_fitopts,
+                         add_clf_creopts=add_clf_creopts,
+                         ret_clf_obj=ret_clf_obj)
+    #perf_nocv_, results_, res_aver_, confmat_ = r0[:4]
+    # used for stopping later
     if check_CV_perf:
-        sens_full,spec_full,F1_full = res_aver_
+        sens_full,spec_full,F1_full = r0['perf_aver']  # res_aver_
     else:
-        sens_full,spec_full,F1_full = perf_nocv_
+        sens_full,spec_full,F1_full = r0['perf_nocv']
 
 
     Xarr = np.array(X)
@@ -2034,11 +2137,22 @@ def selMinFeatSet(clf, X, class_labels, class_ind, sortinds,
         print('selMinFeatSet: --- all feats give perf={}, check_CV_perf = {}'.
             format( sprintfPerfs([sens_full,spec_full,F1_full] ),check_CV_perf) )
 
-    rr = [-1, sortinds.tolist(), perf_nocv_, res_aver_]
+    rrcur = {}
+    rrcur['fold_type'] = 'all_features_present'
+    rrcur['fold_ind'] = -1
+    rrcur['sortinds'] = sortinds.tolist()
+    rrcur['perf_nocv'] = r0['perf_nocv']
+    rrcur['perf_aver'] = r0['perf_aver']
+    rrcur['confmat'] = r0['confmat_aver']
+    rrcur['featinds_present'] = np.arange(max_nfeats)
+    rrcur['fold_type_shuffled' ] = r0['fold_type_shuffled']
+
+    #rr = [-1, sortinds.tolist(), perf_nocv_, res_aver_]
     if ret_clf_obj:
-        models_cur = r0[3]
-        rr += [models_cur]
-    perfs += [ tuple(rr)    ]
+        rrcur['clf_obj'] = r0['clf_objs']
+    #    models_cur = r0[-1]
+    #    rr += [models_cur]
+    perfs += [ rrcur    ]
     #perfs += [ (-1, sortinds.tolist(), perf_nocv_, res_aver_)   ]
 
     sens_prev,spec_prev = 0,0
@@ -2056,21 +2170,32 @@ def selMinFeatSet(clf, X, class_labels, class_ind, sortinds,
         inds = sortinds[-i:].tolist()[::-1] # reversal or order here is only since Jan 21. It is cosmetic
         X_red = Xarr[:,inds]
         model_red.fit(X_red, class_labels, **add_fitopts)
+        # don't train on shuffled in intermediate steps
         r= getPredPowersCV(model_red,X_red,class_labels, class_ind,
                     printLog=(verbose >= 3), n_splits=n_splits_cycle,
                     add_fitopts=add_fitopts,
-                    add_clf_creopts=add_clf_creopts,ret_clf_obj=ret_clf_obj)
-        perf_nocv, results, res_aver = r[:3]
-        sens,spec,F1 = perf_nocv
+                    add_clf_creopts=add_clf_creopts,ret_clf_obj=ret_clf_obj,
+                           train_on_shuffled = False)
+        #perf_nocv, results, res_aver,confmat = r[:4]
+        sens,spec,F1,confmat_nocv = r['perf_nocv']
 
-        rr = [i,inds, perf_nocv,res_aver]
+        rrcur = {}
+        rrcur['fold_type'] = 'some_features_present'
+        rrcur['fold_ind'] = i
+        rrcur['perf_nocv'] = r['perf_nocv']
+        rrcur['perf_aver'] = r['perf_aver']
+        rrcur['confmat'] = r['confmat_aver']
+        rrcur['featinds_present'] = inds
+
+        #rr = [i,inds, perf_nocv,res_aver]
         if ret_clf_obj:
-            models_cur = r[3]
-            rr += [models_cur]
-        perfs += [ tuple(rr)    ]
+            rrcur['clf_objs'] = r['clf_objs']
+            #rr += [models_cur]
+        perfs += [ rrcur  ]
+        #perfs += [ tuple(rr)    ]
         if verbose >= 2 and ( int(i-1 / nfeats_step) % nsteps_report == (nsteps_report-1) ):
             print('selMinFeatSet: --- search of best feat set, len(inds)={}, perf={}'.
-                  format(len(inds), sprintfPerfs(res_aver) ) )
+                  format(len(inds), sprintfPerfs(r['perf_aver']) ) )
 
         # the last one if always CV even though if we checking only training
         # data perf when selecting feats
@@ -2079,25 +2204,34 @@ def selMinFeatSet(clf, X, class_labels, class_ind, sortinds,
         cond_close = (sens_full - sens  < close_to_full_thr) and (spec_full- spec  < close_to_full_thr)
         cond_boring = ( sens_full < 0.4) and nsteps > 1 and (not stop_if_boring)
         stop_now = (cond_close and cond_conv) or cond_boring
+        print( (f'___::{len(inds)}: sens_full = {sens_full*100:.2f} %,  '
+                f'sens_nocv = {sens*100:.2f} %, '
+                f'sens_nocv_prev = {sens_prev:.2f} % stop_now = {stop_now}') )
         if stop_now:
             if n_splits_cycle is None:
-                r = getPredPowersCV(model_red,X_red,class_labels, class_ind,
+                rstop = getPredPowersCV(model_red,X_red,class_labels, class_ind,
                                     printLog=verbose >= 3, n_splits=n_splits,
                                     add_fitopts=add_fitopts,
                                     add_clf_creopts=add_clf_creopts,
                                     ret_clf_obj=ret_clf_obj)
-                perf_nocv, results, res_aver = r[:3]
-                sens,spec,F1 = res_aver
+                #perf_nocv, results, res_aver, confmat = r[:4]
+                sens,spec,F1 = rstop['perf_aver']
 
-                rr = [i,inds, perf_nocv,res_aver]
+                #rr = [i,inds, perf_nocv,res_aver]
+                rrcur['perf_nocv'] = rstop['clf_objs']
+                rrcur['perf_aver'] = rstop['perf_aver']
+                rrcur['confmat'] = rstop['confmat_aver']
+                rrcur['fold_type_shuffled' ] = rstop['fold_type_shuffled']
                 if ret_clf_obj:
-                    models_cur = r[3]
-                    rr += [models_cur]
-                perfs[-1] = tuple(rr)
+                    #models_cur = r[-1]
+                    #rr += [models_cur]
+                    rrcur['clf_objs'] = rstop['clf_objs']
+                #perfs[-1] = tuple(rr)
+                perfs[-1] = rrcur
 
             if verbose >= 1:
                 print('selMinFeatSet: --- ENDED search of best feat set, len(inds)={}, perf={}, boring={}'.
-                      format(len(inds), sprintfPerfs(res_aver), cond_boring ) )
+                      format(len(inds), sprintfPerfs(rrcur['perf_aver']), cond_boring ) )
             break
 
         sens_prev,spec_prev = sens,spec
@@ -2106,18 +2240,34 @@ def selMinFeatSet(clf, X, class_labels, class_ind, sortinds,
     if not stop_now:  # if we stopped because cycle has ended
         if verbose >= 1:
             print('selMinFeatSet: max number of features reached, adding full to the end')
-        rr = [i+1, sortinds.tolist(), perf_nocv_, res_aver_]
+
+
+        rrcur = {}
+        rrcur['fold_type'] = 'all_features_present'
+        rrcur['fold_ind'] = i+1
+        rrcur['sortinds'] = sortinds.tolist()
+        rrcur['perf_nocv'] = r0['perf_nocv']
+        rrcur['perf_aver'] = r0['perf_aver']
+        rrcur['confmat'] = r0['confmat_aver']
+        rrcur['featinds_present'] = np.arange(max_nfeats)
+        rrcur['fold_type_shuffled' ] = r0['fold_type_shuffled']
+
+
+        #rr = [i+1, sortinds.tolist(), r0['perf_nocv'], r0['perf_aver'] ]
         if ret_clf_obj:
-            models_cur = r0[3]
-            rr += [models_cur]
-        perfs += [ tuple(rr)  ]
+            #models_cur = r0[-1]
+            #rr += [models_cur]
+            rrcur['clf_objs'] = r0['clf_objs']
+        #perfs += [ tuple(rr)  ]
+        perfs += [ rrcur ]
 
     return perfs
 
 
 
-def makeClassLabels(sides_hand, grouping, int_types_to_distinguish, ivalis_tb_indarrays,
-                    good_inds, num_labels_tot, rem_neut=1):
+def makeClassLabels(sides_hand, grouping, int_types_to_distinguish,
+                    ivalis_tb_indarrays, good_inds, num_labels_tot,
+                    rem_neut=1):
     '''
         sides_hand = list of one-char strings
 
@@ -2134,39 +2284,22 @@ def makeClassLabels(sides_hand, grouping, int_types_to_distinguish, ivalis_tb_in
             for int_type_cur in grouping:
                 cur = '{}_{}'.format(int_type_cur,side_letter)
                 class_ids_grouped[cur] = gp.class_ids_def[main]
-    print(class_ids_grouped)
+    print(f'class_ids_grouped = {class_ids_grouped}')
 
     #TODO: make possible non-main side
 
 
+    # first fill everthing with neutral label
     #class_labels = np.repeat(gp.class_id_neut,len(Xconcat_imputed))
     class_labels = np.repeat(gp.class_id_neut,num_labels_tot)
     assert gp.class_id_neut == 0
 
-    #old_ver = 0
-    #if old_ver:
-    #    int_types = set()
-    #    for itb in int_types_to_distinguish:
-    #        for side in sides_hand:
-    #            assert len(side) == 1
-    #            int_types.update(['{}_{}'.format(itb,side)])
-    #    #int_types = ['trem_L', 'notrem_L', 'hold_L', 'move_L']
-    #    int_types = list(int_types)
-    #    #print(int_types)
-
-    #    classes = [k for k in ivalis_tb_indarrays.keys() if k in int_types]  #need to be ordered
-    #    #classes
-
-    #    for i,k in enumerate(classes):
-    #        #print(i,k)
-    #        for bininds in ivalis_tb_indarrays[k]:
-    #            #print(i,len(bininds), bininds[0], bininds[-1])
-    #            class_labels[ bininds ] = i + 1
     from collections.abc import Iterable
 
     revdict = {}
     # set class label for current interval types
     bincounts_per_class_name = {}
+    # over all interval_types
     for itb in int_types_to_distinguish:
         for side in sides_hand:
             class_name = '{}_{}'.format(itb,side)
@@ -2246,3 +2379,30 @@ def countClassLabels(class_labels_good, class_ids_grouped=None,revdict=None):
 #        if num_cur < min_num:
 #            s = 'Class {} (cid={}) is not present at all'.format(class_name,cid)
 #            raise ValueError(s)
+
+def plotFeatureImportance(ax, feature_names, shap_values, mode='SHAP', explainer = None):
+    assert mode in ['XGB_gain', 'SHAP', 'XGB_Shapley', 'EBM']
+
+    if mode == 'XGB_Shapley':
+        aggregate = np.mean(np.abs(shap_values[:, 0:-1]), axis=0)
+        # sort by magnitude
+        z = [(x, y) for y, x in sorted(zip(aggregate, feature_names), reverse=True)]
+        z = list(zip(*z))
+    elif mode == 'XGB_gain':
+        z = [(x, y) for y, x in sorted(zip(shap_values, feature_names), reverse=True)]
+    elif mode == 'EBM':
+        if feature_names is None:
+            feature_names = global_exp['feature_names']
+        if shap_values is None:
+            aggregate = global_exp._internal_obj['overall']['scores']
+        z = [(x, y) for y, x in sorted(zip(aggregate, feature_names), reverse=True)]
+        z = list(zip(*z))
+
+
+    ax.bar(z[0], z[1])
+    #ax.set_xticks(rotation=90)
+    ax.tick_params(axis='x', labelrotation=90 )
+    #ax.tight_layout()
+
+    ax.set_title(f'Scores of type {mode}');
+

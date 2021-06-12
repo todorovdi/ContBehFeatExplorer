@@ -10,6 +10,9 @@ import matplotlib.pyplot as plt
 from globvars import gp
 from matplotlib.backends.backend_pdf import PdfPages
 
+from os.path import join as pjoin
+import mpr, mne
+
 pdf = None
 
 plot_stat_scatter = 0
@@ -24,6 +27,12 @@ crop_start = None
 crop_end   = None
 bands_precision = 'crude'
 calc_stats_multi_band = 0
+
+n_free_cores = gp.n_free_cores
+n_jobs = max(1, mpr.cpu_count() - n_free_cores)
+
+allow_CUDA_MNE = mne.utils.get_config('MNE_USE_CUDA')
+allow_CUDA = True
 
 input_subdir = ""
 msrc_inds = np.arange(8,dtype=int)  #indices appearing in channel (sources) names, not channnel indices
@@ -54,7 +63,7 @@ for opt, arg in opts:
         print (helpstr)
         sys.exit(0)
     elif opt == "--param_file":
-        param_fname_full = os.path.join('params',arg)
+        param_fname_full = pjoin(gv.param_dir,arg)
         params_read = gv.paramFileRead(param_fname_full)
     else:
         if opt.startswith('--'):
@@ -64,6 +73,7 @@ for opt, arg in opts:
         else:
             raise ValueError('wrong opt {}'.format(opt) )
         params_cmd[optkey] = arg
+
 
 #overwriting values from param file with those from command line
 #print(params_cmd,params_read)
@@ -88,7 +98,7 @@ for opt,arg in pars.items():
     elif opt == "input_subdir":
         input_subdir = arg
         if len(input_subdir) > 0:
-            subdir = os.path.join(gv.data_dir,input_subdir)
+            subdir = pjoin(gv.data_dir,input_subdir)
             assert os.path.exists(subdir )
     elif opt == "src_grouping_fn":
         src_file_grouping_ind = int(arg)
@@ -161,6 +171,9 @@ for opt,arg in pars.items():
     else:
         raise ValueError('Unknown option:arg {}:{}'.format(opt,arg) )
 
+if allow_CUDA and allow_CUDA_MNE:
+    n_jobs = 'cuda'
+    print('Using CUDA')
 #sys.exit(0)
 
 #curpar = "mods"
@@ -200,7 +213,7 @@ if use_lfp_HFO:
     mods_to_load += ['LFP_hires']
 
 raws_permod_both_sides = upre.loadRaws(rawnames,mods_to_load, sources_type, src_type_to_use,
-             src_file_grouping_ind,input_subdir=input_subdir)
+             src_file_grouping_ind,input_subdir=input_subdir,n_jobs=n_jobs)
 
 sfreqs = [ int(raws_permod_both_sides[rn]['LFP'].info['sfreq']) for rn in rawnames]
 assert len(set(sfreqs)) == 1
@@ -222,7 +235,7 @@ if force_consistent_main_sides:
 rec_info_pri = []
 for rawname_ in rawnames:
     src_rec_info_fn = utils.genRecInfoFn(rawname_,sources_type,src_file_grouping_ind)
-    src_rec_info_fn_full = os.path.join(gv.data_dir, input_subdir, src_rec_info_fn)
+    src_rec_info_fn_full = pjoin(gv.data_dir, input_subdir, src_rec_info_fn)
     rec_info = np.load(src_rec_info_fn_full, allow_pickle=True)
     rec_info_pri += [rec_info]
 
@@ -246,7 +259,7 @@ if save_dat:
                                    use_main_LFP_chan, src_file_grouping_ind,
                                    src_grouping)
         #fname = '{}_'.format(rawn) + fn_suffix_dat
-        fname_dat_full = os.path.join(gv.data_dir, input_subdir, fname)
+        fname_dat_full = pjoin(gv.data_dir, input_subdir, fname)
         print('Saving ',fname_dat_full)
         np.savez(fname_dat_full,
                  dat=dat_pri[rawi],
@@ -339,7 +352,7 @@ if save_stats:
     fname_stats = utils.genStatsFn(rawnames, new_main_side, data_modalities,
                                    use_main_LFP_chan, src_file_grouping_ind,
                                    src_grouping )
-    fname_stats_full = os.path.join( gv.data_dir, input_subdir, fname_stats)
+    fname_stats_full = pjoin( gv.data_dir, input_subdir, fname_stats)
     print('Saving ',fname_stats_full)
     np.savez(fname_stats_full, stats_per_ct=stats_per_ct, stats_HFO_per_ct=stats_HFO_per_ct,
              rawnames=rawnames, cmd=(opts,args), pars=pars)
@@ -366,11 +379,7 @@ if calc_stats_multi_band:
     dat_pri_persfreq = [dat_pri, dat_lfp_hires_pri]
 
     ann_MEGartif_prefix_to_use = '_ann_MEGartif_flt'
-
-    import multiprocessing as mpr
-    from globvars import gp
-    ncores = max(1, min(len(args) , mpr.cpu_count()-gp.n_free_cores) )
-    n_jobs_flt = mpr.cpu_count()
+    n_jobs_flt = max(1, mpr.cpu_count()-gp.n_free_cores )
 
     # note that we can have different channel names for different raws
     #raw_perband_flt_pri_persfreq = []
@@ -381,7 +390,8 @@ if calc_stats_multi_band:
     raw_perband_flt_pri, raw_perband_bp_pri, chnames_perband_flt_pri, chnames_perband_bp_pri  = \
         ugf.bandFilter(rawnames, times_pri, main_sides_pri, side_switched_pri,
                 sfreqs, skips, dat_pri_persfreq, fband_names_inc_HFO, gv.fband_names_HFO_all,
-                fbands, n_jobs_flt, subfeature_order, subfeature_order_lfp_hires,
+                fbands, n_jobs_flt, allow_CUDA and n_jobs == 'cuda',
+                       subfeature_order, subfeature_order_lfp_hires,
                 smoothen_bandpow, ann_MEGartif_prefix_to_use)
 
     #raws_flt_pri_perband_ = {}
@@ -423,7 +433,7 @@ if calc_stats_multi_band:
         fname_stats = utils.genStatsMultiBandFn(rawnames, new_main_side, data_modalities,
                                     use_main_LFP_chan, src_file_grouping_ind,
                                     src_grouping, bands_precision )
-        fname_stats_full = os.path.join( gv.data_dir, input_subdir, fname_stats)
+        fname_stats_full = pjoin( gv.data_dir, input_subdir, fname_stats)
         print('Saving ',fname_stats_full)
         np.savez(fname_stats_full, stats_multiband_bp_per_ct=stats_multiband_bp_per_ct,
                 stats_multiband_flt_per_ct=stats_multiband_flt_per_ct,

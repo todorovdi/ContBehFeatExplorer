@@ -15,6 +15,8 @@ from sklearn.preprocessing import RobustScaler
 from sklearn.manifold import TSNE
 from sklearn.decomposition import PCA
 
+from os.path import join as pjoin
+
 
 from matplotlib.backends.backend_pdf import PdfPages
 import utils_tSNE as utsne
@@ -129,7 +131,20 @@ if n_jobs is None:
     n_jobs = max(1, mpr.cpu_count() - gp.n_free_cores )
 elif n_jobs == -1:
     n_jobs = mpr.cpu_count()
-print('run_genfeats: n_jobs = {}'.format(n_jobs) )
+
+
+if mne.utils.get_config('MNE_USE_CUDA'):
+    n_jobs_tfr = 'cuda'
+else:
+    n_jobs_tfr = n_jobs
+
+if mne.utils.get_config('MNE_USE_CUDA'):
+    n_jobs_flt = 'cuda'
+else:
+    n_jobs_flt = n_jobs
+
+print('run_genfeats: n_jobs = {}, MNE_USE_CUDA = {}'.format(n_jobs, mne.utils.get_config('MNE_USE_CUDA')) )
+
 
 ##########################
 
@@ -184,7 +199,7 @@ for opt, arg in opts:
         print (helpstr)
         sys.exit(0)
     elif opt == "--param_file":
-        param_fname_full = os.path.join('params',arg)
+        param_fname_full = pjoin(gv.param_dir,arg)
         params_read = gv.paramFileRead(param_fname_full)
     else:
         if opt.startswith('--'):
@@ -227,12 +242,12 @@ for opt,arg in pars.items():
     elif opt == "input_subdir":
         input_subdir = arg
         if len(input_subdir) > 0:
-            subdir = os.path.join(gv.data_dir,input_subdir)
+            subdir = pjoin(gv.data_dir,input_subdir)
             assert os.path.exists(subdir )
     elif opt == "output_subdir":
         output_subdir = arg
         if len(output_subdir) > 0:
-            subdir = os.path.join(gv.data_dir,output_subdir)
+            subdir = pjoin(gv.data_dir,output_subdir)
             if not os.path.exists(subdir ):
                 print('Creating output subdir {}'.format(subdir) )
                 os.makedirs(subdir)
@@ -393,10 +408,6 @@ mods_to_load = ['LFP', 'src', 'EMG']
 if use_lfp_HFO:
     mods_to_load += ['LFP_hires']
 
-
-# get info about bad MEG channels (from separate file)
-gen_subj_info = gv.gen_subj_info
-
 # these are just to play and plot because the side can change from patient to
 # patient
 
@@ -404,10 +415,10 @@ move_sides = []
 tremor_sides = []
 for rn in rawnames:
     subj_cur,medcond_cur,task_cur  = utils.getParamsFromRawname(rn)
-    mainmoveside_cur = gen_subj_info[subj_cur].get('move_side',None)
-    maintremside_cur = gen_subj_info[subj_cur].get('tremor_side',None)
-    mainLFPchan_cur =      gen_subj_info[subj_cur]['lfpchan_used_in_paper']
-    tremfreq_Jan_cur =     gen_subj_info[subj_cur]['tremfreq']
+    mainmoveside_cur = gv.gen_subj_info[subj_cur].get('move_side',None)
+    maintremside_cur = gv.gen_subj_info[subj_cur].get('tremor_side',None)
+    mainLFPchan_cur  = gv.gen_subj_info[subj_cur]['lfpchan_used_in_paper']
+    tremfreq_Jan_cur = gv.gen_subj_info[subj_cur]['tremfreq']
 
     move_sides  += [ mainmoveside_cur ]
     tremor_sides+= [ maintremside_cur ]
@@ -464,7 +475,7 @@ for rawi in range(len(rawnames)):
     fname = utils.genPrepDatFn(rawn, new_main_side, data_modalities,
                                 use_main_LFP_chan, src_file_grouping_ind,
                                 src_grouping)
-    fname_dat_full = os.path.join(gv.data_dir, input_subdir, fname)
+    fname_dat_full = pjoin(gv.data_dir, input_subdir, fname)
     f = np.load(fname_dat_full, allow_pickle=True)
     # for some reason if I don't do it explicitly, it has int64 type which
     # offends MNE
@@ -491,7 +502,7 @@ prefix = stats_fn_prefix
 fname_stats = utils.genStatsFn(None, new_main_side, data_modalities,
                                 use_main_LFP_chan, src_file_grouping_ind,
                                 src_grouping, prefix )
-fname_stats_full = os.path.join( gv.data_dir, input_subdir, fname_stats)
+fname_stats_full = pjoin( gv.data_dir, input_subdir, fname_stats)
 f = np.load(fname_stats_full, allow_pickle=True)
 rawnames_stats =  f['rawnames']
 assert set(rawnames).issubset(rawnames_stats)
@@ -502,16 +513,16 @@ if (not recalc_stats_multi_band) and ( 'rbcorr' in features_to_use or 'bpcorr' i
     fname_stats_multi_band = utils.genStatsMultiBandFn(None, new_main_side, data_modalities,
                                     use_main_LFP_chan, src_file_grouping_ind,
                                     src_grouping, bands_only, prefix )
-    fname_stats_full = os.path.join( gv.data_dir, input_subdir, fname_stats_multi_band)
+    fname_stats_full = pjoin( gv.data_dir, input_subdir, fname_stats_multi_band)
     assert os.path.exists(fname_stats_full)
 
 rec_info_pri = []
 for rawname_ in rawnames:
     src_rec_info_fn = utils.genRecInfoFn(rawname_,sources_type,src_file_grouping_ind)
-    src_rec_info_fn_full = os.path.join(gv.data_dir, input_subdir,
+    src_rec_info_fn_full = pjoin(gv.data_dir, input_subdir,
                                         src_rec_info_fn)
     if input_subdir != output_subdir:
-        src_rec_info_fn_full2 = os.path.join(gv.data_dir, output_subdir,
+        src_rec_info_fn_full2 = pjoin(gv.data_dir, output_subdir,
                                             src_rec_info_fn)
         import shutil
         shutil.copyfile(src_rec_info_fn_full,src_rec_info_fn_full2)
@@ -602,10 +613,10 @@ percentileOffset = 25
 ################################
 
 if show_plots:
-    fig_subdir =os.path.join(gv.dir_fig, output_subdir )
+    fig_subdir =pjoin(gv.dir_fig, output_subdir )
     if not os.path.exists(fig_subdir):
         os.makedirs(fig_subdir)
-    fig_fname = os.path.join(fig_subdir,
+    fig_fname = pjoin(fig_subdir,
                              '{}_feat_plots{}_side{}_LFP{}_{}_nmod{}_nfeattp{}.pdf'.format(
                                  rawnstr,show_plots, use_main_moveside,
                                  int(use_main_LFP_chan), bands_only,
@@ -933,9 +944,9 @@ pre_csd_fname = '{}_csd_{}chs.npz'
 pre_rbcorr_fname = '{}_rbcorr_{}chs.npz'
 pre_bpcorr_fname = '{}_bpcorr_{}chs.npz'
 #a = '{}_tfr_{}chs.npz'.format(rawnstr,n_channels_str)
-#fname_tfr_full = os.path.join(gv.data_dir, output_subdir, a)
+#fname_tfr_full = pjoin(gv.data_dir, output_subdir, a)
 #a = '{}_csd_{}chs.npz'.format(rawnstr,n_channels_str)
-#fname_csd_full = os.path.join(gv.data_dir, output_subdir,a)
+#fname_csd_full = pjoin(gv.data_dir, output_subdir,a)
 
 fname_feat_full = ""
 ######################
@@ -983,14 +994,14 @@ fname_csd_full_pri = [0]*len(rawnames)
 for rawi in range(len(rawnames)):
     rawn = rawnames[rawi]
     tfr_fname = pre_tfr_fname.format(rawn,n_channels_pri[rawi] )
-    fname_tfr_full = os.path.join(gv.data_dir, output_subdir, tfr_fname)
+    fname_tfr_full = pjoin(gv.data_dir, output_subdir, tfr_fname)
     g = int( os.path.exists( fname_tfr_full ) )
     if g:
         g += int (upre.getFileAge(fname_tfr_full) < load_TFR_max_age_h)
     gs_tfr[rawi] = g
 
     csd_fname = pre_csd_fname.format(rawn,n_channels_pri[rawi] )
-    fname_csd_full = os.path.join(gv.data_dir, output_subdir, csd_fname)
+    fname_csd_full = pjoin(gv.data_dir, output_subdir, csd_fname)
     g = int( os.path.exists( fname_csd_full )  )
     if g:
         g += int (upre.getFileAge(fname_csd_full) < load_CSD_max_age_h)
@@ -1073,9 +1084,10 @@ if not (use_existing_TFR and have_TFR):
             print('Starting TFR for data #{} with shape {}'.format(rawind,dat_for_tfr.shape) )
             assert ( skip - (skip // skip_div_TFR)  * skip_div_TFR ) < 1e-10
 
+
             tfrres_,wbd = utils.tfr(dat_for_tfr, sfreq, freqs, n_cycles,
                                     windowsz, decim = skip // skip_div_TFR,
-                                    n_jobs=n_jobs)
+                                    n_jobs=n_jobs_tfr)
             if skip_div_TFR > 1:
                 raise ValueError('wbd not debugged for that')
                 tfrres = utsne.downsample(tfrres_, skip_div_TFR, axis=-1)
@@ -1090,7 +1102,7 @@ if not (use_existing_TFR and have_TFR):
 
                 print('Starting TFR for LFP HFO data #{} with shape {}'.format(rawind,dat_for_tfr.shape) )
                 tfrres_LFP_,wbd_HFO = utils.tfr(dat_for_tfr, sfreq_hires, freqs_inc_HFO, n_cycles_inc_HFO,
-                                    windowsz_hires, decim = skip_hires // skip_div_TFR, n_jobs=n_jobs)
+                                    windowsz_hires, decim = skip_hires // skip_div_TFR, n_jobs=n_jobs_tfr)
                 if skip_div_TFR > 1:
                     raise ValueError('wbd not debugged for that')
                     tfrres_LFP = utsne.downsample(tfrres_LFP_, skip_div_TFR, axis=-1)
@@ -1585,7 +1597,6 @@ if ('rbcorr' in features_to_use and not load_rbcorr) or ('bpcorr' in features_to
     skips = [skip, skip_hires]
     dat_pri_persfreq = [dat_pri, dat_lfp_hires_pri]
 
-    n_jobs_flt = n_jobs
 
     # note that we can have different channel names for different raws
     #raw_perband_flt_pri_persfreq = []
@@ -1617,7 +1628,7 @@ if ('rbcorr' in features_to_use and not load_rbcorr) or ('bpcorr' in features_to
         fname_stats_multi_band = utils.genStatsMultiBandFn(None, new_main_side, data_modalities,
                                         use_main_LFP_chan, src_file_grouping_ind,
                                         src_grouping, bands_only, prefix )
-        fname_stats_full = os.path.join( gv.data_dir, input_subdir, fname_stats_multi_band)
+        fname_stats_full = pjoin( gv.data_dir, input_subdir, fname_stats_multi_band)
         f = np.load(fname_stats_full, allow_pickle=True)
         rawnames_stats =  f['rawnames']
         assert set(rawnames).issubset(rawnames_stats)
@@ -1650,7 +1661,7 @@ if 'rbcorr' in features_to_use:  #raw band corr
     rbcor_names_pri = [0] * len(rawnames)
     for rawind in range(len(dat_pri)):
         fn = pre_rbcorr_fname.format(rawnames[rawind], n_channels_pri[rawind] )
-        fn = os.path.join(gv.data_dir, output_subdir, fn)
+        fn = pjoin(gv.data_dir, output_subdir, fn)
         if load_rbcorr and os.path.exists(fn):
             print('Load rbcorr from {}'.format(fn) )
             f = np.load(fn, allow_pickle=True)
@@ -1696,7 +1707,7 @@ if 'rbcorr' in features_to_use:  #raw band corr
 
             if save_rbcorr:
                 print('Saving rbcorr ',fn)
-                #fn = os.path.join(gv.data_dir, output_subdir,'{}_rbcorr.npz'.format(rawnames[rawind] ) )
+                #fn = pjoin(gv.data_dir, output_subdir,'{}_rbcorr.npz'.format(rawnames[rawind] ) )
                 np.savez( fn , rbcorrs=rbcorrs, rbcor_names=rbcor_names, wbd_rbcorr=wbd_rbcorr)
                 gc.collect()
 
@@ -1736,7 +1747,7 @@ if 'bpcorr' in features_to_use:
     bpcor_names_pri = [0] * len(rawnames)
     for rawind in range(len(dat_pri)):
         fn = pre_bpcorr_fname.format(rawnames[rawind], n_channels_pri[rawind] )
-        fn = os.path.join(gv.data_dir, output_subdir, fn)
+        fn = pjoin(gv.data_dir, output_subdir, fn)
         if load_bpcorr and os.path.exists(fn):
             print('Load bpcorr from {}'.format(fn) )
             f = np.load(fn, allow_pickle=True)
@@ -2111,7 +2122,7 @@ if save_feat:
         a = '{}_feats_{}_{}chs_nfeats{}_skip{}_wsz{}_grp{}-{}{}.npz'.\
             format(rawname_,st,n_channels_pri[rawind], X.shape[1], skip, windowsz,
                   src_file_grouping_ind, src_grouping, crp_str)
-        fname_feat_full = os.path.join(gv.data_dir, output_subdir, a)
+        fname_feat_full = pjoin(gv.data_dir, output_subdir, a)
 
         # this contains not heavy things
         info = {}

@@ -175,7 +175,7 @@ SUBSKIP_ML_FIT=1
 
 LFP_CHAN_TO_USE="all"
 #LFP_CHAN_TO_USE="main"
-USE_AUX_IVAL_GROUPINGS=1
+USE_AUX_IVAL_GROUPINGS=0
 
 skip_XGB=0
 skip_XGB_aux_int=0
@@ -192,15 +192,17 @@ fi
       PREFIX_ALL_FEATS=1
          PREFIXES_MAIN=1
 PREFIXES_CROSS_MOD_AUX=1
-      PREFIXES_AUX_SRC=1
+      PREFIXES_AUX_SRC=0
           PREFIXES_AUX=0
 
 #--groupings_to_use
 #GROUPINGS_TO_USE="merge_all_not_trem,merge_movements,merge_nothing"
-GROUPINGS_TO_USE="merge_nothing,merge_all_not_trem"
+#GROUPINGS_TO_USE="merge_nothing,merge_all_not_trem"
+GROUPINGS_TO_USE="merge_nothing"
 
 #int_types_to_use = gp.int_types_to_include
-INT_SETS_TO_USE="basic,trem_vs_quiet"
+#INT_SETS_TO_USE="basic,trem_vs_quiet"
+INT_SETS_TO_USE="basic"
 
 if [ $USE_AUX_IVAL_GROUPINGS -gt 0 ]; then
   GROUPINGS_TO_USE="$GROUPINGS_TO_USE,merge_within_subj,merge_within_medcond,merge_within_task"
@@ -453,9 +455,11 @@ if [ $do_ML -gt 0 ]; then
         echo $S
         #python3 -c "$S" > $OUT
         #python3 -c "$S"
+        cd ..
         OUT=$(python3 -c "$S")
         # first line is hostname so take the last line only
         OUT=`echo "$OUT" | tail -n1`
+        cd run
         #echo "OUTTTT $OUT"
         #echo -e "import sys\nfor r in range(10): print 'rob'" | python3
         echo "CLASS_LAB_GRP_STR=$CLASS_LAB_GRP_STR"

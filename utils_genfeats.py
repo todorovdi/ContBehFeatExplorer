@@ -1678,9 +1678,11 @@ def bandAverage(freqs,freqs_inc_HFO,csd_pri,csdord_pri,csdord_LFP_HFO_pri,
     return bpow_abscsd_pri, bpow_imagcsd, csdord_strs_pri, csdord_strs_HFO_pri, bpow_abscsd_LFP_HFO_pri
 
 
+# I have to give allow_CUDA separately because some things I cannot run on CUDA
+# (e.g. apply_function)
 def bandFilter(rawnames, times_pri, main_sides_pri, side_switched_pri,
                sfreqs, skips, dat_pri_persfreq, fband_names_inc_HFO, fband_names_HFO_all,
-               fbands, n_jobs_flt, subfeature_order, subfeature_order_lfp_hires,
+               fbands, n_jobs_flt, allow_CUDA, subfeature_order, subfeature_order_lfp_hires,
                smoothen_bandpow = 0, ann_MEGartif_prefix_to_use="_ann_MEGartif_flt"):
     import utils_tSNE as utsne
     sfreq = sfreqs[0]
@@ -1690,6 +1692,11 @@ def bandFilter(rawnames, times_pri, main_sides_pri, side_switched_pri,
     chnames_perband_bp_pri   = [0] * len(rawnames)
     means_perband_flt_pri    = [dict()] * len(rawnames)
     means_perband_bp_pri     = [dict()] * len(rawnames)
+
+    n_jobs_maybe_cuda = n_jobs_flt
+    if allow_CUDA:
+        n_jobs_maybe_cuda = 'cuda'
+
     for rawind in range(len(rawnames)):
         raw_perband_flt = {}
         raw_perband_bp  = {}
@@ -1749,7 +1756,7 @@ def bandFilter(rawnames, times_pri, main_sides_pri, side_switched_pri,
                     r.set_annotations(anns_LFPartif)
                 else: # we have only LFP channels then
                     r.set_annotations(anns_LFPartif)
-                r.filter(l_freq=low,h_freq=high, n_jobs=n_jobs_flt,
+                r.filter(l_freq=low,h_freq=high, n_jobs=n_jobs_maybe_cuda,
                         skip_by_annotation='BAD_{}'.format(opsidelet), pad='symmetric')#, filter_length="1s" )
 
                 if sfreq_cur <= sfreq + 1e-10:
@@ -1781,7 +1788,7 @@ def bandFilter(rawnames, times_pri, main_sides_pri, side_switched_pri,
                     assert bandname not in raw_perband_flt
                     raw_perband_flt[bandname] =  r
                 else:
-                    rbp.resample(sfreq=sfreq,n_jobs=n_jobs_flt)
+                    rbp.resample(sfreq=sfreq,n_jobs=n_jobs_maybe_cuda)
 
                 assert bandname not in raw_perband_bp
                 raw_perband_bp [bandname] =  rbp

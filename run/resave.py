@@ -49,7 +49,10 @@ to_perform = ['resample', 'notch', 'highpass']
 overwrite_res = 1
 
 n_free_cores = gp.n_free_cores
-num_cores = mpr.cpu_count() - n_free_cores
+n_jobs = max(1,mpr.cpu_count() - n_free_cores)
+
+allow_CUDA_MNE = mne.utils.get_config('MNE_USE_CUDA')
+allow_CUDA = True
 
 #freqResample = 512
 subjinds = [2,3,4,5,6,7]
@@ -206,8 +209,13 @@ if not os.path.exists(data_dir_output):
     print('Creating {}'.format(data_dir_output) )
     os.makedirs(data_dir_output)
 
+
 print('read_type',read_type)
 print('to_perform',to_perform)
+
+if allow_CUDA and allow_CUDA_MNE:
+    n_jobs = 'cuda'
+    print('Using CUDA')
 
 read_resampled = 'resample' in read_type
 
@@ -314,10 +322,10 @@ for rawname_ in rawnames:
         f.info = mod_info
 
         raw_lfp = upre.saveLFP(fname_noext, skip_if_exist =
-                               skip_existing_LFP,sfreq=freqResample, raw_FT=f)
+                               skip_existing_LFP,sfreq=freqResample, raw_FT=f,n_jobs=n_jobs)
         raw_lfp_highres = upre.saveLFP(fname_noext, skip_if_exist =
                                        skip_existing_LFP,sfreq=freqResample_high,
-                                       raw_FT=f)
+                                       raw_FT=f,n_jobs=n_jobs )
 
     upre.extractEMGData(f,fname_noext, skip_if_exist = skip_existing_EMG)  #saves emg_rectconv
     #continue
@@ -386,7 +394,7 @@ for rawname_ in rawnames:
 
     if do_notch:
         print('Start notch filtering!')
-        f.notch_filter(freqsToKill, n_jobs=num_cores)
+        f.notch_filter(freqsToKill, n_jobs=n_jobs)
 
     if do_highpass:
         import utils_tSNE as utsne
@@ -394,13 +402,13 @@ for rawname_ in rawnames:
                                                                                 allow_missing=True)
         f.set_annotations(anns_artif)
         f.filter(l_freq=lowest_freq_to_keep,
-                        h_freq=None, n_jobs=num_cores, skip_by_annotation='BAD_', pad='symmetric')
+                        h_freq=None, n_jobs=n_jobs, skip_by_annotation='BAD_', pad='symmetric')
         f.set_annotations(mne.Annotations([],[],[]) )
 
     if do_resample and not read_resampled:
         print('Resampling starts')
         if f.info['sfreq'] > freqResample:
-            f.resample(freqResample, n_jobs=num_cores)
+            f.resample(freqResample, n_jobs=n_jobs)
             print(f.info['sfreq'])
 
 
@@ -412,7 +420,7 @@ for rawname_ in rawnames:
         # (probably) and then there is no sense and doing it again
         #filt_raw.set_annotations(anns_MEG_artif)
         filt_raw.filter(l_freq=lowest_freq_to_keep,
-                        h_freq=None, n_jobs=num_cores) #, skip_by_annotation='BAD_MEG')
+                        h_freq=None, n_jobs=n_jobs) #, skip_by_annotation='BAD_MEG')
 
         #############################  Plot
         anns_MEG_artif_flt, cvl_per_side = utils.findRawArtifacts(filt_raw , thr_mult = MEG_flt_artif_thr_mult,
@@ -507,14 +515,14 @@ for rawname_ in rawnames:
                                                         skip_by_annotation='BAD_MEG')
 
             f_sss.set_annotations( anns_MEG_artif_flt)
-            f_sss.notch_filter(freqsToKill, n_jobs=num_cores)
+            f_sss.notch_filter(freqsToKill, n_jobs=n_jobs)
 
             if do_highpass_after_SSS:
                 f_sss.filter(l_freq=lowest_freq_to_keep, h_freq=None,
-                            n_jobs=num_cores, skip_by_annotation='BAD_MEG',
+                            n_jobs=n_jobs, skip_by_annotation='BAD_MEG',
                             pad='symmetric')
 
-            f_sss.resample(freqResample, n_jobs=num_cores)
+            f_sss.resample(freqResample, n_jobs=n_jobs)
             f_sss.set_annotations(mne.Annotations([],[],[]) )
             f = f_sss
 
@@ -543,7 +551,7 @@ for rawname_ in rawnames:
         filt_raw2.load_data()
         if ('highpass' not in read_type) or ('tSSS' in to_perform and not do_highpass_after_SSS):
             filt_raw2.filter(l_freq=lowest_freq_to_keep,
-                                h_freq=None, n_jobs=num_cores, skip_by_annotation='BAD_MEG',
+                                h_freq=None, n_jobs=n_jobs, skip_by_annotation='BAD_MEG',
                                 pad='symmetric')
 
 

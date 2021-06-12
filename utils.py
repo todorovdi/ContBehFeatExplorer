@@ -946,6 +946,10 @@ def tfr(dat, sfreq, freqs, n_cycles, wsz, decim=1, n_jobs = None, mode ='valid')
         raise ValueError('Integer sfreq is required')
     sfreq = int(sfreq)
 
+    if n_jobs is None:
+        if mne.utils.get_config('MNE_USE_CUDA'):
+            n_jobs = 'cuda'
+
     dat_ = dat[None,:]
     #tfrres = mne.time_frequency.tfr_array_morlet(dat_, sfreq, freqs, n_cycles,
     #                                             n_jobs=n_jobs, decim =decim)

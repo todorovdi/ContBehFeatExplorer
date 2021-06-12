@@ -11,6 +11,8 @@ import time
 import gc;
 import scipy.signal as sig
 
+from os.path import join as pjoin
+
 import numpy as np
 from sklearn.preprocessing import RobustScaler
 from sklearn.manifold import TSNE
@@ -172,12 +174,12 @@ for opt, arg in opts:
     elif opt == "--input_subdir":
         input_subdir = arg
         if len(input_subdir) > 0:
-            subdir = os.path.join(gv.data_dir,input_subdir)
+            subdir = pjoin(gv.data_dir,input_subdir)
             assert os.path.exists(subdir )
     elif opt == "--output_subdir":
         output_subdir = arg
         if len(output_subdir) > 0:
-            subdir = os.path.join(gv.data_dir,output_subdir)
+            subdir = pjoin(gv.data_dir,output_subdir)
             if not os.path.exists(subdir ):
                 print('Creating output subdir {}'.format(subdir) )
                 os.makedirs(subdir)
@@ -228,12 +230,6 @@ print('!!!!!! current rawnames --- ',rawnames)
 if dim_inp_nlproj < 0:
     dim_inp_nlproj = dim_PCA
 ############################
-
-# get info about bad MEG channels (from separate file)
-with open('subj_info.json') as info_json:
-    #json.dumps({'value': numpy.int64(42)}, default=convert)
-    gen_subj_info = json.load(info_json)
-
 
 tasks = []
 for rawname_ in rawnames:
@@ -286,24 +282,24 @@ for rawname_ in rawnames:
                    prefix, regex_nrML, regex_nfeats, regex_pcadim)
 
         # here prefix should be without '_' in front or after
-        inp_subdir = os.path.join(gv.data_dir, input_subdir)
+        inp_subdir = pjoin(gv.data_dir, input_subdir)
         fnfound = utsne.findByPrefix(inp_subdir, rawname_, prefix, regex=regex)
         if len(fnfound) > 1:
             fnt = [0] * len(fnfound)
             for fni in range(len(fnt) ):
-                fnfull = os.path.join(inp_subdir, fnfound[fni])
+                fnfull = pjoin(inp_subdir, fnfound[fni])
                 fnt[fni] = os.path.getmtime(fnfull)
             fni_max = np.argmax(fnt)
             fnfound = [ fnfound[fni_max] ]
         assert len(fnfound) == 1, 'For {} with regex {} in {} found not single fnames {}'.\
             format(rawname_,regex,inp_subdir, fnfound)
-        fname_PCA_full = os.path.join( inp_subdir, fnfound[0] )
+        fname_PCA_full = pjoin( inp_subdir, fnfound[0] )
     else:
         prefix += '_'
         out_name_templ = '{}_{}PCA_nr{}_{}chs_nfeats{}_pcadim{}_skip{}_wsz{}'
         out_name = (out_name_templ ).\
             format(sources_type,prefix, nraws_used_PCA, n_channels, n_feats_PCA, dim_PCA, skip_ML, windowsz)
-        fname_PCA_full = os.path.join( inp_subdir, '{}{}.npz'.format(rawname_,out_name))
+        fname_PCA_full = pjoin( inp_subdir, '{}{}.npz'.format(rawname_,out_name))
 
 
     modtime = datetime.datetime.fromtimestamp(os.path.getmtime(fname_PCA_full)  )
@@ -611,7 +607,7 @@ if do_nlproj:
 
 
     #a = '{}_tsne_{}chs_skip{}_wsz{}.npz'.format(rawname_,n_channels, totskip, windowsz)
-    fname_tsne_full = os.path.join( gv.data_dir, output_subdir, out_name + '.npz')
+    fname_tsne_full = pjoin( gv.data_dir, output_subdir, out_name + '.npz')
 
     have_nlproj = False
     try:
@@ -656,11 +652,11 @@ if do_nlproj:
 if show_plots and do_nlproj:
     print('Starting nlproj plotting ')
     print('!!! only zero seed !! ')
-    out_subdir_fig = os.path.join(gv.dir_fig, output_subdir)
+    out_subdir_fig = pjoin(gv.dir_fig, output_subdir)
     if not os.path.exists(out_subdir_fig):
         os.makedirs( out_subdir_fig)
         print('Creating dir for fig {}'.format(out_subdir_fig) )
-    fig_fname = os.path.join(out_subdir_fig, out_name+'.pdf' )
+    fig_fname = pjoin(out_subdir_fig, out_name+'.pdf' )
     pdf= PdfPages(fig_fname  )
 
     #cols = [colors, colors2, colors3]

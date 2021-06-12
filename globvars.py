@@ -1,7 +1,9 @@
-import os
+import os,sys
 import json
 import socket
 import numpy as np
+
+from os.path import join as pjoin
 
 try:
     import ConfigParser
@@ -47,7 +49,7 @@ srcs                                = None
 artifact_intervals                  = None
 
 gparams                              = {}
-
+code_dir = os.path.expandvars('$OSCBAGDIS_DATAPROC_CODE')
 gparams['intTypes'] = ['pre', 'post', 'initseg', 'endseg', 'middle_full', 'no_tremor', 'unk_activity_full' ]
 gparams['intType2col'] =  {'pre':'blue', 'post':'gold', 'middle_full':'red', 'no_tremor':'green',
             'unk_activity_full': 'cyan', 'initseg': 'teal', 'endseg':'blueviolet' }
@@ -63,12 +65,33 @@ if os.environ.get('OUTPUT_OSCBAGDIS') is not None:
 else:
     dir_fig = '.'
 
-with open('subj_info.json') as info_json:
+param_dir = pjoin(code_dir,'params')
+
+with open(pjoin(code_dir,'subj_info.json') ) as info_json:
     #raise TypeError
     #json.dumps({'value': numpy.int64(42)}, default=convert)
     gen_subj_info = json.load(info_json)
 
 dir_fig_preproc = os.path.join(dir_fig,'preproc')
+
+
+CUDA_state = 'no'
+try:
+    import GPUtil
+    import pycuda
+    GPUs_list = GPUtil.getAvailable()
+
+    try:
+        import pycuda.driver as cuda_driver
+        cuda_driver.init()
+    except pycuda.driver.Error as e:
+        print(f'CUDA problem: {e}')
+    CUDA_state = 'ok'
+except (ImportError,ValueError) as e:
+    print(e)
+    GPUs_list = []
+    CUDA_state = 'bad'
+
 
 
 fbands = {'tremor': [3,10], 'low_beta':[11,22], 'high_beta':[22,30],
@@ -98,7 +121,7 @@ data_coupling_types_all = ['self', 'LFP_vs_all', 'CB_vs_all', 'motorlike_vs_moto
 def paramFileRead(fname,recursive=True):
     print('--Log: reading paramFile {0}'.format(fname) )
 
-    file = open(fname, 'r')
+    file = open(pjoin(code_dir, fname), 'r')
     ini_str = '[root]\n' + file.read()
     file.close()
     ini_fp = StringIO.StringIO(ini_str)
@@ -111,15 +134,15 @@ def paramFileRead(fname,recursive=True):
 
     if(recursive):
         addParamKeys = sorted( [ k for k in params.keys() if 'iniAdd' in k ] )
-        l = len(addParamKeys)
-        if(l ):
-            print('---Log: found {0} iniAdd\'s, reading them'.format(l) )
+        lenAddParamKeys = len(addParamKeys)
+        if(lenAddParamKeys ):
+            print('---Log: found {0} iniAdd\'s, reading them'.format(lenAddParamKeys) )
         for pkey in addParamKeys:
             paramFileName = paramFileRead(params[pkey])
             params.update(paramFileName)
 
         # we actually want to overwrite some of the params from the added inis
-        if(l):
+        if(lenAddParamKeys):
             paramsAgain = paramFileRead(fname,recursive=False)
             params.update(paramsAgain)
 
@@ -238,7 +261,7 @@ class globparams:
         #s = s[:-2]
 
 
-        with open('subj_info.json') as info_json:
+        with open(pjoin(code_dir,'subj_info.json') ) as info_json:
             self.gen_subj_info = json.load(info_json)
 
         self.int_types_ps = {'L':[],'R':[] }

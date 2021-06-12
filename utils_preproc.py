@@ -986,7 +986,7 @@ def getCleanIntervalBins(rawname_,sfreq, times, suffixes = ['_ann_LFPartif'],ver
 
 def loadRaws(rawnames,mods_to_load, sources_type = None, src_type_to_use=None,
              src_file_grouping_ind=None, use_saved = True, highpass_lfreq = None,
-             input_subdir=""):
+             input_subdir="", n_jobs=1):
     '''
     use_saved means using previously done preproc
     '''
@@ -1104,7 +1104,7 @@ def loadRaws(rawnames,mods_to_load, sources_type = None, src_type_to_use=None,
                     continue
                 raw_permod_both_sides_cur[mod].\
                 filter(l_freq=highpass_lfreq, h_freq=None,picks='all',
-                       n_jobs = 6)
+                       n_jobs = n_jobs)
 
 
         #raw_permod_both_sides_cur['afterICA']
@@ -1116,7 +1116,7 @@ def loadRaws(rawnames,mods_to_load, sources_type = None, src_type_to_use=None,
 def saveLFP(rawname_naked, f_highpass = 2, skip_if_exist = 1,
                          n_free_cores = 2, ret_if_exist = 0, notch=1, highpass=1,
             raw_FT=None, sfreq=1024, raw_resampled = None,
-            filter_artif_care=1, save_with_anns = 0):
+            filter_artif_care=1, save_with_anns = 0, n_jobs = 1):
     import globvars as gv
     import multiprocessing as mpr
     lowest_freq_to_preserve = f_highpass
@@ -1173,11 +1173,11 @@ def saveLFP(rawname_naked, f_highpass = 2, skip_if_exist = 1,
         subraw.set_channel_types(y)
 
 
-    num_cores = mpr.cpu_count() - 1
-    nj = max(1, num_cores-n_free_cores)
+    #num_cores = mpr.cpu_count() - 1
+    #nj = max(1, num_cores-n_free_cores)
     if abs(subraw.info['sfreq'] - sfreq) > 0.1:
         print('saveLFP: Resample {} to {}'.format(subraw.info['sfreq'],sfreq) )
-        subraw.resample(sfreq, n_jobs= nj )
+        subraw.resample(sfreq, n_jobs= n_jobs )
 
     artif_fname = os.path.join(data_dir , '{}_ann_LFPartif.txt'.format(rawname_naked) )
     if os.path.exists(artif_fname ) and filter_artif_care:
@@ -1189,7 +1189,7 @@ def saveLFP(rawname_naked, f_highpass = 2, skip_if_exist = 1,
     if notch:
         freqsToKill = np.arange(50, sfreq//2, 50)  # harmonics of 50
         print('saveLFP: Resample')
-        subraw.notch_filter(freqsToKill,  n_jobs= nj)
+        subraw.notch_filter(freqsToKill,  n_jobs= n_jobs)
 
     if highpass:
         print('saveLFP: highpass')
