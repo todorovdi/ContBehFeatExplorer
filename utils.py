@@ -398,7 +398,7 @@ def getMEGsrc_chname_nice(chn, roi_labels=None, keyorder=None, preserve_prefix =
 
     return name
 
-def nicenMEGsrc_chnames(chns, roi_labels=None, keyorder=None, prefix = ''):
+def nicenMEGsrc_chnames(chns, roi_labels=None, keyorder=None, prefix = '', allow_empty=False):
     assert isinstance(roi_labels,dict)
     # nor MEGsrc chnames left unchanged
     if len(chns):
@@ -407,11 +407,15 @@ def nicenMEGsrc_chnames(chns, roi_labels=None, keyorder=None, prefix = ''):
         return []
     chns_nicened = [0] * len(chns)
     for i,chn in enumerate(chns):
-        fi = chn.find('src')
         chn_nice = chn
-        if fi in [0,1]:   # we only accept .?src   kind of chnames here
-            chn_nice = getMEGsrc_chname_nice(chn, roi_labels, keyorder)
-            chn_nice = prefix + chn_nice
+        if chn is None:
+            if not allow_empty:
+                raise ValueError('Found None!')
+        else:
+            fi = chn.find('src')
+            if fi in [0,1]:   # we only accept .?src   kind of chnames here
+                chn_nice = getMEGsrc_chname_nice(chn, roi_labels, keyorder)
+                chn_nice = prefix + chn_nice
         chns_nicened[i] = chn_nice
 
     return chns_nicened
@@ -424,6 +428,8 @@ def nicenFeatNames(feat_names, roi_labels, keyorder):
     for fi,feat_name in enumerate(feat_names):
         fr = nicenFeatName(feat_name,roi_labels,keyorder)
         r += [fr]
+
+    assert len(r) == len(feat_names)
 
     if single:
         return r[0]
@@ -2287,7 +2293,7 @@ def plotBandLocations(tfr,timeints,fbs,prefix='', logscale=False,
         for i,ti in enumerate(timeints):
             timin,timax,tiname = ti
             ax = axs[i,j]
-            ttl = '{}:{}\n{:.1f},  {:.1f}'.format(tiname,fbname,timin,timax,logscale=logscale)
+            ttl = f'{tiname}:{fbname}\n{timin:.1f},  {timax:.1f}  logscale={logscale}'
             if anns is not None and tiname != 'entire':
                 ann_descrs = findIntersectingAnns(timin,timax,anns)
                 if len(ann_descrs) > 0 :
@@ -3391,11 +3397,11 @@ def makeRawFromFeats(X, feat_names, skip, sfreq=256, namelen = 15):
     r = mne.io.RawArray(X.T,info)
     return r, feat_types_cooresp_dict
 
-def makeSimpleRaw(dat_,ch_names=None,sfreq=256,rescale=True,l=10,force_trunc_renum=False):
+def makeSimpleRaw(dat,ch_names=None,sfreq=256,rescale=True,l=10,force_trunc_renum=False, verbose=False):
     # does rescaling to one
-    assert dat_.ndim == 2
+    assert dat.ndim == 2
     if ch_names is None:
-        ch_names = list(  map(str, np.arange( len(dat_)) ) )
+        ch_names = list(  map(str, np.arange( len(dat)) ) )
     elif force_trunc_renum or np.max( [len(chn) for chn in ch_names ] ) > 15:
         ch_names = list(ch_names)[:]
         for chni in range(len(ch_names) ):
@@ -3404,12 +3410,14 @@ def makeSimpleRaw(dat_,ch_names=None,sfreq=256,rescale=True,l=10,force_trunc_ren
     info_ = mne.create_info( ch_names=ch_names, ch_types= ['csd']*len(ch_names), sfreq=sfreq)
 
     if rescale:
-        me = np.mean(dat_, axis=1)
-        std = np.std(dat_, axis=1)
+        me = np.mean(dat, axis=1)
+        std = np.std(dat, axis=1)
 
-        dat_ = (dat_-me[:,None])/std[:,None]
+        dat = (dat-me[:,None])
+        if np.min( np.abs(std) ) >= 1e-19:
+            dat /= std[:,None]
 
-    dispraw = mne.io.RawArray(dat_,info_)
+    dispraw = mne.io.RawArray(dat,info_,verbose=verbose)
     return dispraw
 
 def prepareSourceGroups(labels,srcgroups_all):
@@ -3750,27 +3758,59 @@ def vizGroup(sind_str,positions,labels,srcgroups, show=True, labels_to_skip = ['
     #mam.close()"
     return clrs
 
-def vizGroup2(sind_str,positions,labels,srcgroups, show=True, labels_to_skip = ['unlabeled'],
-             show_legend=True, alpha=0.1, seed=None, figsize_mult = 1, msz=15, printLog=0):
+def vizGroup2(sind_str, positions, labels, srcgroups,
+              show=True, labels_to_skip = ['unlabeled'],
+             show_legend=True, alpha=0.1, seed=None, figsize_mult = 1, msz=15,
+              printLog=0, color_grouping = None,
+             color_group_labels = None, sizes=None, def_alpha = 0.9,
+              msz_mult=0.25):
     '''
     visualize src group. Slower than vizGroup, but allows to save things normally and legends as well
     positions -- 3D coords of ALL sources (not just subgroups)
     srcgroups -- for each coord index an index from the list of an item in the labels list
+    [!] labels -- which labels we actually plot
     '''
     import pymatreader as pymr
     import os
-    import mayavi.mlab as mam
+    #import mayavi.mlab as mam
     import globvars as gv
     import matplotlib as mpl
 
+    assert len(srcgroups) == len(positions)
+    if color_grouping is not None:
+        assert len(color_grouping) == len(labels), (len(color_grouping) , len(labels) )
+
+
+
+    nc = 2
+    if show_legend:
+        nc += 1
+    nr = 1
+    fig,axs = plt.subplots(nr,nc,
+                           figsize=(14*figsize_mult,5*figsize_mult),
+                           subplot_kw={'projection':'3d', 'proj_type':'ortho'})
+    plt.subplots_adjust(wspace=0.01)
+    ax_top  = axs[0]
+    ax_side = axs[1]
+    if show_legend:
+        ax_leg  = axs[-1]
+
+
+    # if I want to add a 2D plot as well
+    #ax__ = axs[2]
+    #ax__.plot([0,1],[0,1] )
+    #ax__.view_init(0,0)
 
     #print('    ', sgdn)
-    fig = plt.figure(figsize=(14*figsize_mult,5*figsize_mult))
-    main_shape = 120
-    if show_legend:
-        main_shape = 130
-    ax_top = fig.add_subplot(main_shape+1,projection='3d', proj_type='ortho')
-    ax_side = fig.add_subplot(main_shape+2,projection='3d', proj_type='ortho')
+    #fig = plt.figure(figsize=(14*figsize_mult,5*figsize_mult))
+    #main_shape = 120
+    #if show_legend:
+    #    main_shape = 130
+    #ax_top = fig.add_subplot(main_shape+1,projection='3d', proj_type='ortho')
+    #ax_side = fig.add_subplot(main_shape+2,projection='3d', proj_type='ortho')
+    #if show_legend:
+    #    ax_leg = fig.add_subplot(main_shape+3,projection='3d', proj_type='ortho')
+
 
     headfile = pymr.read_mat(os.path.join(gv.data_dir,
                                         'headmodel_grid_{}_surf.mat'.format(sind_str)) )
@@ -3785,12 +3825,18 @@ def vizGroup2(sind_str,positions,labels,srcgroups, show=True, labels_to_skip = [
     ax_top.plot_trisurf(rr_mm[:,0], rr_mm[:,1], rr_mm[:,2], triangles=tris-1,
                     alpha=alpha)
     ax_top.set_zticks([])
+    #
+    ax_top.set_yticks([])
+    ax_top.set_xticks([])
     #ax_top.set_top_view()
 
     ax_side.view_init(0,0)
     ax_side.plot_trisurf(rr_mm[:,0], rr_mm[:,1], rr_mm[:,2], triangles=tris-1,
                     alpha=alpha)
     ax_side.set_xticks([])
+    #
+    ax_side.set_yticks([])
+    ax_side.set_zticks([])
     #ax_side.set_top_view()
 
 
@@ -3798,38 +3844,90 @@ def vizGroup2(sind_str,positions,labels,srcgroups, show=True, labels_to_skip = [
         np.random.seed(seed)
     # create random colors for various labels
     labels_cur = labels#_dict[sgdn]
-    clrs = np.random.uniform(low=0.3,size=(len(labels_cur),3))
+
+    if color_group_labels is not None:
+        clrs = np.random.uniform(low=0.3,size=(len(color_group_labels),3) )
+        alphas = def_alpha * np.ones( (len(color_group_labels),1) )
+
+        clrs = np.hstack([clrs,alphas ]   )
+    else:
+        clrs = np.random.uniform(low=0.3,size=(len(labels_cur),3) )
     # for clri in range(len(clrs) ):
     #     colcur= clrs[clri]
     #     ii = np.argmin(colcur)
     #     colcur[ii] = max(colcur[ii], 0.7 )
 
+    xs = []
+    ys = []
+    zs = []
+
+    if sizes is not None:
+        assert len(sizes) == len(labels)
+
     msz = msz * figsize_mult
+    color_list = []
+    marker_sizes = []
     for grpi in range(len(labels_cur)):
         lab = labels_cur[grpi]
         if printLog:
             print(lab)
         #inds = np.where(srcgroups_dict[sgdn] == grpi)
+        # indices in srcgroups
         inds = np.where(srcgroups == grpi)
         if lab in labels_to_skip:
             print('  skipping {} {} points'.format(len(inds),lab) )
             continue
         x,y,z = positions[inds].T
         #mam.points3d(x,y,z, scale_factor=0.5, color = tuple(clrs[grpi]) )
-        ax_top.scatter(x,y,z,color=tuple(clrs[grpi]), s=msz)
-        ax_side.scatter(x,y,z,color=tuple(clrs[grpi]), s=msz)
+        #ax_top.scatter(xs,ys,zs,color=tuple(clrs[grpi]), s=msz)
+        #ax_side.scatter(xs,ys,zs,color=tuple(clrs[grpi]), s=msz)
+        xs += [x]
+        ys += [y]
+        zs += [z]
+
+        if sizes is not None:
+            marker_sizes +=  [ msz + sizes[grpi]  * (msz * msz_mult) ] * len(z)
+
+        if color_group_labels is None:
+            color_list += [  tuple(clrs[grpi]) ] * len(z)
+        else:
+            cur_col = np.zeros(4)
+            for ci in color_grouping[grpi]:
+                cur_col += clrs[ ci ]
+            cur_col  /=  len(color_grouping[grpi] )
+            color_list += [  tuple(cur_col) ] * len(z)
+    #if color_group_labels is not None:
+    #    color_list = np.array(clrs)[ color_grouping ]
+    xs = np.hstack(xs)
+    ys = np.hstack(ys)
+    zs = np.hstack(zs)
+
+    if sizes is None:
+        marker_sizes = [msz] * len(xs)
+
+    #print(color_list)
+    #print(marker_sizes)
+
+    ax_top.scatter(xs,ys,zs,color=color_list,  s=marker_sizes)
+    ax_side.scatter(xs,ys,zs,color=color_list, s=marker_sizes)
 
     if show_legend:
-        ax_leg = fig.add_subplot(main_shape+3,projection='3d', proj_type='ortho')
         legels = []
         s = 12
-        for i in range(len(labels)):
-            if labels[i] in labels_to_skip:
-                continue
-            legel = mpl.lines.Line2D([0], [0], marker='o', color='w', label=labels[i],
-                                            markerfacecolor=clrs[i], markersize=s)
-            legels += [legel]
-        ax_leg.legend(handles = legels,loc='center')
+        if color_group_labels is None:
+            for i in range(len(labels)):
+                if labels[i] in labels_to_skip:
+                    continue
+                legel = mpl.lines.Line2D([0], [0], marker='o', color='w', label=labels[i],
+                                                markerfacecolor=clrs[i], markersize=s)
+                legels += [legel]
+        else:
+            for i in range(len(color_group_labels)):
+                legel = mpl.lines.Line2D([0], [0], marker='o', color='w',
+                                         label=color_group_labels[i],
+                                         markerfacecolor=clrs[i], markersize=s)
+                legels += [legel]
+                ax_leg.legend(handles = legels,loc='center', prop={'size':13} )
         ax_leg.set_xticks([])
         ax_leg.set_yticks([])
         ax_leg.set_zticks([])
@@ -3933,3 +4031,113 @@ def genMLresFn(rawnames, sources_type, src_file_grouping_ind, src_grouping,
 
     out_name = '_{}{}.npz'.format(sind_join_str,out_name)
     return out_name
+
+def collectFeatTypeInfo(feature_names, keep_sides=0, ext_info = True):
+    import re
+    ftypes = []
+    fbands = []
+    fbands_first, fbands_second = [],[]
+    fband_pairs = []
+    fband_per_ftype = {}
+
+    bichan_feat_info = {'bpcorr':None, 'rbcorr':None }
+    for bfik in bichan_feat_info:
+        bichan_feat_info[bfik] = {'band_LHS':[], 'band_RHS':[] , 'mod_LHS':[],
+                                  'mod_RHS':[], 'band_mod_LHS':[],
+                                  'band_mod_RHS':[] }
+        for k in bichan_feat_info[bfik]:
+            bichan_feat_info[bfik][k] = []
+
+    crop_LFP = 3
+    crop_msrc = 4
+    if keep_sides:
+        crop_LFP += 1
+        crop_msrc += 1
+
+    bpcorr_left  = []
+    bpcorr_right = []
+    rbcorr_left  = []
+    rbcorr_right = []
+
+    bpcorr_left_mod  = []
+    bpcorr_right_mod = []
+    rbcorr_left_mod  = []
+    rbcorr_right_mod = []
+    for fn in feature_names:
+        Hmode = False
+        rH = re.match('(H_[a-z]{1,5})_',fn)
+        if rH is None:
+            r = re.match('([a-zA-Z0-9]+)_',fn)
+            Hmode = True
+        else:
+            r = rH
+        ftype = r.groups()[0]
+        ftypes += [ftype]
+
+        r = re.match(ftype + '_([a-zA-Z0-9]+)_',fn)
+        if r is not None and rH is None:
+            fb = r.groups()[0]
+            fbands += [fb]
+            fband_per_ftype[ftype] = fband_per_ftype.get(ftype,[]) + [fb]
+
+        if ext_info:
+            if ftype in bichan_feat_info:
+                r = re.match(ftype + '_([a-zA-Z0-9]+)_.*,([a-zA-Z0-9]+)_',fn)
+                fb1 = r.groups()[0]
+                fb2 = r.groups()[1]
+                fband_pairs += [(fb1,fb2)]
+                fbands_first  += [fb1]
+                fbands_second += [fb2]
+
+                fband_per_ftype[ftype] = fband_per_ftype.get(ftype,[] ) + [fb2]  # fb1 is aleady there
+
+
+                r = re.match(ftype + '_([a-zA-Z0-9]+)_(.+)*,([a-zA-Z0-9]+)_(.+)$',fn)
+                fb1_ = r.groups()[0]
+                mod1 = r.groups()[1]
+                fb2_ = r.groups()[2]
+                mod2 = r.groups()[3]
+                assert fb1_ == fb1
+                assert fb2_ == fb2
+
+                if mod1.startswith('LFP'):
+                    mod1 = mod1[:crop_LFP]
+                if mod2.startswith('LFP'):
+                    mod2 = mod2[:crop_LFP]
+                if mod1.startswith('msrc'):
+                    mod1 = mod1[:crop_msrc]
+                if mod2.startswith('msrc'):
+                    mod2 = mod2[:crop_msrc]
+
+                bichan_feat_info[ftype]['band_LHS']     += [fb1 ]
+                bichan_feat_info[ftype]['band_RHS']     += [fb2 ]
+                bichan_feat_info[ftype]['mod_LHS']      += [mod1]
+                bichan_feat_info[ftype]['mod_RHS']      += [mod2]
+                bichan_feat_info[ftype]['band_mod_LHS'] += [(fb1,mod1)]
+                bichan_feat_info[ftype]['band_mod_RHS'] += [(fb2,mod2)]
+
+    for k1,v1 in bichan_feat_info.items():
+        for k2,v2 in v1.items():
+            #print(k1,k2,len(v2) )
+            bichan_feat_info[k1][k2] = list( set(v2) )
+
+    for k1,v1 in fband_per_ftype.items():
+        fband_per_ftype[k1] = list( sorted( set(v1) ))
+
+
+
+
+    info = {}
+    info['ftypes'] = list(sorted( set(ftypes)) )
+    info['fbands'] = list(sorted( set(fbands + fbands_second)) )
+    info['fbands_first'] = list(sorted( set(fbands_first)) )
+    info['fbands_second'] = list(sorted(set(fbands_second)) )
+    info['fband_pairs']= list(set(fband_pairs))
+    info['fband_per_ftype']= fband_per_ftype
+
+    # remove those that were not found
+    for ftype in set( bichan_feat_info.keys() ) - set(ftypes):
+        del bichan_feat_info[ftype]
+    info['bichan_feat_info'] = bichan_feat_info
+
+    return info

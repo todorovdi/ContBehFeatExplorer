@@ -82,7 +82,7 @@ def collectPerformanceInfo(rawnames, prefixes, ndays_before = None,
                 else:
                     sources_type_ = ''
 
-                regex = '{}_{}grp{}-{}_{}_PCA_nr({})_[0-9]+chs_nfeats({})_pcadim({}).*wsz[0-9]+\.npz'.\
+                regex = r'{}_{}grp{}-{}_{}_PCA_nr({})_[0-9]+chs_nfeats({})_pcadim({}).*wsz[0-9]+\.npz'.\
                     format(rawname_, sources_type_, group_fn, group_ind, prefix_expr,
                     regex_nrPCA, regex_nfeats, regex_pcadim)
             else:
@@ -304,7 +304,8 @@ def collectPerformanceInfo2(rawnames, prefixes, ndays_before = None,
                            n_feats_PCA=None,dim_PCA=None, nraws_used=None,
                            sources_type = None, printFilenames = False,
                            group_fn = 10, group_ind=0, subdir = '', old_file_format=False,
-                           load_X=False, use_main_LFP_chan=False):
+                           load_X=False, use_main_LFP_chan=False,
+                           remove_large_items=1 ):
     '''
     red means smallest possible feat set as found by XGB
 
@@ -455,9 +456,9 @@ def collectPerformanceInfo2(rawnames, prefixes, ndays_before = None,
                 print('Moving Shapley values')
                 res_cur['featsel_shap_res'] = f['featsel_shap_res'][()]
 
-            remove_large_items = 1
+
             if remove_large_items:
-                for lda_anver in res_cur['lda_analysis_versions']:
+                for lda_anver in res_cur['LDA_analysis_versions']:
                     del lda_anver['X_transformed']
                     #del lda_anver['ldaobj']
                 if 'Xconcat_good_cur' in res_cur:
@@ -498,12 +499,382 @@ def collectPerformanceInfo2(rawnames, prefixes, ndays_before = None,
 def getFileAge(fname_full, ret_hours=True):
     created = os.stat( fname_full ).st_ctime
     dt = datetime.fromtimestamp(created)
+    modified = os.stat( fname_full ).st_mtime
+    dt = datetime.fromtimestamp(modified)
     today = datetime.today()
     tdelta = (today - dt)
     r = tdelta
     if ret_hours:
-        nh = tdelta.seconds / ( 60 * 60 )
+        nh = tdelta.total_seconds() / (60 * 60)
         r = nh
-    return nh
+    return r
+
+def listRecent(days = 5, hours = None, lookup_dir = None):
+    import os
+    from os.path import join as pjoin
+    if lookup_dir is None:
+        lookup_dir = gv.data_dir
+    lf = os.listdir(gv.data_dir)
+    final_list = []
+    for f in lf:
+        age_hours = getFileAge(pjoin(lookup_dir,f)  , 1)
+#        print(age_hours, f)
+        age_days = age_hours / 24
+        #print( age_days ,f )
+        if hours is None and days is not None:
+            if age_days < days:
+                final_list += [f]
+        else:
+            if days is None:
+                if age_hours < hours:
+                    final_list += [f]
+            else:
+                if age_hours < hours + days * 24:
+                    final_list += [f]
+    return final_list
+
+def listRecentPrefixes(days = 5, hours = None, lookup_dir = None):
+    import re
+    lf = listRecent(days, hours, lookup_dir)
+    prefixes = []
+    for f in lf:
+        out = re.match('_S.._.*grp[0-9\-]+_(.*)_ML', f)
+        prefix = out.groups()[0]
+        prefixes += [prefix]
+    return list(sorted(set(prefixes) ) )
 
 
+def total_size(o, handlers={}, verbose=False, minRepSz = None, printNotFound = 0):
+    """ Returns the approximate memory footprint an object and all of its contents.
+
+    Automatically finds the contents of the following builtin containers and
+    their subclasses:  tuple, list, deque, dict, set and frozenset.
+    To search other containers, add handlers to iterate over their contents:
+
+        handlers = {SomeContainerClass: iter,
+                    OtherContainerClass: OtherContainerClass.get_elements}
+
+        minRepSz -- size in bytes after which we'll print the object
+
+    """
+    import sys
+    from itertools import chain
+
+    dict_handler = lambda d: chain.from_iterable(d.items())
+    all_handlers = {tuple: iter,
+                    list: iter,
+                    #deque: iter,
+                    dict: dict_handler,
+                    set: iter,
+                    frozenset: iter }
+    all_handlers.update(handlers)     # user handlers take precedence
+    seen = set()                      # track which object id's have already been seen
+    default_size = sys.getsizeof(0)       # estimate sizeof object without __sizeof__
+
+    def sizeof(o,up=None):
+        #if id(o) in seen:       # do not double count the same object
+        #    return 0
+        seen.add(id(o))
+        #s = sys.getsizeof(o, default_size)
+        if isinstance(o,np.ndarray):
+            s = o.nbytes
+        else:
+            s = sys.getsizeof(o)
+
+        if verbose:
+            print(s, type(o), repr(o)  ) #, file=stderr)
+
+        #import calcResStruct as cRS
+
+        found = 0
+        for typ, handler in all_handlers.items():
+            if isinstance(o, typ):
+                sz = sum(map(sizeof, handler(o)))
+                if minRepSz is not None:
+                    if sz > minRepSz: # and not type(up) == cRS.calcResStruct:
+                        print(sz,o)
+                s += sz
+                found = 1
+                break
+            elif hasattr(o, '__dict__'):
+                sz = sum(map( (lambda x: sizeof(x, up=o) ), dict_handler(o.__dict__)))
+                s += sz
+                found = 1
+                break
+         #if not printNotFound:
+         #    if o is not None and\
+         #            not isinstance(o,str) and\
+         #            not isinstance(o,np.ndarray) and not isinstance(o,float) \
+         #            and not isinstance(o,int):# and not isinstance wrapper_descriptor:
+         #        print(type(o),o,up)
+
+        return s
+
+    return sizeof(o)
+
+def extractLightInfo(f):
+    res_cur = f['results_cur'][()]
+
+    res_cur['feature_names_filtered'] = f['feature_names_filtered_pri'][()][0]
+    res_cur['class_labels_good'] = f['class_labels_good']
+
+    if 'pars' not in res_cur:
+        res_cur['pars'] = f['pars'][()]
+    elif isinstance(res_cur['pars'], np.array):
+        res_cur['pars'] = res_cur['pars'][()]
+
+    return removeLargeItems(res_cur)
+
+def removeLargeItems(res_cur, keep_featsel=['XGB_Shapley','XGB_Shapley2'], remove_full_scores=True, verbose=0):
+    featsel_methods = list(res_cur['featsel_per_method'] )
+    for fsh in featsel_methods:
+        if fsh in keep_featsel:
+            if remove_full_scores:
+                class_labels_good = res_cur['class_labels_good']
+                revdict = res_cur['revdict']
+                from sklearn import preprocessing
+                lab_enc = preprocessing.LabelEncoder()
+                # just skipped class_labels_good
+                fspm_cur = res_cur['featsel_per_method'][fsh]
+                if 'scores' in fspm_cur:
+                    if 'scores_av' not in fspm_cur:
+                        scores = fspm_cur['scores']
+
+                        subskip_fit = round( (len( class_labels_good )  )/ scores.shape[0] )
+                        if 'pars' in res_cur:
+                            assert int( res_cur['pars']['subskip_fit'] ) == subskip_fit
+
+                        lab_enc.fit(class_labels_good )
+                        class_ids = lab_enc.transform(class_labels_good[::subskip_fit])
+
+                        scores_av, bias = utsne.getScoresPerClass(class_ids,scores, ret_bias=1)
+                        res_cur['featsel_per_method'][fsh]['scores_av'] = scores_av
+
+                        res_cur['featsel_per_method'][fsh]['scores_bias_av'] = bias
+                    del res_cur['featsel_per_method'][fsh]['scores']
+        else:
+            del res_cur['featsel_per_method'][fsh]
+
+
+    if ('best_inds_XGB_fs' not in res_cur) and 'perfs_XGB_fs' in res_cur:
+        res_cur['best_inds_XGB_fs'] =  res_cur['perfs_XGB_fs'][-1]['featinds_present']
+
+    for lda_anver in res_cur['LDA_analysis_versions'].values():
+        keys_to_clean = ['X_transformed', 'ldaobj', 'ldaobjs']
+        for subver in lda_anver.values():
+            for ktc in keys_to_clean:
+                if ktc in subver:
+                    if ktc == 'ldaobj':
+                        subver['nfeats'] = len( subver[ktc].scalings_ )
+                    elif ktc == 'ldaobjs':
+                        subver['nfeats'] = [ len( ldaobj.scalings_ ) for ldaobj in subver[ktc] ]
+
+                    if verbose:
+                        print('delted ',ktc)
+                    del subver[ktc]
+        #del lda_anver['ldaobj']
+    if 'Xconcat_good_cur' in res_cur:
+        if verbose:
+            print('delted Xconcat_good_cur')
+        del res_cur['Xconcat_good_cur']
+    try:
+        del res_cur['transformed_imputed']
+        del res_cur['transformed_imputed_CV']
+
+
+        del res_cur['ldaobj_avCV']
+        del res_cur['ldaobjs_CV']
+        del res_cur[ 'ldaobj']
+
+    except KeyError as e:
+        print('already removed ',e)
+    for pt in ['perfs_XGB','perfs_XGB_fs' ]:
+        for i in range(len(res_cur[pt]) ):
+            sub = res_cur[pt][i]
+            if 'args' in sub:
+                if 'X' in sub['args']:
+                    del sub['args']['X']
+                if 'class_labels' in sub['args']:
+                    del sub['args']['class_labels']
+                if 'clf' in sub['args']:
+                    del sub['args']['clf']
+            if 'clf_obj' in sub:
+                if verbose:
+                    print('delted clf_obj')
+                del sub['clf_obj']
+            if 'clf_objs' in sub:
+                if verbose:
+                    print('delted clf_obj')
+                del sub['clf_objs']
+
+        XGB_anvers = res_cur.get('XGB_analysis_versions',{} )
+        for aname,sub in XGB_anvers.items():
+            if 'args' in sub:
+                if 'X' in sub['args']:
+                    del sub['args']['X']
+                if 'class_labels' in sub['args']:
+                    del sub['args']['class_labels']
+                if 'clf' in sub['args']:
+                    del sub['args']['clf']
+            if 'clf_obj' in sub:
+                if verbose:
+                    print('delted clf_obj')
+                del sub['clf_obj']
+            if 'clf_objs' in sub:
+                if verbose:
+                    print('delted clf_obj')
+                del sub['clf_objs']
+
+    return res_cur
+
+def printSizeInfo(res_cur,depthcur=0,depthleft=0, units=1024**2):
+    if not ( isinstance(res_cur, dict) or hasattr( res_cur, '__dict__') ):
+        print( '{total_size(res_cur) / units:.4f}' )
+        return
+    sz = 0
+    keys = list(res_cur.keys() )
+    sz_per_key = [0] * len(keys)
+    for ik,kk in enumerate(keys):
+        item = res_cur[kk]
+        s = total_size(item, minRepSz=None)
+        sz_per_key[ik]  = s
+        sz += s
+        #print(s, kk  )
+    indent = ''.join( [' '] * depthcur * 2 )
+    sz2 = total_size(res_cur)
+
+    print(f'  Total {indent}{sz} bytes = {sz / units:.4f} Mb' + f' or {indent}{sz2} bytes = {sz2 / units:.4f} Mb')
+    #print()
+
+    print(f'{indent}Sorted subparts')
+    for k,s in  sorted( zip(keys,sz_per_key), key=lambda x: x[1], reverse=1 ) :
+        print(f'{indent}{s/ units:.4f} Mb -- size of {k}' )
+
+
+from collections.abc import Iterable
+def printDict(d,max_depth=3, depth_cur=0,print_leaves = False, indent_nchars=2):
+    # tool for exploring dictionaries with high degree of nestedness and large
+    # (to print) leaves
+    if hasattr(d,'__dict__'):
+        d = d.__dict__
+    indent = ''.join(' '*depth_cur * indent_nchars)
+    if not isinstance(d,Iterable):
+        if print_leaves:
+            print(indent,d)
+        return
+    if depth_cur > max_depth:
+        return
+    if isinstance(d,dict):
+        for k,item in d.items():
+            s = ''
+            if isinstance(item,Iterable):
+                s = f'  {len(item)}'
+            print(f'{indent}{k}' + s)
+            printDict(item,max_depth=max_depth,
+                depth_cur=depth_cur+1,print_leaves=print_leaves)
+    else:
+        for item in d:
+            printDict(item,max_depth=max_depth,
+                depth_cur=depth_cur+1,print_leaves=print_leaves)
+
+def getStrongCorrelPairs(C,strong_correl_level = 0.7):
+    absC = np.abs(C)
+
+    C_nocenter = absC - np.diag(np.diag(absC))
+    C_nocenter = np.triu(C_nocenter) # since it is symmetric
+
+    C_flat = C_nocenter.flatten()
+    sinds = np.argsort(C_flat)
+    hist, bin_edges = np.histogram(C_nocenter.flatten(), bins=20, density=False)
+    strong_correl_inds = np.where( C_flat > strong_correl_level )[0]
+    tuples = [np.unravel_index(i,C_nocenter.shape) for i in strong_correl_inds]
+    return tuples
+    #for ind in
+    #coords = np.unravel_index(i, C_nocenter.shape)
+
+def getSynonymList(tuples, ret_dict = False):
+    d = {}
+    for a,b in tuples:
+        if a in d:
+            d[a] += [b]
+        else:
+            d[a] = [a,b]
+    if ret_dict:
+        return d
+    else:
+        return list(d.values())
+
+def getNotSyn(C_subset,strong_correl_level):
+
+    pairs = getStrongCorrelPairs(C_subset,strong_correl_level)
+    print('Num correl pairs ',len(pairs), len(pairs)/C_subset.size)
+
+    synlist = getSynonymList(pairs)
+
+    # indices in fip_fs not in the original array
+    allinds = np.arange(C_subset.shape[0])
+    inds_to_rem = []
+    for syns in synlist:
+        inds_to_rem += syns[1:]
+    nonsyn_feat_inds = allinds[~np.in1d(allinds,inds_to_rem)]
+    return nonsyn_feat_inds
+
+def selBestColumns(M, q_thr):
+    # searches for columns that have in at least one row entry larger than q_thr - quantile in this row
+    # returns column indices
+    assert M.ndim == 2
+    col_inds= []
+    q = np.quantile(M,q_thr,axis=1)
+    #print(q)
+    for i in range(M.shape[0] ):
+        cur_inds = np.where( M[i] > q[i] )[0]
+        col_inds += cur_inds.tolist()
+    col_inds = np.unique( col_inds )
+    return col_inds
+
+
+# test
+#A = [[0, 0.1, 10, 8, 0, 0, 0],
+#[0, 0.1, 0, 8, 0, 10, 0] ]
+#A = np.array(A)
+#print(A, A.shape)
+#
+#r = selBestColumns(A,0.8)
+#tuple(r) == tuple( np.array([2, 3, 5]) )
+
+
+def printSynInfo(synlist,indlist,featnames,ftypes_print = ['bpcorr'],minlen_print = 2,
+                 minlen_print_feanames = 2):
+    from featlist import parseFeatNames
+
+    nums_difs=[]
+    lens = []
+
+
+    for syni,syns in enumerate(synlist):
+        indslist_orig = np.array(indlist)[ syns ]
+        #print(len(indslist_orig))
+        featnames_syns_cur = np.array(featnames)[indslist_orig]
+        r = parseFeatNames(featnames_syns_cur)
+        ftypes = list( set( r['ftype'] ) )
+        if ftypes_print is not None:
+            ftype_print_allowed = (ftypes[0] in ftypes_print) and ( len(ftypes) == 1 )
+        else:
+            ftype_print_allowed = True
+        len_cur = len(syns)
+        if len_cur >= minlen_print and ftype_print_allowed:
+            print(f'index = {syni}, total num = { len_cur} ')
+        num_difs = 0
+        for k,vals in r.items():
+            lcur = len(set(vals))
+            if lcur > 1:
+                if len_cur >= minlen_print and ftype_print_allowed:
+                    print(f'    num different {k:5} = {lcur}')
+                num_difs += 1
+        if len_cur >= minlen_print and ftype_print_allowed:
+            print(f'  num_difs was = {num_difs}')
+        nums_difs += [num_difs]
+        lens += [len_cur]
+
+        if len_cur >= minlen_print_feanames and ftype_print_allowed:
+            print(featnames_syns_cur)

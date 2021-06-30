@@ -16,6 +16,8 @@ import mne
 
 from scipy.stats import pearsonr
 
+from featlist import selFeatsRegexInds
+
 def plotEvolutionMultiCh(dat, times, chan_names=None, interval = None, extend=5,
                          yshift_stdmult = 4, bnd_toshow = 'start', rawname='',
                          ax = None, save=1, prefix='', ww=None, dat_ext=None,
@@ -522,21 +524,22 @@ def getIntervalSurround(start,end, extend, raw=None, times=None, verbose = False
     subint_names = ['prestart','poststart','main','preend','postend']
     return ts, tsis, subint_names
 
-def selFeatsRegexInds(names, regexs, unique=1):
-    import re
-    if isinstance(regexs,str):
-        regexs = [regexs]
-
-    inds = []
-    for namei,name in enumerate(names):
-        for pattern in regexs:
-            r = re.match(pattern, name)
-            if r is not None:
-                inds += [namei]
-                if unique:
-                    break
-
-    return inds
+#def selFeatsRegexInds(names, regexs, unique=1):
+#    # return indices of names that match at least one of the regexes
+#    import re
+#    if isinstance(regexs,str):
+#        regexs = [regexs]
+#
+#    inds = []
+#    for namei,name in enumerate(names):
+#        for pattern in regexs:
+#            r = re.match(pattern, name)
+#            if r is not None:
+#                inds += [namei]
+#                if unique:
+#                    break
+#
+#    return inds
 
 
 def selFeatsRegex(data, names, regexs, unique=1):
@@ -1844,7 +1847,7 @@ def _getPredPower_singleFold(arg):
 
 def getPredPowersCV(clf,X,class_labels,class_ind, printLog = False, n_splits=None,
                     ret_clf_obj=False, skip_noCV =False, add_fitopts={},
-                   add_clf_creopts ={}, train_on_shuffled =True ):
+                   add_clf_creopts ={}, train_on_shuffled =True, seed=0 ):
     # clf is assumed to be already fitted on entire training data here
     # TODO: maybe I need to adapt for other classifiers
     # ret = [perf_nocv, perfs_CV, perf_aver, confmat_aver ] and maybe list of classif objects
@@ -1868,7 +1871,7 @@ def getPredPowersCV(clf,X,class_labels,class_ind, printLog = False, n_splits=Non
         #if n_KFold_splits is not None:
         from sklearn.model_selection import KFold
         from sklearn.model_selection import train_test_split
-        kf = KFold(n_splits=n_splits, shuffle=True)
+        kf = KFold(n_splits=n_splits, shuffle=True, random_state=seed)
         split_res = kf.split(X)
 
         n_jobs_perrun = add_clf_creopts.get('n_jobs', 1)
@@ -1971,7 +1974,11 @@ def getPredPowersCV(clf,X,class_labels,class_ind, printLog = False, n_splits=Non
         if ret_clf_obj:
             retcur['clf_objs'] = [clf]
         #    ret += [ [clf] ]
-    retcur['fold_type_shuffled' ] = res_fold_type_spec
+    if res_fold_type_spec is not None:
+        res_fold_type_spec_no_clfobj =  res_fold_type_spec[0], *res_fold_type_spec[2:]
+    else:
+        res_fold_type_spec_no_clfobj = None
+    retcur['fold_type_shuffled' ] = res_fold_type_spec_no_clfobj
 
     #return tuple(ret)
     return retcur
@@ -1990,7 +1997,10 @@ def calcLDAVersions(X_to_fit, X_to_transform, class_labels,n_components_LDA,
     print('LDA var explained = ', lda.explained_variance_ratio_)
     print('LDA priors ', list(zip( [revdict[cid] for cid in lda.classes_],lda.priors_) ) )
 
-    X_LDA = lda.transform(X_to_transform)  # we transform all points, even bad and ulabeled ones. Transform is done using scalings
+    if X_to_transform is not None:
+        X_LDA = lda.transform(X_to_transform)  # we transform all points, even bad and ulabeled ones. Transform is done using scalings
+    else:
+        X_LDA = None
 
     #classification_report(y_true, y_pred, target_names=target_names)
 
@@ -2007,7 +2017,8 @@ def calcLDAVersions(X_to_fit, X_to_transform, class_labels,n_components_LDA,
     # Compute prediction on training, shuffled labels
     class_labels_shuffled = class_labels.copy()
     np.random.shuffle(class_labels_shuffled)
-    sens,spec,F1,confmat = getClfPredPower(lda,X_to_fit, class_labels_shuffled, class_ind_to_check)
+    sens,spec,F1,confmat = getClfPredPower(lda,X_to_fit, class_labels_shuffled,
+                                           class_ind_to_check)
     print('-- LDA check_on_shuffle sens {:.2f} spec {:.2f} F1 {:.2f}'.format(sens,spec,F1) )
 
     subres = {}
@@ -2017,7 +2028,9 @@ def calcLDAVersions(X_to_fit, X_to_transform, class_labels,n_components_LDA,
     ##################
     lda_shuffled = type(lda)()
     lda_shuffled.fit(X_to_fit, class_labels_shuffled)
-    sens,spec,F1,confmat = getClfPredPower(lda_shuffled,X_to_fit, class_labels_shuffled, class_ind_to_check)
+    sens,spec,F1,confmat = getClfPredPower(lda_shuffled,X_to_fit,
+                                           class_labels_shuffled,
+                                           class_ind_to_check)
     print('-- LDA train_on_shuffle labels sens {:.2f} spec {:.2f} F1 {:.2f}'.format(sens,spec,F1) )
 
     subres = {}
@@ -2074,7 +2087,10 @@ def calcLDAVersions(X_to_fit, X_to_transform, class_labels,n_components_LDA,
     sens_cv_avCV,spec_cv_avCV,F1_cv_avCV = r2['perf_aver'] #res_aver_LDA_avCV
 
     print('-- LDA CV _avCV sens {:.2f} spec {:.2f} F1 {:.2f}'.format(sens_cv_avCV,spec_cv_avCV,F1_cv_avCV) )
-    X_LDA_CV = lda_aver.transform(X_to_transform)
+    if X_to_transform is not None:
+        X_LDA_CV = lda_aver.transform(X_to_transform)
+    else:
+        X_LDA_CV = None
 
     subres = {}
     subres['ldaobj'] = lda_aver
@@ -2086,12 +2102,15 @@ def calcLDAVersions(X_to_fit, X_to_transform, class_labels,n_components_LDA,
 
     return res
 
+
+import copy
 def selMinFeatSet(clf, X, class_labels, class_ind, sortinds, drop_perf_pct = 4,
                   conv_perf_pct = 2, n_splits=4, verbose=1,
                   add_fitopts={},
                   add_clf_creopts={}, check_CV_perf = False, nfeats_step = 3,
                   nsteps_report=1, max_nfeats=100, stop_if_boring = True,
-                  ret_clf_obj=False):
+                  ret_clf_obj=False, stop_cond = ['sens', 'spec', 'F1'],
+                  seed=0, featnames=None):
     '''
     sortinds -- sorted increasing importance (i.e. the most imporant is the last one, as given by argsort)
     it is assumed that clf.fit has already been made
@@ -2101,41 +2120,60 @@ def selMinFeatSet(clf, X, class_labels, class_ind, sortinds, drop_perf_pct = 4,
 
         the last one is alwasy cross-validated
     '''
+    args = copy.deepcopy(locals() )
+    del args['X']
+    del args['class_labels']
     from globvars import gp
 
     if check_CV_perf:
         s = 'CV'
     else:
         s = 'noCV'
+
+    max_nfeats = min(max_nfeats,X.shape[1] )
+
     print('selMinFeatSet: --- starting {} for X.shape={}, step={}, max_nfeats={}, drop_perf_thr={}, conv_thr={}'.
           format(s,X.shape,nfeats_step,max_nfeats,drop_perf_pct,conv_perf_pct) )
 
     r0 = getPredPowersCV(clf,X,class_labels,class_ind, verbose >=3,
                          n_splits=n_splits, add_fitopts=add_fitopts,
                          add_clf_creopts=add_clf_creopts,
-                         ret_clf_obj=ret_clf_obj)
+                         ret_clf_obj=ret_clf_obj,seed=seed)
     #perf_nocv_, results_, res_aver_, confmat_ = r0[:4]
     # used for stopping later
+    # performance using all features
     if check_CV_perf:
         sens_full,spec_full,F1_full = r0['perf_aver']  # res_aver_
     else:
         sens_full,spec_full,F1_full = r0['perf_nocv']
 
+    perfvec_full = []
+    if 'sens' in stop_cond:
+        perfvec_full += [sens_full]
+    if 'spec' in stop_cond:
+        perfvec_full += [spec_full]
+    if 'F1' in stop_cond:
+        perfvec_full += [F1_full]
+    perfvec_full = np.array(perfvec_full)
 
     Xarr = np.array(X)
     #X_red = Xarr[:,sortinds[-2:].tolist()]
     model_red = type(clf)(**add_clf_creopts)
 
     # red = utsne.getClfPredPower(model_red,X_red,y,
-    #                             gp.class_ids_def['trem_' + mts_letter], printLog=1)
+    #                             gv.class_ids_def['trem_' + mts_letter], printLog=1)
     # print(red)
 
     perfs = []
     nfeats = X.shape[1]
 
+    if featnames is not None:
+        featnames = np.array(featnames)
+        assert len(featnames) == nfeats
+
     if verbose >= 1:
-        print('selMinFeatSet: --- all feats give perf={}, check_CV_perf = {}'.
-            format( sprintfPerfs([sens_full,spec_full,F1_full] ),check_CV_perf) )
+        print('selMinFeatSet: --- all {} feats give perf={}, check_CV_perf = {}'.
+            format( len(sortinds), sprintfPerfs([sens_full,spec_full,F1_full] ),check_CV_perf) )
 
     rrcur = {}
     rrcur['fold_type'] = 'all_features_present'
@@ -2144,8 +2182,17 @@ def selMinFeatSet(clf, X, class_labels, class_ind, sortinds, drop_perf_pct = 4,
     rrcur['perf_nocv'] = r0['perf_nocv']
     rrcur['perf_aver'] = r0['perf_aver']
     rrcur['confmat'] = r0['confmat_aver']
-    rrcur['featinds_present'] = np.arange(max_nfeats)
+    rrcur['featinds_present'] = np.arange(len(sortinds) )
     rrcur['fold_type_shuffled' ] = r0['fold_type_shuffled']
+    rrcur['args']  = args
+
+    #rrcur['max_nfeats'] = max_nfeats
+    #rrcur['n_splits'] = n_splits
+    #rrcur['check_CV_perf'] = check_CV_perf
+    #rrcur['stop_cond']
+    #rrcur['seed']
+    #rrcur['drop_perf_pct']
+    #rrcur['conv_perf_pct'] =
 
     #rr = [-1, sortinds.tolist(), perf_nocv_, res_aver_]
     if ret_clf_obj:
@@ -2156,6 +2203,7 @@ def selMinFeatSet(clf, X, class_labels, class_ind, sortinds, drop_perf_pct = 4,
     #perfs += [ (-1, sortinds.tolist(), perf_nocv_, res_aver_)   ]
 
     sens_prev,spec_prev = 0,0
+    perfvec_prev = np.zeros(len(stop_cond) )
     if check_CV_perf:
         n_splits_cycle =  n_splits
     else:
@@ -2165,6 +2213,7 @@ def selMinFeatSet(clf, X, class_labels, class_ind, sortinds, drop_perf_pct = 4,
     converge_thr = conv_perf_pct / 100
     close_to_full_thr = drop_perf_pct / 100
     nsteps = 0
+    inds_printed = set([])
     for i in range(1,max_nfeats+1,nfeats_step):
         # counting backwards
         inds = sortinds[-i:].tolist()[::-1] # reversal or order here is only since Jan 21. It is cosmetic
@@ -2175,9 +2224,21 @@ def selMinFeatSet(clf, X, class_labels, class_ind, sortinds, drop_perf_pct = 4,
                     printLog=(verbose >= 3), n_splits=n_splits_cycle,
                     add_fitopts=add_fitopts,
                     add_clf_creopts=add_clf_creopts,ret_clf_obj=ret_clf_obj,
-                           train_on_shuffled = False)
+                           train_on_shuffled = False, seed=seed)
         #perf_nocv, results, res_aver,confmat = r[:4]
-        sens,spec,F1,confmat_nocv = r['perf_nocv']
+
+        if check_CV_perf:
+            sens,spec,F1 = r['perf_aver']
+        else:
+            sens,spec,F1,confmat_nocv = r['perf_nocv']
+        perfvec_cur = []
+        if 'sens' in stop_cond:
+            perfvec_cur += [sens]
+        if 'spec' in stop_cond:
+            perfvec_cur += [spec]
+        if 'F1' in stop_cond:
+            perfvec_cur += [F1]
+        perfvec_cur = np.array(perfvec_cur)
 
         rrcur = {}
         rrcur['fold_type'] = 'some_features_present'
@@ -2193,27 +2254,42 @@ def selMinFeatSet(clf, X, class_labels, class_ind, sortinds, drop_perf_pct = 4,
             #rr += [models_cur]
         perfs += [ rrcur  ]
         #perfs += [ tuple(rr)    ]
-        if verbose >= 2 and ( int(i-1 / nfeats_step) % nsteps_report == (nsteps_report-1) ):
-            print('selMinFeatSet: --- search of best feat set, len(inds)={}, perf={}'.
-                  format(len(inds), sprintfPerfs(r['perf_aver']) ) )
 
         # the last one if always CV even though if we checking only training
         # data perf when selecting feats
         # I do not want to use abs() here
-        cond_conv = ( (sens - sens_prev) <  converge_thr ) and ( (spec - spec_prev) <  converge_thr )
-        cond_close = (sens_full - sens  < close_to_full_thr) and (spec_full- spec  < close_to_full_thr)
-        cond_boring = ( sens_full < 0.4) and nsteps > 1 and (not stop_if_boring)
+        #cond_conv = ( (sens - sens_prev) <  converge_thr ) and ( (spec - spec_prev) <  converge_thr )
+        conv_dist_Linf = np.max( np.abs(perfvec_cur - perfvec_prev) )
+        cond_conv = conv_dist_Linf  <  converge_thr
+        #cond_close = (sens_full - sens  < close_to_full_thr) and (spec_full- spec  < close_to_full_thr)
+        close_dist_Linf = np.max(perfvec_full - perfvec_cur ) # allow signed. Negative means improvement, I allow it
+        cond_close = close_dist_Linf  < close_to_full_thr
+        # if even the full sunsitivity was low, don't bother
+        #cond_boring = ( sens_full < 0.4) and nsteps > 1 and (not stop_if_boring)
+        cond_boring = ( np.max(perfvec_cur) < 0.4) and nsteps > 1 and (not stop_if_boring)
         stop_now = (cond_close and cond_conv) or cond_boring
-        print( (f'___::{len(inds)}: sens_full = {sens_full*100:.2f} %,  '
-                f'sens_nocv = {sens*100:.2f} %, '
-                f'sens_nocv_prev = {sens_prev:.2f} % stop_now = {stop_now}') )
+
+
+        if verbose >= 2 and ( int(i-1 / nfeats_step) % nsteps_report == (nsteps_report-1) ):
+            print('selMinFeatSet: --- search of best feat set, len(inds)={}, perf={}'.
+                  format(len(inds), sprintfPerfs(r['perf_aver'],  ) ) )
+            print(f'____::{len(inds)}: dist_close={100*close_dist_Linf:.2f}%,  dist_conv={100*conv_dist_Linf:.2f}%')
+            inds_not_printed = list( set(inds) - inds_printed)
+            if featnames is not None:
+                print(featnames[inds_not_printed] )
+                inds_printed = inds_printed | set(inds_not_printed)
+
+
+        #print( (f'___::{len(inds)}: sens_full = {sens_full*100:.2f} %,  '
+        #        f'sens_nocv = {sens*100:.2f} %, '
+        #        f'sens_nocv_prev = {sens_prev:.2f} % stop_now = {stop_now}') )
         if stop_now:
             if n_splits_cycle is None:
                 rstop = getPredPowersCV(model_red,X_red,class_labels, class_ind,
                                     printLog=verbose >= 3, n_splits=n_splits,
                                     add_fitopts=add_fitopts,
                                     add_clf_creopts=add_clf_creopts,
-                                    ret_clf_obj=ret_clf_obj)
+                                    ret_clf_obj=ret_clf_obj, seed=seed)
                 #perf_nocv, results, res_aver, confmat = r[:4]
                 sens,spec,F1 = rstop['perf_aver']
 
@@ -2227,14 +2303,23 @@ def selMinFeatSet(clf, X, class_labels, class_ind, sortinds, drop_perf_pct = 4,
                     #rr += [models_cur]
                     rrcur['clf_objs'] = rstop['clf_objs']
                 #perfs[-1] = tuple(rr)
+
+                rrcur['stopped_natually'] = stop_now
+                rrcur['cond_close'] = cond_close
+                rrcur['cond_conv'] =  cond_conv
+                rrcur['cond_boring'] = cond_boring
+
                 perfs[-1] = rrcur
 
             if verbose >= 1:
-                print('selMinFeatSet: --- ENDED search of best feat set, len(inds)={}, perf={}, boring={}'.
-                      format(len(inds), sprintfPerfs(rrcur['perf_aver']), cond_boring ) )
+                print('selMinFeatSet: --- ENDED search of best feat set, len(inds)={}, perf={}, {}'.\
+                      format(len(inds), sprintfPerfs(rrcur['perf_aver'] ),
+                      f' boring={cond_boring}, close={cond_close}, conv={cond_conv}'  ) )
+
             break
 
-        sens_prev,spec_prev = sens,spec
+        sens_prev,spec_prev,F1_prev = sens,spec,F1
+        perfvec_prev = perfvec_cur.copy()
         nsteps += 1
 
     if not stop_now:  # if we stopped because cycle has ended
@@ -2251,6 +2336,10 @@ def selMinFeatSet(clf, X, class_labels, class_ind, sortinds, drop_perf_pct = 4,
         rrcur['confmat'] = r0['confmat_aver']
         rrcur['featinds_present'] = np.arange(max_nfeats)
         rrcur['fold_type_shuffled' ] = r0['fold_type_shuffled']
+        rrcur['stopped_natually'] = stop_now
+        rrcur['cond_close'] = cond_close
+        rrcur['cond_conv'] =  cond_conv
+        rrcur['cond_boring'] = cond_boring
 
 
         #rr = [i+1, sortinds.tolist(), r0['perf_nocv'], r0['perf_aver'] ]
@@ -2290,7 +2379,7 @@ def makeClassLabels(sides_hand, grouping, int_types_to_distinguish,
 
 
     # first fill everthing with neutral label
-    #class_labels = np.repeat(gp.class_id_neut,len(Xconcat_imputed))
+    #class_labels = np.repeat(gv.class_id_neut,len(Xconcat_imputed))
     class_labels = np.repeat(gp.class_id_neut,num_labels_tot)
     assert gp.class_id_neut == 0
 
@@ -2370,6 +2459,9 @@ def countClassLabels(class_labels_good, class_ids_grouped=None,revdict=None):
             counts[lbl] = num_cur
     return counts
 
+
+
+
 #def checkClassLabelsCompleteness(class_labels_good, class_ids_grouped, class_to_check,
 #                                 min_num = 1):
 #    countClassLabels(class_labels_good, class_ids_grouped)
@@ -2380,29 +2472,64 @@ def countClassLabels(class_labels_good, class_ids_grouped=None,revdict=None):
 #            s = 'Class {} (cid={}) is not present at all'.format(class_name,cid)
 #            raise ValueError(s)
 
-def plotFeatureImportance(ax, feature_names, shap_values, mode='SHAP', explainer = None):
-    assert mode in ['XGB_gain', 'SHAP', 'XGB_Shapley', 'EBM']
 
-    if mode == 'XGB_Shapley':
-        aggregate = np.mean(np.abs(shap_values[:, 0:-1]), axis=0)
-        # sort by magnitude
-        z = [(x, y) for y, x in sorted(zip(aggregate, feature_names), reverse=True)]
-        z = list(zip(*z))
-    elif mode == 'XGB_gain':
-        z = [(x, y) for y, x in sorted(zip(shap_values, feature_names), reverse=True)]
-    elif mode == 'EBM':
-        if feature_names is None:
-            feature_names = global_exp['feature_names']
-        if shap_values is None:
-            aggregate = global_exp._internal_obj['overall']['scores']
-        z = [(x, y) for y, x in sorted(zip(aggregate, feature_names), reverse=True)]
-        z = list(zip(*z))
+#trem_class_label = 'trem_L'
+#global main_class_id = redict[trem_class_label]
+def balanced_accuracy_pseudo_binary(y_true, y_pred, *, sample_weight=None,
+                        adjusted=False, main_class_id=None):
+    #global main_class_id
+    assert main_class_id is not None
+    y_true2 = np.ones(len(y_true))
+    y_true2[y_true != main_class_id] = 0
 
+    y_pred2 = np.ones(len(y_pred))
+    y_pred2[y_pred != main_class_id] = 0
 
-    ax.bar(z[0], z[1])
-    #ax.set_xticks(rotation=90)
-    ax.tick_params(axis='x', labelrotation=90 )
-    #ax.tight_layout()
+    y_true = y_true2
+    y_pred = y_pred2
 
-    ax.set_title(f'Scores of type {mode}');
+    from sklearn.metrics import confusion_matrix
+    C = confusion_matrix(y_true, y_pred, sample_weight=sample_weight)
+    with np.errstate(divide='ignore', invalid='ignore'):
+        per_class = np.diag(C) / C.sum(axis=1)
+    if np.any(np.isnan(per_class)):
+        import warnings
+        warnings.warn('y_pred contains classes not in y_true')
+        per_class = per_class[~np.isnan(per_class)]
+    score = np.mean(per_class)
+    if adjusted:
+        n_classes = len(per_class)
+        chance = 1 / n_classes
+        score -= chance
+        score /= 1 - chance
+    return score
 
+def getScoresPerClass(class_ids,scores, ret_bias=False):
+    if scores.ndim == 2:
+        lblinds = np.sort( np.unique(class_ids) )
+    elif scores.ndim == 3:
+        lblinds = range(scores.shape[1] )
+    else:
+        raise ValueError(f'Wrong ndim, {scores.shape}')
+    assert scores.shape[0] == len(class_ids)
+    r = np.zeros( (len(lblinds) ,scores.shape[-1] - 1 ) )
+    biases = np.zeros( len(lblinds) )
+    for lblind in lblinds:
+        # select points where true class is like the current one
+        ptinds = np.where(class_ids == lblind)[0]
+        classid_enconded = lblind
+        if scores.ndim == 3:
+            # XGB doc: Note the final column is the bias term
+            sc = scores[ptinds,lblind,0:-1]
+        elif scores.ndim == 2:
+            # XGB doc: Note the final column is the bias term
+            sc = scores[ptinds,0:-1]
+        scores_cur = np.mean(sc, axis=0)
+        r[lblind,:]  = scores_cur
+
+        bias_cur = np.mean(scores[ptinds,-1] )
+        biases[lblind] = bias_cur
+    rr = r
+    if ret_bias:
+        rr = r,biases
+    return rr

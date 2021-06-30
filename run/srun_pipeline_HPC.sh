@@ -121,6 +121,7 @@ SRC_GROUPING_FN=10
 RAW_SUBDIR=""
 #FEAT_SUBDIR="genfeats_scale_combine_subj"
 FEAT_SUBDIR=""
+ML_SUBDIR="nointerp"
 
 
 MAX_TFR_AGE_H=240 # 10 days, it was gen on Jan 15
@@ -189,9 +190,9 @@ else
 fi
 
 ######## common for ML and nlproj
-            PREFIX_ALL_FEATS=0
-               PREFIXES_MAIN=0
-      PREFIXES_CROSS_MOD_AUX=0
+            PREFIX_ALL_FEATS=1
+               PREFIXES_MAIN=1
+      PREFIXES_CROSS_MOD_AUX=1
 PREFIXES_CROSS_BPCORR_SUBMOD=0
 PREFIXES_CROSS_BPCORR_SUBMOD_ORDBAND=0
 PREFIXES_CROSS_BPCORR_SUBMOD_ORDBAND2=1
@@ -199,27 +200,43 @@ PREFIXES_CROSS_RBCORR_SUBMOD=0
             PREFIXES_AUX_SRC=0
                 PREFIXES_AUX=0
 
+#previously IPYTHON_SYNTAX
+USE_IPYTHON=0
+if [ $USE_IPYTHON -ne 0 ]; then
+  DDASH="--"
+else
+  DDASH=""
+fi
+
 #--groupings_to_use
-#GROUPINGS_TO_USE="merge_all_not_trem,merge_movements,merge_nothing"
-#GROUPINGS_TO_USE="merge_nothing,merge_all_not_trem"
-GROUPINGS_TO_USE="merge_nothing"
+# using spaces inatead of commas kills compatibilitiy with prev versions (when I could run muliple groupings in one file)
+# but otherwise it does not work on jusuf -- it has too old bash..
+GROUPINGS_TO_USE="merge_all_not_trem merge_movements merge_nothing"
+#GROUPINGS_TO_USE="merge_nothing merge_all_not_trem"
+#GROUPINGS_TO_USE="merge_nothing"
 
 #int_types_to_use = gp.int_types_to_include
-#INT_SETS_TO_USE="basic,trem_vs_quiet"
+#INT_SETS_TO_USE="basic trem_vs_quiet"
 INT_SETS_TO_USE="basic"
 
 if [ $USE_AUX_IVAL_GROUPINGS -gt 0 ]; then
-  GROUPINGS_TO_USE="$GROUPINGS_TO_USE,merge_within_subj,merge_within_medcond,merge_within_task"
-  INT_SETS_TO_USE="$INT_SETS_TO_USE,subj_medcond_task,subj_medcond,subj"
+  GROUPINGS_TO_USE="$GROUPINGS_TO_USE merge_within_subj merge_within_medcond merge_within_task"
+  INT_SETS_TO_USE="$INT_SETS_TO_USE subj_medcond_task subj_medcond subj"
 fi
 
 echo "GROUPINGS_TO_USE=$GROUPINGS_TO_USE"
 echo "INT_SETS_TO_USE=$INT_SETS_TO_USE"
-defIFS=$IFS
-IFS=','
+# on custer I canno set IFS for some reason. And bash has different version, so readarray won't work
+#defIFS=$IFS
+#IFS=','; echo .$IFS.
+#echo .$IFS. 
+#readarray -d : -t strarr <<< "$mainstr"
+read -a int_sets_arr  <<< $INT_SETS_TO_USE
 read -a groupings_arr <<< $GROUPINGS_TO_USE
-read -a int_sets_arr <<< $INT_SETS_TO_USE
-IFS=$defIFS
+#IFS=$defIFS
+echo ${groupings_arr[0]} : ${groupings_arr[1]} 
+#exit 0
+
 
 
 PARCEL_TYPES_CB="Cerebellum"
@@ -236,8 +253,6 @@ TSNE_PLOTS=1
 #raws=$raw,$raw_compl
 LOAD_TSNE=0  #allows to skip those that were already computed
 
-#IPYTHON_SYNTAX=""
-IPYTHON_SYNTAX="--"
 if [ ${#GENFEATS_PARAM_FILE} -eq 0 ]; then
   GENFEATS_PARAM_FILE=genfeats_defparams.ini
 fi
@@ -290,7 +305,7 @@ if [ $do_genfeats -gt 0 ]; then
   SUBDIR_STR="$INPUT_SUBDIR_STR $OUTPUT_SUBDIR_STR"
   #echo SUBDIR_STR=$SUBDIR_STR
   #exit 0
-  RUNSTRING_CUR=' run_genfeats.py $IPYTHON_SYNTAX -r "$raws" --param_file $GENFEATS_PARAM_FILE $GENFEATS_INTERMED  $SUBDIR_STR --scale_data_combine_type $SCALE_DATA_COMBINE_TYPE'
+  RUNSTRING_CUR=' run_genfeats.py $DDASH -r "$raws" --param_file $GENFEATS_PARAM_FILE $GENFEATS_INTERMED  $SUBDIR_STR --scale_data_combine_type $SCALE_DATA_COMBINE_TYPE'
   #GENFEATS_PLOT_STR="--show_plots 1 --plot_types raw_stats_scatter,feat_stats_scatter"
   #RUNSTRING_CUR=' run_genfeats.py -- -r "$raws" --param_file $GENFEATS_PARAM_FILE --bands "$BANDS_TYPE" --sources_type "$SOURCES_TYPE" --feat_types "$FEAT_TYPES_TO_USE_GENFEATS" --crop "$CROP" --src_grouping "$SRC_GROUPING" --src_grouping_fn $SRC_GROUPING_FN --Kalman_smooth $KALMAN $GENFEATS_INTERMED $GENFEATS_PLOT_STR --rbcorr_use_local_means $RBCORR_USE_LOCAL_MEANS $SUBDIR_STR --scale_data_combine_type $SCALE_DATA_COMBINE_TYPE'
   R=$(eval echo $RUNSTRING_CUR)
@@ -311,7 +326,7 @@ if [ $do_ML -gt 0 ]; then
   #$EXECSTR $interactive run_ML.py  -- -r $raw,$raw_compl
 
   function ML { 
-    RS="run_ML.py -- $1"
+    RS="run_ML.py $DDASH $1"
     #echo $RS --prefix all
     #echo RS= $RS
 
@@ -381,73 +396,80 @@ if [ $do_ML -gt 0 ]; then
 
     if [ $PREFIXES_CROSS_BPCORR_SUBMOD_ORDBAND -ne 0 ]; then 
       BPCORR_SUBMOD="--LFP_related_only 1 --cross_couplings_only 1 --feat_types bpcorr"
+      #
+      #cross_freqmod_
       #########
  #--fbands_mod1 msrc:beta --fbands_mod2 LFP:gamma,tremor
-      b_LFP="beta"; b_msrc="gamma"; 
-      RUNSTRING_CUR=' $RS $BPCORR_SUBMOD --fbands_mod1 msrc:$b_msrc --fbands_mod2 LFP:$b_LFP --prefix LFPrel_noself_onlyBpcorr_$b_msrc$b_LFP  '
+      # NOTE THAT I CANNOT USE LOCAL VARIABLE HERE! ONLY THE LAST WILL BE REMEMBERED
+      b_msrc="$BANDS_GAMMA"; b_LFP="$BANDS_BETA";
+      RUNSTRING_CUR=' $RS $BPCORR_SUBMOD --fbands_mod1 msrc:$BANDS_GAMMA --fbands_mod2 LFP:$BANDS_BETA --prefix cross_freqmod_$BANDS_GAMMA:$BANDS_BETA ' 
       RUNSTRINGS+=("$RUNSTRING_CUR")
 
-      b_LFP="beta"; b_msrc="tremor"; 
-      RUNSTRING_CUR=' $RS $BPCORR_SUBMOD --fbands_mod1 msrc:$b_msrc --fbands_mod2 LFP:$b_LFP --prefix LFPrel_noself_onlyBpcorr_$b_msrc$b_LFP  '
+      b_msrc="tremor"; b_LFP="$BANDS_BETA";
+      RUNSTRING_CUR=' $RS $BPCORR_SUBMOD --fbands_mod1 msrc:tremor --fbands_mod2 LFP:$BANDS_BETA --prefix cross_freqmod_tremor:$BANDS_BETA ' 
       RUNSTRINGS+=("$RUNSTRING_CUR")
 
-      b_LFP="tremor"; b_msrc="gamma"; 
-      RUNSTRING_CUR=' $RS $BPCORR_SUBMOD --fbands_mod1 msrc:$b_msrc --fbands_mod2 LFP:$b_LFP --prefix LFPrel_noself_onlyBpcorr_$b_msrc$b_LFP  '
+      b_msrc="$BANDS_GAMMA"; b_LFP="tremor";
+      RUNSTRING_CUR=' $RS $BPCORR_SUBMOD --fbands_mod1 msrc:$BANDS_GAMMA --fbands_mod2 LFP:tremor --prefix cross_freqmod_$BANDS_GAMMA:tremor ' 
       RUNSTRINGS+=("$RUNSTRING_CUR")
 
-      b_LFP="tremor"; b_msrc="beta"; 
-      RUNSTRING_CUR=' $RS $BPCORR_SUBMOD --fbands_mod1 msrc:$b_msrc --fbands_mod2 LFP:$b_LFP --prefix LFPrel_noself_onlyBpcorr_$b_msrc$b_LFP  '
+      b_msrc="$BANDS_BETA"; b_LFP="tremor";
+      RUNSTRING_CUR=' $RS $BPCORR_SUBMOD --fbands_mod1 msrc:$BANDS_BETA --fbands_mod2 LFP:tremor --prefix cross_freqmod_$BANDS_BETA:tremor ' 
       RUNSTRINGS+=("$RUNSTRING_CUR")
 
-      b_LFP="gamma"; b_msrc="tremor"; 
-      RUNSTRING_CUR=' $RS $BPCORR_SUBMOD --fbands_mod1 msrc:$b_msrc --fbands_mod2 LFP:$b_LFP --prefix LFPrel_noself_onlyBpcorr_$b_msrc$b_LFP  '
+      b_msrc="tremor"; b_LFP="$BANDS_GAMMA";
+      RUNSTRING_CUR=' $RS $BPCORR_SUBMOD --fbands_mod1 msrc:tremor --fbands_mod2 LFP:$BANDS_GAMMA --prefix cross_freqmod_tremor:$BANDS_GAMMA ' 
       RUNSTRINGS+=("$RUNSTRING_CUR")
 
-      b_LFP="gamma"; b_msrc="beta"; 
-      RUNSTRING_CUR=' $RS $BPCORR_SUBMOD --fbands_mod1 msrc:$b_msrc --fbands_mod2 LFP:$b_LFP --prefix LFPrel_noself_onlyBpcorr_$b_msrc$b_LFP  '
+      b_msrc="$BANDS_BETA"; b_LFP="$BANDS_GAMMA";
+      RUNSTRING_CUR=' $RS $BPCORR_SUBMOD --fbands_mod1 msrc:$BANDS_BETA --fbands_mod2 LFP:$BANDS_GAMMA --prefix cross_freqmod_$BANDS_BETA:$BANDS_GAMMA ' 
       RUNSTRINGS+=("$RUNSTRING_CUR")
 
-      b_LFP="HFO"; b_msrc="tremor"; 
-      RUNSTRING_CUR=' $RS $BPCORR_SUBMOD --fbands_mod1 msrc:$b_msrc --fbands_mod2 LFP:$b_LFP --prefix LFPrel_noself_onlyBpcorr_$b_msrc$b_LFP  '
+      b_msrc="tremor"; b_LFP="$BANDS_HFO";
+      RUNSTRING_CUR=' $RS $BPCORR_SUBMOD --fbands_mod1 msrc:tremor --fbands_mod2 LFP:$BANDS_HFO --prefix cross_freqmod_tremor:$BANDS_HFO ' 
       RUNSTRINGS+=("$RUNSTRING_CUR")
 
-      b_LFP="HFO"; b_msrc="beta"; 
-      RUNSTRING_CUR=' $RS $BPCORR_SUBMOD --fbands_mod1 msrc:$b_msrc --fbands_mod2 LFP:$b_LFP --prefix LFPrel_noself_onlyBpcorr_$b_msrc$b_LFP  '
+      b_msrc="$BANDS_BETA"; b_LFP="$BANDS_HFO";
+      RUNSTRING_CUR=' $RS $BPCORR_SUBMOD --fbands_mod1 msrc:$BANDS_BETA --fbands_mod2 LFP:$BANDS_HFO --prefix cross_freqmod_$BANDS_BETA:$BANDS_HFO ' 
       RUNSTRINGS+=("$RUNSTRING_CUR")
 
-      b_LFP="HFO"; b_msrc="gamma"; 
-      RUNSTRING_CUR=' $RS $BPCORR_SUBMOD --fbands_mod1 msrc:$b_msrc --fbands_mod2 LFP:$b_LFP --prefix LFPrel_noself_onlyBpcorr_$b_msrc$b_LFP  '
+      b_msrc="$BANDS_GAMMA"; b_LFP="$BANDS_HFO";
+      RUNSTRING_CUR=' $RS $BPCORR_SUBMOD --fbands_mod1 msrc:$BANDS_GAMMA --fbands_mod2 LFP:$BANDS_HFO --prefix cross_freqmod_$BANDS_GAMMA:$BANDS_HFO ' 
       RUNSTRINGS+=("$RUNSTRING_CUR")
     fi 
 
     if [ $PREFIXES_CROSS_BPCORR_SUBMOD_ORDBAND2 -ne 0 ]; then 
       BPCORR_SUBMOD="--LFP_related_only 1 --cross_couplings_only 1 --feat_types bpcorr"
       #########
- #--fbands_mod1 msrc:beta --fbands_mod2 LFP:gamma,tremor
-      b_LFP="beta"; b_msrc="tremor,gamma"; 
-      RUNSTRING_CUR=' $RS $BPCORR_SUBMOD --fbands_mod1 msrc:$b_msrc --fbands_mod2 LFP:$b_LFP --prefix LFPrel_noself_onlyBpcorr_$b_msrc$b_LFP  '
+ #--fbands_mod1 msrc:$BANDS_BETA --fbands_mod2 LFP:$BANDS_GAMMA,tremor
+      b_msrc="tremor,$BANDS_GAMMA"; b_LFP="$BANDS_BETA";
+      RUNSTRING_CUR=' $RS $BPCORR_SUBMOD --fbands_mod1 msrc:tremor,$BANDS_GAMMA --fbands_mod2 LFP:$BANDS_BETA --prefix cross_freqmod_tremor,$BANDS_GAMMA:$BANDS_BETA ' 
       RUNSTRINGS+=("$RUNSTRING_CUR")
 
-      b_LFP="gamma"; b_msrc="tremor,beta"; 
-      RUNSTRING_CUR=' $RS $BPCORR_SUBMOD --fbands_mod1 msrc:$b_msrc --fbands_mod2 LFP:$b_LFP --prefix LFPrel_noself_onlyBpcorr_$b_msrc$b_LFP  '
+      b_msrc="tremor,$BANDS_BETA"; b_LFP="$BANDS_GAMMA";
+      RUNSTRING_CUR=' $RS $BPCORR_SUBMOD --fbands_mod1 msrc:tremor,$BANDS_BETA --fbands_mod2 LFP:$BANDS_GAMMA --prefix cross_freqmod_tremor,$BANDS_BETA:$BANDS_GAMMA ' 
       RUNSTRINGS+=("$RUNSTRING_CUR")
 
-      b_LFP="tremor"; b_msrc="beta,gamma"; 
-      RUNSTRING_CUR=' $RS $BPCORR_SUBMOD --fbands_mod1 msrc:$b_msrc --fbands_mod2 LFP:$b_LFP --prefix LFPrel_noself_onlyBpcorr_$b_msrc$b_LFP  '
+      b_msrc="$BANDS_BETA,$BANDS_GAMMA"; b_LFP="tremor";
+      RUNSTRING_CUR=' $RS $BPCORR_SUBMOD --fbands_mod1 msrc:$BANDS_BETA,$BANDS_GAMMA --fbands_mod2 LFP:tremor --prefix cross_freqmod_$BANDS_BETA,$BANDS_GAMMA:tremor ' 
       RUNSTRINGS+=("$RUNSTRING_CUR")
 
-      b_LFP="HFO"; b_msrc="tremor,beta"; 
-      RUNSTRING_CUR=' $RS $BPCORR_SUBMOD --fbands_mod1 msrc:$b_msrc --fbands_mod2 LFP:$b_LFP --prefix LFPrel_noself_onlyBpcorr_$b_msrc$b_LFP  '
+      b_msrc="tremor,$BANDS_BETA"; b_LFP="$BANDS_HFO";
+      RUNSTRING_CUR=' $RS $BPCORR_SUBMOD --fbands_mod1 msrc:tremor,$BANDS_BETA --fbands_mod2 LFP:$BANDS_HFO --prefix cross_freqmod_tremor,$BANDS_BETA:$BANDS_HFO ' 
       RUNSTRINGS+=("$RUNSTRING_CUR")
 
-      b_LFP="HFO"; b_msrc="tremor,gamma"; 
-      RUNSTRING_CUR=' $RS $BPCORR_SUBMOD --fbands_mod1 msrc:$b_msrc --fbands_mod2 LFP:$b_LFP --prefix LFPrel_noself_onlyBpcorr_$b_msrc$b_LFP  '
+      b_msrc="tremor,$BANDS_GAMMA"; b_LFP="$BANDS_HFO";
+      RUNSTRING_CUR=' $RS $BPCORR_SUBMOD --fbands_mod1 msrc:tremor,$BANDS_GAMMA --fbands_mod2 LFP:$BANDS_HFO --prefix cross_freqmod_tremor,$BANDS_GAMMA:$BANDS_HFO ' 
       RUNSTRINGS+=("$RUNSTRING_CUR")
 
-      b_LFP="HFO"; b_msrc="beta,gamma"; 
-      RUNSTRING_CUR=' $RS $BPCORR_SUBMOD --fbands_mod1 msrc:$b_msrc --fbands_mod2 LFP:$b_LFP --prefix LFPrel_noself_onlyBpcorr_$b_msrc$b_LFP  '
+      b_msrc="$BANDS_BETA,$BANDS_GAMMA"; b_LFP="$BANDS_HFO";
+      RUNSTRING_CUR=' $RS $BPCORR_SUBMOD --fbands_mod1 msrc:$BANDS_BETA,$BANDS_GAMMA --fbands_mod2 LFP:$BANDS_HFO --prefix cross_freqmod_$BANDS_BETA,$BANDS_GAMMA:$BANDS_HFO ' 
       RUNSTRINGS+=("$RUNSTRING_CUR")
     fi 
+    #s/b_msrc="\([a-zA-Z,]\+\)"; b_LFP="\([a-zA-Z,]\+\)";/\0\r      RUNSTRING_CUR=' $RS $BPCORR_SUBMOD --fbands_mod1 msrc:\1 --fbands_mod2 LFP:\2 --prefix cross_freqmod_\1:\2 '/gc
+
+
+    
 
     if [ $PREFIXES_CROSS_RBCORR_SUBMOD -ne 0 ]; then 
       RBCORR_SUBMOD="--LFP_related_only 1 --cross_couplings_only 1 --feat_types rbcorr"
@@ -520,14 +542,19 @@ if [ $do_ML -gt 0 ]; then
   # for ML we use same
   if [ ${#FEAT_SUBDIR} -gt 0 ]; then
     INPUT_SUBDIR_STR="--input_subdir $FEAT_SUBDIR"
-    OUTPUT_SUBDIR_STR="--output_subdir $FEAT_SUBDIR"
   else
     INPUT_SUBDIR_STR=""
+  fi
+
+  if [ ${#ML_SUBDIR} -gt 0 ]; then
+    OUTPUT_SUBDIR_STR="--output_subdir $ML_SUBDIR"
+  else
     OUTPUT_SUBDIR_STR=""
   fi
+
   SUBDIR_STR="$INPUT_SUBDIR_STR $OUTPUT_SUBDIR_STR"
   #COMMON_ALL="--pcexpl $DESIRED_PCA_EXPLAIN --discard $DESIRED_DISCARD --show_plots $ML_PLOTS --sources_type $SOURCES_TYPE --bands_type $BANDS_TYPE --src_grouping $SRC_GROUPING --src_grouping_fn $SRC_GROUPING_FN --skip_XGB $skip_XGB --skip_XGB_aux_int $skip_XGB_aux_int --max_XGB_step_nfeats $max_XGB_step_nfeats --subskip_fit $SUBSKIP_ML_FIT --LFPchan $LFP_CHAN_TO_USE --heavy_fit_red_featset $HEAVY_FIT_REDUCED_FEATSET $SUBDIR_STR --plot_types $ML_PLOT_TYPES --load_only $ML_LOAD_ONLY --param_file $MI_PARAM_FILE"
-  COMMON_ALL="--param_file $MI_PARAM_FILE"
+  COMMON_ALL="--param_file $MI_PARAM_FILE $SUBDIR_STR"
   if [ $RUN_CLASS_LAB_GRP_SEPARATE -eq 0 ]; then
     CLASS_LAB_GRP_STR="--groupings_to_use=$GROUPINGS_TO_USE --int_types_to_use=$INT_SETS_TO_USE"
     #echo COMMON_ALL= $COMMON_ALL    # replaces comma with space
@@ -587,7 +614,7 @@ if [ $do_nlproj -gt 0 ]; then
   #$EXECSTR $interactive run_nlproj.py --     -r $raw
 
   function nlproj {
-    RS="run_nlproj.py -- $1"
+    RS="run_nlproj.py $DDASH $1"
     if [ $PREFIX_ALL_FEATS -gt 0 ]; then
       $EXECSTR $RS --prefix all                                                           
     fi

@@ -978,6 +978,7 @@ def tfr2csd(dat, sfreq, returnOrder = False, skip_same = [], ind_pairs = None,
 
 def _feat_correl3(arg):
     resname,bn_from,bn_to,pc,fromi,toi,windowsz,skip,dfrom,dto,mfrom,mto,oper,pos,local_means = arg
+    #print(arg)
 
     q = 0.05
     if mfrom is None:
@@ -1054,9 +1055,10 @@ def computeCorr(raws, names, defnames, skip, windowsz, band_pairs,
                     parcel_couplings, LFP2parcel_couplings, LFP2LFP_couplings,
                     res_group_id = 9, n_jobs=None, positive=1, templ = None,
                     roi_labels = None, sort_keys=None, printLog=False, means=None,
-                    local_means=False):
+                    local_means=False, reverse=True):
     '''
     dat is chans x timebins
+    positive -- wheather inputs are postive
     windowz is in bins of Xtimes_full
     returns lists
     '''
@@ -1098,13 +1100,13 @@ def computeCorr(raws, names, defnames, skip, windowsz, band_pairs,
                     effind_from = i
                     effind_to   = j
 
-                    dfrom = raws[bn_from][effind_from][0][0]
-                    dto   = raws[bn_to][effind_to][0][0]
+                    dfrom = raws[bn_from][effind_from][0][0] # band from -> i
+                    dto   = raws[bn_to][effind_to][0][0]     # band to   -> j
                     assert dfrom.size > 1
                     assert dto.size > 1
 
-                    chn1 = names_from[effind_from]
-                    chn2 = names_to[effind_to]
+                    chn1 = names_from[effind_from]     # from[i]
+                    chn2 = names_to[effind_to]         # to [j]
                     side1, gi1, parcel_ind1, si1  = utils.parseMEGsrcChnameShort(chn1)
                     side2, gi2, parcel_ind2, si2  = utils.parseMEGsrcChnameShort(chn2)
 
@@ -1125,24 +1127,29 @@ def computeCorr(raws, names, defnames, skip, windowsz, band_pairs,
                     args += [arg]
                     #print('1', resname)
 
-                    if rev: # reversal of bands, not indices (they are symmetric except when division)
+                    # I had   <band_from> ch_1,  <band_to> ch_2,    now I want
+                    # <band_to> ch_1 and <band_from> ch_2
+
+                    if rev and reverse: # reversal of bands, not indices (they are symmetric except when division)
                         # change bands. So I need same channels (names and
                         # data) but with exchanged bands
                         effind_from = j
                         effind_to   = i
 
-                        dfrom = raws[bn_to][effind_to][0][0]
-                        dto   = raws[bn_from][effind_from][0][0]
+                        dfrom = raws[bn_to][effind_to][0][0]      # band to   -> i
+                        dto   = raws[bn_from][effind_from][0][0]  # band from -> j
 
-                        # change bands
-                        chn1 = names_to[effind_to]
-                        chn2 = names_from[effind_from]
+                        # this is about channel names, NOT bands
+                        # here we should have names_to == names_from since both
+                        # are for non-HFO bands
+                        chn1 = names_to[effind_to]             # to[i]
+                        chn2 = names_from[effind_from]         # from[j]
                         side1, gi1, parcel_ind1, si1  = utils.parseMEGsrcChnameShort(chn1)
                         side2, gi2, parcel_ind2, si2  = utils.parseMEGsrcChnameShort(chn2)
 
                         # change bands
-                        newchn1 = '{}_msrc{}_{}_{}_c{}'.format(bn_to,    side1,res_group_id,pi1,0)
-                        newchn2 = '{}_msrc{}_{}_{}_c{}'.format(bn_from,  side2,res_group_id,pi2,0)
+                        newchn1 = '{}_msrc{}_{}_{}_c{}'.format(bn_to,    side1,res_group_id,pi1,0) # to ,    side of i , parcel ind 1
+                        newchn2 = '{}_msrc{}_{}_{}_c{}'.format(bn_from,  side2,res_group_id,pi2,0) # from , side of j  , parcel ind 2
 
                         resname = '{}_{},{}'.format(oper,newchn1,newchn2)
                         # we won't have final name before averaging
@@ -1219,6 +1226,8 @@ def computeCorr(raws, names, defnames, skip, windowsz, band_pairs,
                 assert dfrom.size > 1
                 assert dto.size > 1
 
+                #import pdb; pdb.set_trace()
+
                 #name = '{}_{},{}'.format(oper,nfrom,nto)
                 # we won't have final name before averaging
                 if means is not None:
@@ -1234,7 +1243,7 @@ def computeCorr(raws, names, defnames, skip, windowsz, band_pairs,
                 #print('2', resname)
 
                 ######################3
-                if rev:
+                if rev and reverse:
                     # change order
                     effind_from = ind_lfp
                     effind_to   = ind_src
@@ -1324,7 +1333,7 @@ def computeCorr(raws, names, defnames, skip, windowsz, band_pairs,
                 args += [arg]
                 #print('3', resname)
 
-                if rev:
+                if rev and reverse:
                     newchn1 = '{}_{}'.format(bn_to,   names_from[effind_from] )
                     newchn2 = '{}_{}'.format(bn_from, names_to[effind_to] )
                     resname = '{}_{},{}'.format(oper,newchn1,newchn2)
@@ -1750,7 +1759,8 @@ def bandFilter(rawnames, times_pri, main_sides_pri, side_switched_pri,
 
                 dat_cur = dat_pri_cur_sfreq[rawind]
                 low,high = fbands[bandname]
-                r = utils.makeSimpleRaw(dat_cur, ch_names=None, sfreq=sfreq_cur)
+                r = utils.makeSimpleRaw(dat_cur, ch_names=None,
+                                        sfreq=sfreq_cur, rescale=False)
                 if bandname.find('HFO') < 0:
                     r.set_annotations(anns_MEGartif)
                     r.set_annotations(anns_LFPartif)

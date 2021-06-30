@@ -75,6 +75,8 @@ with open(pjoin(code_dir,'subj_info.json') ) as info_json:
 dir_fig_preproc = os.path.join(dir_fig,'preproc')
 
 
+hostname = socket.gethostname()
+
 CUDA_state = 'no'
 try:
     import GPUtil
@@ -83,12 +85,16 @@ try:
 
     try:
         import pycuda.driver as cuda_driver
-        cuda_driver.init()
-    except pycuda.driver.Error as e:
-        print(f'CUDA problem: {e}')
+        try:
+            cuda_driver.init()
+        except pycuda.driver.Error as e:
+            print(f'CUDA problem: {e}')
+    except AttributeError as e:
+        print(f'CUDA presence: {e}')
     CUDA_state = 'ok'
 except (ImportError,ValueError) as e:
-    print(e)
+    if not hostname.startswith('jsfc'):
+        print(e)
     GPUs_list = []
     CUDA_state = 'bad'
 
@@ -107,6 +113,11 @@ fband_names_HFO_all = fband_names_HFO_crude + fband_names_HFO_fine
 fband_names_crude_inc_HFO = fband_names_crude + fband_names_HFO_crude
 fband_names_fine_inc_HFO = fband_names_fine + fband_names_HFO_fine
 
+wband_feat_types = ['rbcorr', 'bpcorr', 'con' ]
+bichan_feat_types = ['rbcorr', 'bpcorr', 'con' ]
+bichan_bifreq_feat_types = ['rbcorr', 'bpcorr' ]
+bichan_bifreq_cross_feat_types = [ 'bpcorr' ]
+
 EMG_per_hand = {'right':['EMG061_old', 'EMG062_old'], 'left':['EMG063_old', 'EMG064_old' ] }
 EMG_per_hand_base = {'right':['EMG061', 'EMG062'], 'left':['EMG063', 'EMG064' ] }
 
@@ -118,6 +129,14 @@ rawnames_combine_types_rawdata = ['no', 'subj', 'medcond', 'task']
 
 data_coupling_types_all = ['self', 'LFP_vs_all', 'CB_vs_all', 'motorlike_vs_motorlike']
 
+import re
+common_regexs = {}
+# r is needed because by def python3 treats \w as escape for unicode
+common_regexs[ 'match_feat_beg_H'] = re.compile(r'^(H_[a-z]{1,5})_(\w+)')
+common_regexs[ 'match_feat_beg_notH'] = re.compile(r'^([a-zA-Z0-9]+)_')
+common_regexs[ 'match_band_ch_band_ch_beg'] = re.compile(r'^([a-zA-Z0-9]+)_(.+),([a-zA-Z0-9]+)_(.+)$')
+
+
 def paramFileRead(fname,recursive=True):
     print('--Log: reading paramFile {0}'.format(fname) )
 
@@ -127,7 +146,8 @@ def paramFileRead(fname,recursive=True):
     ini_fp = StringIO.StringIO(ini_str)
     preparams = ConfigParser.RawConfigParser(allow_no_value=True)
     preparams.optionxform = str
-    preparams.readfp(ini_fp)
+    preparams.read_file(ini_fp)
+    #preparams.readfp(ini_fp)
     #sect = paramsEnv_pre.sections()
     items= preparams.items('root')
     params = dict(items)

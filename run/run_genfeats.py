@@ -256,9 +256,15 @@ for opt,arg in pars.items():
     elif opt == "mods":
         data_modalities = arg.split(',')   #lfp of msrc
     elif opt == "feat_types":
-        features_to_use = arg.split(',')
-        for ftu in features_to_use:
+        features_to_use_pre = arg.split(',')
+        features_to_use = []
+        for ftu in features_to_use_pre:
             assert ftu in feat_types_all, ftu
+            if ftu == 'Hjorth':
+                features_to_use += ['H_mob', 'H_act', 'H_compl' ]
+            else:
+                features_to_use += [ftu]
+
     elif opt == "bands":
         bands_only = arg  #crude of fine
         assert bands_only in ['fine', 'crude']
@@ -1604,6 +1610,7 @@ if ('rbcorr' in features_to_use and not load_rbcorr) or ('bpcorr' in features_to
 
     smoothen_bandpow = 0
 
+    # band filter computed separately for different datasets
     raw_perband_flt_pri, raw_perband_bp_pri, chnames_perband_flt_pri, chnames_perband_bp_pri  = \
         ugf.bandFilter(rawnames, times_pri, main_sides_pri, side_switched_pri,
               sfreqs, skips, dat_pri_persfreq, fband_names_inc_HFO, gv.fband_names_HFO_all,
