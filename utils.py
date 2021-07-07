@@ -329,6 +329,7 @@ def genMEGsrcChnameShort(side,srcgroup_ind, ind, subind ):
 
 def parseMEGsrcChnameShort(chn):
     ''' <something>srcR_1_34_c54'''
+    # actually '_' is part of '\w' but apparenty it is not a problem
     r = re.match('[\w_,]*src([RL])_([0-9]+)_c([0-9]+)',chn)
     if r is not None:
         assert len(r.groups() ) == 3
@@ -874,7 +875,7 @@ def calcNoutMMM_specgram(Sxx, nbins=200, thr=0.01, takebin = 20, retBool = False
 #10-20, 20-30
 def prepFreqs(min_freq = 3, max_freq = 400, min_freqres=2,
               gamma_bound = 30, HFO_bound = 90, frmult_scale=2*np.pi / 5,
-              freqres = [1 , 2 ,4 ], frmults = [1, 1/2, 1/4] , sfreq=None ):
+              freqres = [1 , 2 ,4 ], frmults = [1, 1/2, 1/4] , sfreq=None, separate_beta=True ):
     # gamma_bound is just bound when we change freq res to a coarser one
     # by default we have differnt freq steps for different bands and also different
     # window sizes (rusulting from different ratios of n_cycles and freq)
@@ -885,13 +886,28 @@ def prepFreqs(min_freq = 3, max_freq = 400, min_freqres=2,
 
     assert max_freq > gamma_bound, 'we want {} > {} '.format(max_freq, gamma_bound)
     assert min_freq < gamma_bound, 'we want {} < {} '.format(min_freq, gamma_bound)
-    fbands = [ [min_freq,gamma_bound], [gamma_bound,HFO_bound], [HFO_bound,max_freq]  ]
+    if separate_beta:
+        b0,b1 = gv.fbands['beta']
+        assert gamma_bound >= b1
+        assert min_freq <= b0
+        # duplicate 1
+        freqres = freqres[0], freqres[1], freqres[1], freqres[2]
+        frmults = frmults[0], frmults[1], frmults[1], frmults[2]
+        fbands = [ [min_freq, b0], [b0,gamma_bound], [gamma_bound,HFO_bound], [HFO_bound,max_freq]  ]
+    else:
+        fbands = [ [min_freq,gamma_bound], [gamma_bound,HFO_bound], [HFO_bound,max_freq]  ]
+
     #freqres = np.array( [ 1, 2, 4  ] ) * min_freqres
     #frmults = frmult_scale * np.array( [pi5, pi5/2, pi5/4] )
     if max_freq <= HFO_bound:
-        fbands = fbands[:2]
-        freqres = freqres[:2]
-        frmults = frmults[:2]
+        cutoff = 2
+        if separate_beta:
+            cutoff = 3
+        fbands = fbands  [:cutoff]
+        freqres = freqres[:cutoff]
+        frmults = frmults[:cutoff]
+
+    print(frmults)
 
     freqs = []
     n_cycles  = []
@@ -942,8 +958,10 @@ def tfr(dat, sfreq, freqs, n_cycles, wsz, decim=1, n_jobs = None, mode ='valid')
     elif n_jobs == -1:
         n_jobs = mpr.cpu_count()
 
-    assert mode in ['valid','same']
+    assert mode in ['valid','same','untouched']
 
+    if dat.ndim == 1:
+        dat = dat[None,:]
     #dat has shape n_chans x ntimes // decim
     #returns n_chans x freqs x dat.shape[-1] // decim
     assert dat.ndim == 2
@@ -952,9 +970,10 @@ def tfr(dat, sfreq, freqs, n_cycles, wsz, decim=1, n_jobs = None, mode ='valid')
         raise ValueError('Integer sfreq is required')
     sfreq = int(sfreq)
 
-    if n_jobs is None:
-        if mne.utils.get_config('MNE_USE_CUDA'):
-            n_jobs = 'cuda'
+    #if n_jobs is None:
+    # this does not work with CUDA :(
+    #    if mne.utils.get_config('MNE_USE_CUDA') and gv.CUDA_state == 'ok':
+    #        n_jobs = 'cuda'
 
     dat_ = dat[None,:]
     #tfrres = mne.time_frequency.tfr_array_morlet(dat_, sfreq, freqs, n_cycles,
@@ -990,7 +1009,11 @@ def tfr(dat, sfreq, freqs, n_cycles, wsz, decim=1, n_jobs = None, mode ='valid')
     #endind = startind + len(data)
     #and then we decimate
 
-    #wsz =
+    # !!!!!!!! not that we have different relations between n_cycles
+    # and freqs for two sets of freqs. So windows sizes will be different.
+    # for lower freqs we have larger windows. But I'm ok for them being not
+    # exactly aligned with high freq windows -- anyway machine learning later
+    # will smear everything
     nbins_orig = dat.shape[-1]
     if mode == 'same':
         # in 'full' the first entries would be (index in convolution array + 1) = length of
@@ -1012,14 +1035,38 @@ def tfr(dat, sfreq, freqs, n_cycles, wsz, decim=1, n_jobs = None, mode ='valid')
         window_boundaries = np.vstack( [ window_boundaries_st, window_boundaries_end] )
     elif mode == 'valid':
         # first index of window that has all bins valid
+        #first_ind = (wsz // 2) // decim
+        #last_offset = (wsz // 2) // decim
+        #tfrres = tfrres[:,:,first_ind:-last_offset]
+        # window_boundaries_st =  np.arange(0,nbins_orig - wsz, decim ) # we start from zero if wsz divide 2 and decim well
+        # July 5:   actully first_ind = 0 and last_offset should be untouched as well
+        #first_ind = 0
+
         first_ind = (wsz // 2) // decim
         last_offset = (wsz // 2) // decim
         tfrres = tfrres[:,:,first_ind:-last_offset]
-        window_boundaries_st =  np.arange(0,nbins_orig - wsz, decim ) # we start from zero if wsz divide 2 and decim well
+
+        window_boundaries_st =  np.arange(0,nbins_orig, decim  ) # we start from zero if wsz divide 2 and decim well
         window_boundaries_end = window_boundaries_st + wsz
         window_boundaries = np.vstack( [ window_boundaries_st, window_boundaries_end] )
 
-    assert window_boundaries.shape[-1] == tfrres.shape[-1]
+        window_boundaries = window_boundaries[:, :tfrres.shape[-1]  ]
+
+        #end_cutoff = tfrres.shape[-1] - (wsz * 2) // decim + 1
+        #tfrres =
+        #window_boundaries
+
+        #print( last_offset, tfrres.shape )
+    elif mode == 'untouched':
+        # in fact it should be shited by one bin right, but perhaps I'll ignore it
+        window_boundaries_st =  np.arange(0,nbins_orig, decim  ) # we start from zero if wsz divide 2 and decim well
+        window_boundaries_end = window_boundaries_st + wsz
+        window_boundaries = np.vstack( [ window_boundaries_st, window_boundaries_end] )
+    else:
+        raise ValueError("Not implemented")
+
+    if mode != 'untouched':
+        assert window_boundaries.shape[-1] == tfrres.shape[-1], (window_boundaries.shape[-1], tfrres.shape[-1] )
 
     return tfrres, window_boundaries
 
@@ -3265,7 +3312,8 @@ def getWindowIndicesFromIntervals(wbd,ivalis,sfreq, ret_type='bins_list',
 
             if len(inds) == 0:
                 print('getWindowIndicesFromIntervals: EMPTY {}, start {}, end {}'.format(it_,s,e))
-                import pdb; pdb.set_trace()
+                raise ValueError(f's,e,it_={s,e,it_}')
+                #import pdb; pdb.set_trace()
                 empty = True
                 continue
             ws,we = inds[0],inds[-1]
@@ -3313,7 +3361,9 @@ def getWindowIndicesFromIntervals(wbd,ivalis,sfreq, ret_type='bins_list',
 
 def setArtifNaN(X, ivalis_artif_tb_indarrays_merged, feat_names, ignore_shape_warning=False):
     '''
+    ivalis -- dict, not necessarily containing only aritfacts
     copies input array
+    feat_names can be None
     '''
     if feat_names is None:
         mode_all_chans = True
@@ -3328,7 +3378,7 @@ def setArtifNaN(X, ivalis_artif_tb_indarrays_merged, feat_names, ignore_shape_wa
     assert isinstance(ivalis_artif_tb_indarrays_merged, dict)
     Xout = X.copy()
     for interval_name in ivalis_artif_tb_indarrays_merged:
-        templ = 'BAD_(.+)'
+        templ = '^BAD_(.+)'
         matchres = re.match(templ,interval_name).groups()
         assert matchres is not None and len(matchres) > 0
         artif_type = matchres[0]
@@ -3356,6 +3406,27 @@ def setArtifNaN(X, ivalis_artif_tb_indarrays_merged, feat_names, ignore_shape_wa
                 #print('fd')
 
     return Xout
+
+def imputeInterpArtif(X,anns_artif, featnames, wbd_merged=None, nbins_total=None, sfreq=256):
+    # X: nbins x nchans
+    if wbd_merged is None:
+        wbd_merged= np.vstack( [np.arange(X.shape[0]),np.arange(X.shape[0]) + 1 ] )
+        #print(wbd_merged.shape)
+    ivalis_artif = ann2ivalDict(anns_artif)
+    ivalis_artif_tb_indarrays_merged = \
+        getWindowIndicesFromIntervals(wbd_merged,ivalis_artif,
+                                    sfreq,ret_type='bins_contig',
+                                    ret_indices_type = 'window_inds',
+                                        nbins_total=nbins_total )
+
+    X_artif_nan  = setArtifNaN(X, ivalis_artif_tb_indarrays_merged, featnames,
+                                       ignore_shape_warning=False)
+
+    import pandas as pd
+    df = pd.DataFrame(X_artif_nan)
+    df = df.interpolate(axis=0)
+    return df.to_numpy()
+    #return df
 
 def indHoleToNoHole(binind, dataset_bounds_uncut_bins, nedge_bins):
     '''
@@ -3397,7 +3468,8 @@ def makeRawFromFeats(X, feat_names, skip, sfreq=256, namelen = 15):
     r = mne.io.RawArray(X.T,info)
     return r, feat_types_cooresp_dict
 
-def makeSimpleRaw(dat,ch_names=None,sfreq=256,rescale=True,l=10,force_trunc_renum=False, verbose=False):
+def makeSimpleRaw(dat,ch_names=None,sfreq=256,rescale=True,l=10,
+                  force_trunc_renum=False, verbose=False, copy=False):
     # does rescaling to one
     assert dat.ndim == 2
     if ch_names is None:
@@ -3408,6 +3480,9 @@ def makeSimpleRaw(dat,ch_names=None,sfreq=256,rescale=True,l=10,force_trunc_renu
             ch_names[chni] = ch_names[chni][:l] + '_{}'.format(chni)
 
     info_ = mne.create_info( ch_names=ch_names, ch_types= ['csd']*len(ch_names), sfreq=sfreq)
+
+    if copy:
+        dat = dat.copy()
 
     if rescale:
         me = np.mean(dat, axis=1)

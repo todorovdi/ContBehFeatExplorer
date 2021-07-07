@@ -326,7 +326,8 @@ def collectDataFromMultiRaws(rawnames, raws_permod_both_sides, sources_type,
     return dat_pri, dat_lfp_hires_pri, extdat_pri, anns_pri, times_pri,\
     times_hires_pri, subfeature_order_pri, subfeature_order_lfp_hires_pri, aux_info_per_raw
 
-# found on stackoverflow by someone called NaN
+# found on stackoverflow by someone called NaN. Some black magic I don't quite
+# understand
 def stride(a, win=(3, 3), stepby=(1, 1)):
     """Provide a 2D sliding/moving view of an array.
     There is no edge correction for outputs. Use the `pad_` function first."""
@@ -352,6 +353,10 @@ def stride(a, win=(3, 3), stepby=(1, 1)):
     newshape = tuple(((shp - win_shp) // ss) + 1) + tuple(win_shp)
     newstrides = tuple(np.array(a.strides) * ss) + a.strides
     a_s = as_strided(a, shape=newshape, strides=newstrides, subok=True).squeeze()
+
+    if len(win) == 2 and win[0] == 1 and len(stepby) == 2 and stepby[0] == 1:
+        if a.ndim == 2 and a_s.ndim == 2:
+            a_s = a_s[:,None]
     return a_s
 
 def H_difactmob(dat,dt, windowsz = None, dif = None, skip=None, stride_ver = True):
@@ -360,6 +365,7 @@ def H_difactmob(dat,dt, windowsz = None, dif = None, skip=None, stride_ver = Tru
     if dif is None:
         dif = np.diff(dat,axis=-1, prepend=dat[:,0][:,None] ) / dt
     if windowsz is None:
+        print('AA')
         activity = np.var(dat, axis=-1)
         vardif = np.var(dif, axis=-1)
     else:
@@ -371,10 +377,19 @@ def H_difactmob(dat,dt, windowsz = None, dif = None, skip=None, stride_ver = Tru
                 stride_view_dat = stride(dat, win=win, stepby=step )
                 activity = np.var(stride_view_dat,axis=-1, ddof=1)  #ddof=1 to agree with pandas version
 
+                # there is some bug in stride function for shape=(1,N) array that I correct this way
+                if activity.ndim == 1:
+                    assert dat.shape[0] == 1
+                    activity = activity[None,:]
+
                 #print(dat.shape, activity.shape, win, step)
 
                 stride_view_dif = stride(dif, win=win, stepby=step )
                 vardif = np.var(stride_view_dif,axis=-1, ddof=1)
+
+                if vardif.ndim == 1:
+                    assert dat.shape[0] == 1
+                    vardif = vardif[None,:]
             else:
                 activity = []
                 vardif = []
@@ -388,11 +403,46 @@ def H_difactmob(dat,dt, windowsz = None, dif = None, skip=None, stride_ver = Tru
         else:
             raise ValueError('wrong ndim, shape = {}'.format(dat.shape) )
 
-    bad_act = np.abs(activity) < 1e-10
-    activity_bettered = activity[:]
-    activity_bettered[bad_act] = 1e-10
+    #import pdb;pdb.set_trace()
+
+    #  we don't want to have activity equal exactly to zero because we will
+    #  divide next. This way if vardif == 0, then we get 0 as asnwer still
+    eps = 1e-14
+    bad_act = np.abs(activity) < eps
+    activity_bettered = activity.copy()
+    activity_bettered[bad_act] = eps
+
+    bad_vardif = np.abs(vardif) < eps
+
+    # DEBUG
+    #c0 = np.max( activity_bettered[0]  ) / np.max(vardif[0])
+    #plt.figure(figsize=(15,4) ); plt.plot(vardif[0], label='vardif'); plt.legend()
+    #plt.plot(activity[0] / c0 , label='activity', ls='--'); plt.legend()
+    #plt.vlines( np.where(bad_act[0] )[0],    0,100, label=  'bad_act', color='purple' ); plt.legend()
+    #plt.vlines( np.where(bad_vardif[0] )[0],-10,0,  label='bad_vardif', color='red' ); plt.legend()
+    #print('np.sum(bad_vardif) = ',np.sum(bad_vardif) )
+    #print('np.sum(bad_act) = ',np.sum(bad_act) )
+
+    #print(activity[0])
+    #print(bad_act[0])
+
     mobility = np.sqrt( vardif / activity_bettered )
-    mobility[bad_act] = 0
+    #plt.figure(figsize=(15,4) ); plt.plot(mobility[0], label='mobility_pre', ls=':'); plt.legend()
+
+    #bad_act_and_vardif = bad_act & ( np.abs(vardif) < 1e-10 )
+    #mobility[bad_act_and_vardif ] = 0
+    mobility[bad_vardif ] = 0
+    mobility[bad_act ] = 0  # "political" decision!
+
+    #c = np.max( activity_bettered[0]  ) / np.max(mobility[0])
+    #plt.figure(figsize=(15,4) ); plt.plot(mobility[0], label='mobility'); plt.legend()
+    #plt.plot(activity_bettered[0] / c , label='activity_bettered', ls='--'); plt.legend()
+
+    # we need to do something when vardif is nonzero and activity is zero (it
+    # does happen e.g. when there is a step happening) -- I don't want to get
+    # huge mobility because I replace eps. Mobility is not very well defined
+    # but maybe I can just postulate it to be zero
+
     if (skip is not None) and not stride_ver:
         #dif       = dif[:,::skip]  # DON'T touch it!!
         activity  = activity[:,::skip]
@@ -400,11 +450,13 @@ def H_difactmob(dat,dt, windowsz = None, dif = None, skip=None, stride_ver = Tru
 
     return dif,activity, mobility
 
-def Hjorth(dat, dt, windowsz = None, skip=None,stride_ver=True, remove_invalid = False):
+def Hjorth(dat, dt=1., windowsz = 1, skip=1,stride_ver=True, remove_invalid = False, pad=True):
+    # first dim is channel number, second is time
     if isinstance(dat,list):
         acts, mobs, compls, wbds = [],[],[], []
         for subdat in dat:
-            a,m,c,wbd = Hjorth(subdat,dt,windowsz,skip,stride_ver, remove_invalid=remove_invalid)
+            a,m,c,wbd = Hjorth(subdat,dt,windowsz,skip,stride_ver=stride_ver,
+                               remove_invalid=remove_invalid)
             acts += [a]
             mobs += [m]
             compls += [c]
@@ -419,31 +471,60 @@ def Hjorth(dat, dt, windowsz = None, skip=None,stride_ver=True, remove_invalid =
     #print(dat.shape)
 
     ndb = dat.shape[-1]
-    padlen = windowsz-skip
-    #if  int(ndb / windowsz) * windowsz - ndb == 0:  # dirty hack to agree with pandas version
-    #    padlen += 1
+    if pad:
+        padlen = windowsz-skip
+        #if  int(ndb / windowsz) * windowsz - ndb == 0:  # dirty hack to agree with pandas version
+        #    padlen += 1
 
-    if stride_ver:
-        #print('Using Hjorth stride ver for dat type {}'.format( type(dat) ) )
-        assert dat.ndim == 2, dat.shape
-        dat = np.pad(dat, [(0,0), (padlen,0) ], mode='edge' )
+        if stride_ver:
+            #print('Using Hjorth stride ver for dat type {}'.format( type(dat) ) )
+            assert dat.ndim == 2, dat.shape
+            dat = np.pad(dat, [(0,0), (padlen,0) ], mode='edge' )
+        else:
+            raise ValueError('lost validity')
     else:
-        raise ValueError('lost validity')
+        padlen = 0
+
     dif = np.diff(dat,axis=-1, prepend=dat[:,0][:,None] ) / dt
     dif2 = np.diff(dif,axis=-1, prepend=dif[:,0][:,None] ) / dt
 
-    dif, activity, mobility = H_difactmob(dat,dt, windowsz=windowsz, dif=dif, skip=skip, stride_ver=stride_ver)
-    import gc;gc.collect()
-    dif2, act2, mob2 = H_difactmob(dif,dt, windowsz=windowsz, dif=dif2, skip=skip, stride_ver=stride_ver)
-    del dif
-    del dif2
-    del act2
 
-    bad_mob = np.abs(mobility) < 1e-10
-    mobility_bettered = mobility[:]
-    mobility_bettered[bad_mob] = 1e-10
+
+    dif, activity, mobility = H_difactmob(dat,dt, windowsz=windowsz,
+        dif=dif, skip=skip, stride_ver=stride_ver)
+    import gc;gc.collect()
+    dif2, act2, mob2 = H_difactmob(dif,dt, windowsz=windowsz,
+        dif=dif2, skip=skip, stride_ver=stride_ver)
+
+    #plt.figure(); plt.plot(dif.T, label='dif'); plt.legend()
+    #plt.figure(); plt.plot(dif2.T, label='dif2'); plt.legend()
+
+    #plt.figure(); plt.plot(activity.T, label='activity'); plt.legend()
+    #plt.figure(); plt.plot(mobility.T, label='mobility'); plt.legend()
+
+    #del dif
+    #del dif2
+    #del act2
+
+
+    eps = 1e-14
+    bad_mob = np.abs(mobility) < eps
+    mobility_bettered = mobility.copy()
+    mobility_bettered[bad_mob] = eps
     complexity = mob2 / mobility_bettered
-    complexity[bad_mob] = 0
+    complexity[ np.abs(mob2) < eps ] = 0
+    # political decision, otherwise compleixty becomes huge at the step moment
+    complexity[ bad_mob ] = 0
+
+    #plt.figure()
+    #plt.plot(mobility[0], label='mobility')
+    #plt.plot(mobility_bettered[0], label='mobility_bettered')
+    #plt.plot(mob2[0], label='mob2')
+    #plt.plot(complexity[0], label='complexity')
+    #print(complexity[0] )
+    ##plt.ylim(0,250)
+    #plt.legend()
+
     #complexity = mob2 / mobility
 
     n = windowsz // skip
@@ -503,6 +584,8 @@ def selectIndPairs(chnames_nice, chnames_short ,include_pairs,upper_diag=True,in
     include_pairs -- pairs of regex
     chnames_nice -- msrc_<roi_label>_c<component ind>
     inc_same -- whether we include self couplings (only makes sense if upper_diag is True)
+    I need chnames_nice because I will use them to select AAL parcels using reg expressions
+    I also need short names because I will parse them. Of course they need to match
 
     returns
     ind_pairs -- list of lists of channel indices coupled to a given channel ind
@@ -592,6 +675,7 @@ def selectIndPairs(chnames_nice, chnames_short ,include_pairs,upper_diag=True,in
                         if pair not in parcel_couplings:
                             parcel_couplings[pair] = []
                         #parcel_couplings[pair] += [ (i,ind_of_ind) ]
+                        # here i and j are indices in chnames_nice
                         parcel_couplings[pair] += [ (i,j) ]
 
                         if parcel_ind1 not in ind_pairs_parcelis:
@@ -725,8 +809,8 @@ def tfr2csd(dat, sfreq, returnOrder = False, skip_same = [], ind_pairs = None,
                 firstarg = []
                 secarg = []
                 chn1,chn2 = None,None
-                r = np.zeros( (1, dat.shape[1], dat.shape[2] ), dtype=np.complex )
-                rimabs = np.zeros( (1, dat.shape[1], dat.shape[2] ), dtype=np.complex )
+                r = np.zeros( (1, dat.shape[1], dat.shape[2] ), dtype=complex )
+                rimabs = np.zeros( (1, dat.shape[1], dat.shape[2] ), dtype=complex )
 
                 if fast_ver:
                     # which sources belong to the parcel with given index
@@ -758,8 +842,8 @@ def tfr2csd(dat, sfreq, returnOrder = False, skip_same = [], ind_pairs = None,
                     #ip_to =   [ ip[1] for ip in ind_pairs ]
 
                     #print('starting parcel pair ',pc)
-                    r = np.zeros( (1, dat.shape[1], dat.shape[2] ), dtype=np.complex )
-                    rimabs = np.zeros( (1, dat.shape[1], dat.shape[2] ), dtype=np.complex )
+                    r = np.zeros( (1, dat.shape[1], dat.shape[2] ), dtype=complex )
+                    rimabs = np.zeros( (1, dat.shape[1], dat.shape[2] ), dtype=complex )
 
                     #for ifrom from ip_from:
                     #    rtmp = np.conj ( dat[[ifrom]] ) *  ( dat[ip_to] )  # upper diagonal elements only, same freq cross-channels
@@ -847,8 +931,8 @@ def tfr2csd(dat, sfreq, returnOrder = False, skip_same = [], ind_pairs = None,
                 secarg = []
                 chn2 = None
 
-                r = np.zeros( (1, dat.shape[1], dat.shape[2] ), dtype=np.complex )
-                #rimabs = np.zeros( (1, dat.shape[1], dat.shape[2] ), dtype=np.complex )
+                r = np.zeros( (1, dat.shape[1], dat.shape[2] ), dtype=complex )
+                #rimabs = np.zeros( (1, dat.shape[1], dat.shape[2] ), dtype=complex )
 
                 if fast_ver:
                     chi = np.where(oldchns == chn1)[0][0]
@@ -924,9 +1008,10 @@ def tfr2csd(dat, sfreq, returnOrder = False, skip_same = [], ind_pairs = None,
                 secarg = []
 
                 ninds_counted = 0
-                r = np.zeros( (1, dat.shape[1], dat.shape[2] ), dtype=np.complex )
+                r = np.zeros( (1, dat.shape[1], dat.shape[2] ), dtype=complex )
                 for (i,j) in ind_pairs:
                     rtmp = np.conj ( dat[[i]] ) *  ( dat[[j]] )    # upper diagonal elements only, same freq cross-channels
+                    #print(rtmp)
 
                     if normalize:
                         norm = np.abs(rtmp)
@@ -977,8 +1062,23 @@ def tfr2csd(dat, sfreq, returnOrder = False, skip_same = [], ind_pairs = None,
 
 
 def _feat_correl3(arg):
-    resname,bn_from,bn_to,pc,fromi,toi,windowsz,skip,dfrom,dto,mfrom,mto,oper,pos,local_means = arg
-    #print(arg)
+    resname,bn_from,bn_to,pc,fromi,toi,dfrom,dto,mfrom,mto, \
+        windowsz,skip,oper,pos,local_means,pad,verbose = arg
+    # fromi and toi --
+    if verbose == 2:
+        print('    _feat_correl3 debug output')
+        for varn,var in locals().items():
+            if varn not in ['dfrom', 'dto', 'arg','varn','var']:
+                print(varn, '=',var)
+        print('  end print arg')
+    elif verbose == 3:
+        print('    _feat_correl3 debug output')
+        for varn,var in locals().items():
+            if varn not in [ 'arg','varn','var']:
+                print(varn, '=',var)
+        print('  end print arg')
+    #if verbose >= 3:
+    #    print(arg)
 
     q = 0.05
     if mfrom is None:
@@ -997,13 +1097,26 @@ def _feat_correl3(arg):
     assert dfrom.size == dto.size, (dfrom.shape, dto.shape, bn_from,bn_to,fromi,toi,resname)
     assert dfrom.ndim == 1
 
-    # to agree with Hjorth
-    ndb = len(dfrom)
-    padlen = windowsz-skip
-    #if  int(ndb / windowsz) * windowsz - ndb == 0:  # dirty hack to agree with pandas version
-    #    padlen += 1
-    dfrom = np.pad(dfrom, [(0), (padlen) ], mode='edge' )
-    dto = np.pad(dto, [(0), (padlen) ], mode='edge' )
+    #print(mfrom,mto)
+
+    #if gv.DEBUG_MODE:
+    #    print(f'padding = {pad}')
+    if pad == 'pre_left':
+        # to agree with Hjorth
+        ndb = len(dfrom)
+        padlen = windowsz-skip
+        #if  int(ndb / windowsz) * windowsz - ndb == 0:  # dirty hack to agree with pandas version
+        #    padlen += 1
+        # padding after right edge
+        dfrom = np.pad(dfrom, [(0), (padlen) ], mode='edge' )
+        dto   = np.pad(dto, [(0), (padlen) ], mode='edge' )
+    elif pad == 'pre_right':
+        ndb = len(dfrom)
+        padlen = windowsz-skip
+        dfrom = np.pad(dfrom, [ (padlen), (0) ], mode='edge' )
+        dto   = np.pad(dto, [ (padlen), (0) ], mode='edge' )
+    elif pad not in ['no','post_right','post_left']:
+        raise ValueError(f'wrong pad value {pad}')
 
     win = (windowsz,)
     step = (skip,)
@@ -1018,15 +1131,46 @@ def _feat_correl3(arg):
             mto_cur = mto
         rr = np.mean( (stride_view_dfrom - mfrom_cur ) * (stride_view_dto - mto_cur ) , axis=-1)
     elif oper == 'div':
+        assert pos, "One cannot divide if one may have zeros in the denominator!"
         rr = stride_view_dfrom / stride_view_dto
     else:
         raise ValueError('wrong oper {}'.format(oper) )
     #import ipdb; ipdb.set_trace()
 
+    #if gv.DEBUG_MODE:
+    #    plt.figure()
+    #    plt.plot( dfrom, label ='from', ls='--' )
+    #    plt.plot( dto, label='to', ls = ':')
+    #    plt.plot( np.arange(len(dfrom) )[::skip][:len(rr) ] , rr, label=f'{bn_from} -- {bn_to}')
+    #    plt.title(resname)
+    #    plt.legend()
+
+    if verbose >= 3:
+        print('rr = ',rr)
     # removing invalid due to padding
     #rr = rr[0:-windowsz//skip]
-    sl = slice(windowsz//skip - 1,None,None)
-    rr = rr[sl]
+
+    if pad == 'pre_left':
+        sl = slice(None, - windowsz//skip + 1,None)
+        if verbose >= 2:
+            print(f'slice(windowsz//skip - 1,None,None) = {sl} ')
+        rr = rr[sl]
+    elif pad == 'pre_right':
+        sl = slice(windowsz//skip - 1,None,None)
+        if verbose >= 2:
+            print(f'slice(windowsz//skip - 1,None,None) = {sl} ')
+        rr = rr[sl]
+
+    #if pad == 'pre_left':
+    #    sl = slice(windowsz//skip - 1,None,None)
+    #    if verbose >= 2:
+    #        print(f'slice(windowsz//skip - 1,None,None) = {sl} ')
+    #    rr = rr[sl]
+    #elif pad == 'pre_right':
+    #    sl = slice(None, - windowsz//skip + 1,None)
+    #    if verbose >= 2:
+    #        print(f'slice(windowsz//skip - 1,None,None) = {sl} ')
+    #    rr = rr[sl]
 
     #ndb = len(dfrom)
     #padlen = windowsz-skip
@@ -1038,7 +1182,6 @@ def _feat_correl3(arg):
     del dfrom
     del dto
 
-    wbd = None  # to save memory
     #pred = np.arange(ndb + padlen)
     #wnds = stride(pred, (windowsz,), (skip,) )
     #wbd = np.vstack( [ wnds[:,0], wnds[:,-1] + 1 ] )
@@ -1049,18 +1192,24 @@ def _feat_correl3(arg):
     #wbd = np.vstack( [ window_boundaries_st, window_boundaries_end] )
     #print(dfrom.shape, stride_view_dto.shape)
 
-    return rr,resname,bn_from,bn_to,pc,fromi,toi,wbd,oper,pos
+    # actually returned fromi and toi are not used later
+    # only the bn_From
+    return rr,resname,bn_from,bn_to,pc,fromi,toi,oper,pos
 
 def computeCorr(raws, names, defnames, skip, windowsz, band_pairs,
                     parcel_couplings, LFP2parcel_couplings, LFP2LFP_couplings,
                     res_group_id = 9, n_jobs=None, positive=1, templ = None,
                     roi_labels = None, sort_keys=None, printLog=False, means=None,
-                    local_means=False, reverse=True):
+                    local_means=False, reverse=True, verbose=0,
+                pad='pre_left'):
     '''
     dat is chans x timebins
     positive -- wheather inputs are postive
     windowz is in bins of Xtimes_full
+    defnames -- only used to get LFP indices
     returns lists
+    names: dict of lists of strings with (short) channel names.
+        Before we assumed that ordering and indexing of channels is the same in all names
     '''
     #e.g  bandPairs = [('tremor','beta'), ('tremor','gamma'), ('beta','gamma') ]
     # compute Pearson corr coef between different band powers all chan-chan
@@ -1091,14 +1240,17 @@ def computeCorr(raws, names, defnames, skip, windowsz, band_pairs,
         names_from = names[bn_from]
         names_to   = names[bn_to]
 
+        # effind -- used to take raws,means and names
+
         if bn_from.find('HFO') < 0 and bn_to.find('HFO') < 0:
             for pc in parcel_couplings:
                 (pi1,pi2) = pc
                 ind_pairs = parcel_couplings[pc]  # ind_pairs won't work because it is indices not in band array
                 for (i,j) in ind_pairs:
                     rev = (pi1 != pi2) and (bn_from != bn_to)
-                    effind_from = i
-                    effind_to   = j
+                    # indices in defnames
+                    effind_from = names_from.index( defnames[i] )
+                    effind_to   = names_to.index( defnames[j] )
 
                     dfrom = raws[bn_from][effind_from][0][0] # band from -> i
                     dto   = raws[bn_to][effind_to][0][0]     # band to   -> j
@@ -1122,8 +1274,8 @@ def computeCorr(raws, names, defnames, skip, windowsz, band_pairs,
                         m2 = means[bn_to][effind_to]
                     else:
                         m1,m2=None,None
-                    arg = resname,bn_from,bn_to,pc,effind_from,effind_to,\
-                        windowsz,skip,dfrom,dto,m1,m2,oper,positive,locm
+                    arg = resname,bn_from,bn_to,pc,i,j,\
+                        dfrom,dto,m1,m2
                     args += [arg]
                     #print('1', resname)
 
@@ -1133,8 +1285,8 @@ def computeCorr(raws, names, defnames, skip, windowsz, band_pairs,
                     if rev and reverse: # reversal of bands, not indices (they are symmetric except when division)
                         # change bands. So I need same channels (names and
                         # data) but with exchanged bands
-                        effind_from = j
-                        effind_to   = i
+                        effind_from = names_from.index( defnames[j] )
+                        effind_to   = names_to.index( defnames[i] )
 
                         dfrom = raws[bn_to][effind_to][0][0]      # band to   -> i
                         dto   = raws[bn_from][effind_from][0][0]  # band from -> j
@@ -1160,8 +1312,8 @@ def computeCorr(raws, names, defnames, skip, windowsz, band_pairs,
                             m2 = means[bn_from][effind_from]
                         else:
                             m1,m2=None,None
-                        arg = resname,bn_to,bn_from,pc,effind_from,effind_to,\
-                            windowsz,skip,dfrom,dto,m1,m2,oper,positive,locm
+                        arg = resname,bn_to,bn_from,pc,i,j,\
+                            dfrom,dto,m1,m2
                         args += [arg]
                         #print('1rev', resname)
 
@@ -1179,12 +1331,14 @@ def computeCorr(raws, names, defnames, skip, windowsz, band_pairs,
                 rev = False
                 ind_lfp = i
                 ind_src = j
+                assert defnames[ind_lfp].startswith('LFP')
+                assert defnames[ind_src].startswith('msrc')
                 # I cannot reverse then
                 # i -- always LFP, j -- alwyas src
                 if bn_from.find('HFO') >= 0:
                     # effind_from index we'll use to access raws[bn_from]
                     effind_from = names_from.index( defnames[ind_lfp] )
-                    effind_to   = ind_src
+                    effind_to   = names_to.index( defnames[ind_src] )
 
                     chn_src = names_to[ind_src]
                     side1, gi1, parcel_ind1, si1  = utils.parseMEGsrcChnameShort(chn_src)
@@ -1194,7 +1348,8 @@ def computeCorr(raws, names, defnames, skip, windowsz, band_pairs,
                     newchn2 = '{}_{}'.format(bn_from, chn )
                 # I cannot reverse then
                 elif bn_to.find('HFO') >= 0:
-                    effind_from = ind_src
+                    # adds in wrong order but bothe will be there ultimately
+                    effind_from = names_from.index( defnames[ind_src] )
                     effind_to   = names_to.index( defnames[ind_lfp] )
 
                     chn_src = names_from[ind_src]
@@ -1204,8 +1359,8 @@ def computeCorr(raws, names, defnames, skip, windowsz, band_pairs,
                     chn = names_to[effind_to]
                     newchn2 = '{}_{}'.format(bn_to, chn )
                 elif bn_to.find('HFO') < 0 and  bn_to.find('HFO') < 0 :
-                    effind_from = ind_src
-                    effind_to   = ind_lfp
+                    effind_from = names_from.index( defnames[ind_src] )
+                    effind_to   = names_to.index( defnames[ind_lfp] )
 
                     chn_src = names_from[effind_from]
                     side1, gi1, parcel_ind1, si1  = utils.parseMEGsrcChnameShort(chn_src)
@@ -1238,15 +1393,15 @@ def computeCorr(raws, names, defnames, skip, windowsz, band_pairs,
                 else:
                     m1,m2=None,None
                 arg = resname,bn_from,bn_to,pc,effind_from,effind_to,\
-                    windowsz,skip,dfrom,dto,m1,m2,oper,positive,locm
+                    dfrom,dto,m1,m2
                 args += [arg]
                 #print('2', resname)
 
                 ######################3
                 if rev and reverse:
                     # change order
-                    effind_from = ind_lfp
-                    effind_to   = ind_src
+                    effind_from = names_from.index( defnames[ind_lfp] )
+                    effind_to   = names_to.index( defnames[ind_src] )
 
                     chn_src = names_to[effind_to]
                     side1, gi1, parcel_ind1, si1  = utils.parseMEGsrcChnameShort(chn_src)
@@ -1281,7 +1436,7 @@ def computeCorr(raws, names, defnames, skip, windowsz, band_pairs,
                     else:
                         m1,m2=None
                     arg = resname,bn_to,bn_from,pc,effind_from,effind_to,\
-                        windowsz,skip,d1,d2,m1,m2,oper,positive,locm
+                        d1,d2,m1,m2
                     args += [arg]
                     #print('2rev', resname)
 
@@ -1295,14 +1450,14 @@ def computeCorr(raws, names, defnames, skip, windowsz, band_pairs,
                 # I cannot reverse then
                 if bn_from.find('HFO') >= 0:
                     effind_from = names_from.index( defnames[i] )
-                    effind_to   = j
+                    effind_to   = names_to.index( defnames[j] )
                 # I cannot reverse then
                 elif bn_to.find('HFO') >= 0:
-                    effind_from = i
+                    effind_from = names_from.index( defnames[i] )
                     effind_to   = names_to.index( defnames[j] )
                 elif bn_to.find('HFO') < 0 and  bn_to.find('HFO') < 0 :
-                    effind_from = i
-                    effind_to   = j
+                    effind_from = names_from.index( defnames[i] )
+                    effind_to   = names_to.index( defnames[j] )
                 elif bn_to.find('HFO') >= 0 and bn_to.find('HFO') >= 0:
                     effind_from = names_from.index( defnames[i] )
                     effind_to   = names_to.index( defnames[j] )
@@ -1329,7 +1484,7 @@ def computeCorr(raws, names, defnames, skip, windowsz, band_pairs,
                 else:
                     m1,m2=None,None
                 arg = resname,bn_from,bn_to,pc,effind_from,effind_to,\
-                    windowsz,skip,dfrom,dto,m1,m2,oper,positive,locm
+                    dfrom,dto,m1,m2
                 args += [arg]
                 #print('3', resname)
 
@@ -1353,7 +1508,7 @@ def computeCorr(raws, names, defnames, skip, windowsz, band_pairs,
                     #name = '{}_{},{}'.format(oper,nfrom,nto)
                     # we won't have final name before averaging
                     arg = resname,bn_to,bn_from,pc,effind_from,effind_to,\
-                        windowsz,skip,d1,d2,m1,m2,oper,positive,locm
+                        d1,d2,m1,m2
                     args += [arg]
                     #print('3rev', resname)
 
@@ -1369,6 +1524,9 @@ def computeCorr(raws, names, defnames, skip, windowsz, band_pairs,
         ncores = mpr.cpu_count()
     else:
         ncores = n_jobs
+
+    common_arg_part = (windowsz,skip,oper,positive,local_means,pad,verbose)
+    args = [ (*arg,*common_arg_part) for arg in args ]
     if ncores > 1:
         #if ncores > 1:
         print('high ord feats:  Sending {} tasks to {} cores'.format(len(args), ncores))
@@ -1377,7 +1535,7 @@ def computeCorr(raws, names, defnames, skip, windowsz, band_pairs,
         #pool.close()
         #pool.join()
 
-        res = Parallel(n_jobs=n_jobs)(delayed(_feat_correl3)(arg) for arg in args)
+        res = Parallel(n_jobs=n_jobs)(delayed(_feat_correl3)( arg  ) for arg in args)
     else:
         res = []
         for arg in args:
@@ -1387,7 +1545,7 @@ def computeCorr(raws, names, defnames, skip, windowsz, band_pairs,
     dct_nums = {}
     # wbd is same for all
     for r in res:
-        rr,resname,bn_from,bn_to,pc,fromi,toi,wbd,oper,pos  = r
+        rr,resname,bn_from,bn_to,pc,fromi,toi,oper,pos  = r
         # make averages
 
         #nfrom = pc[0]
@@ -1426,7 +1584,10 @@ def computeCorr(raws, names, defnames, skip, windowsz, band_pairs,
     wbd = wbd[:,sl] - padlen
 
     #print( dct_nums )
-    #print(resname_min_num, num)
+    if verbose > 0:
+        print('resname_min_num = ',resname_min_num, num)
+    if verbose >= 2:
+        print( f'dct_nums = {dct_nums}' )
 
     return cors,cor_names, dct_nums, wbd
 
@@ -1564,6 +1725,12 @@ def bandAverage(freqs,freqs_inc_HFO,csd_pri,csdord_pri,csdord_LFP_HFO_pri,
                 vals_to_aver = np.log(vals_to_aver)
             bandpow = np.mean(vals_to_aver   , axis=1 )
 
+            #print(low,high,freqis)
+            #plt.plot(csdcur[0][0], label=f'{bandname}')
+
+            #plt.plot(bandpow[0], label=f'{bandname}')
+            #plt.legend()
+
             # put into resulting list
             bpow_abscsd_curband += [bandpow[:,None,:]]
 
@@ -1692,7 +1859,9 @@ def bandAverage(freqs,freqs_inc_HFO,csd_pri,csdord_pri,csdord_LFP_HFO_pri,
 def bandFilter(rawnames, times_pri, main_sides_pri, side_switched_pri,
                sfreqs, skips, dat_pri_persfreq, fband_names_inc_HFO, fband_names_HFO_all,
                fbands, n_jobs_flt, allow_CUDA, subfeature_order, subfeature_order_lfp_hires,
-               smoothen_bandpow = 0, ann_MEGartif_prefix_to_use="_ann_MEGartif_flt"):
+               smoothen_bandpow = 0, ann_MEGartif_prefix_to_use="_ann_MEGartif_flt",
+               artif_handling = 'reject', anns_MEGartif=None, artif_LFPartif=None,
+              filter_phase='minimum' ):
     import utils_tSNE as utsne
     sfreq = sfreqs[0]
     raw_perband_flt_pri      = [0] * len(rawnames)
@@ -1702,8 +1871,16 @@ def bandFilter(rawnames, times_pri, main_sides_pri, side_switched_pri,
     means_perband_flt_pri    = [dict()] * len(rawnames)
     means_perband_bp_pri     = [dict()] * len(rawnames)
 
+    filter_length_dict = {'tremor':'2s'}
+    # maybe if I use sfreq >> 256 and care about really fast things I might
+    # reconsider values here
+    for fb in gv.fbands:
+        if fb == 'tremor':
+            continue
+        filter_length_dict[fb] = '1s'
+
     n_jobs_maybe_cuda = n_jobs_flt
-    if allow_CUDA:
+    if allow_CUDA and gv.CUDA_state == 'ok':
         n_jobs_maybe_cuda = 'cuda'
 
     for rawind in range(len(rawnames)):
@@ -1723,14 +1900,27 @@ def bandFilter(rawnames, times_pri, main_sides_pri, side_switched_pri,
         #anns_LFPartif = mne.read_annotations(fname_full_LFPartif)
         #anns_MEGartif = mne.read_annotations(fname_full_MEGartif)
 
+        main_side_before_change = main_sides_pri[rawind]  # side of body
+        opsidelet = utils.getOppositeSideStr(main_side_before_change[0].upper() ) # side of brain
+        wrong_brain_sidelet = main_side_before_change[0].upper()
 
-        anns_MEGartif, _, _, _ = \
-            utsne.concatAnns([rn],[times_pri[rawind] ],[ann_MEGartif_prefix_to_use],
-                                side_rev_pri=[side_switched_pri[rawind] ] )
 
-        anns_LFPartif, _, _, _ = \
-            utsne.concatAnns([rn],[times_pri[rawind] ],['_ann_LFPartif'],
-                                side_rev_pri=[side_switched_pri[rawind] ]  )
+        if artif_handling == 'reject':
+            anns_MEGartif, _, _, _ = \
+                utsne.concatAnns([rn],[times_pri[rawind] ],[ann_MEGartif_prefix_to_use],
+                                    side_rev_pri=[side_switched_pri[rawind] ] )
+
+            anns_LFPartif, _, _, _ = \
+                utsne.concatAnns([rn],[times_pri[rawind] ],['_ann_LFPartif'],
+                                    side_rev_pri=[side_switched_pri[rawind] ]  )
+            #print(anns_MEGartif.onset)
+            #print(anns_LFPartif.onset)
+            anns_LFPartif = utils.removeAnnsByDescr(anns_LFPartif, ['artif_LFP{}'.format(wrong_brain_sidelet) ])
+            #print(anns_LFPartif.onset)
+        elif artif_handling == 'ignore':
+            anns_MEGartif= mne.Annotations([],[],[])
+            anns_LFPartif= mne.Annotations([],[],[])
+
         #anns_artif, anns_artif_pri, times2, dataset_bounds_ = \
         #    utsne.concatAnns(rawnames[rawind],times_pri[rawind], artif_mod_str,crop=(crop_start,crop_end),
         #                allow_short_intervals=True,
@@ -1738,10 +1928,6 @@ def bandFilter(rawnames, times_pri, main_sides_pri, side_switched_pri,
         #                    wbd_pri = wbd_H_pri[rawind], sfreq=sfreq)
 
 
-        main_side_before_change = main_sides_pri[rawind]  # side of body
-        opsidelet = utils.getOppositeSideStr(main_side_before_change[0].upper() ) # side of brain
-        wrong_brain_sidelet = main_side_before_change[0].upper()
-        anns_LFPartif = utils.removeAnnsByDescr(anns_LFPartif, ['artif_LFP{}'.format(wrong_brain_sidelet) ])
 
         for bandi,bandname in enumerate(fband_names_inc_HFO):
             means_perchan_flt = {}
@@ -1754,29 +1940,53 @@ def bandFilter(rawnames, times_pri, main_sides_pri, side_switched_pri,
                 if abs(sfreq-sfreq_cur) < 1e-10 and (bandname in fband_names_HFO_all):
                     continue
 
-                print(si,bandname)
-
+                #print(si,bandname)
 
                 dat_cur = dat_pri_cur_sfreq[rawind]
                 low,high = fbands[bandname]
                 r = utils.makeSimpleRaw(dat_cur, ch_names=None,
-                                        sfreq=sfreq_cur, rescale=False)
+                                        sfreq=sfreq_cur, rescale=False,copy=True)
+                filter_length = filter_length_dict[bandname]
+
+
                 if bandname.find('HFO') < 0:
+                    chnames_cur = subfeature_order
                     r.set_annotations(anns_MEGartif)
                     r.set_annotations(anns_LFPartif)
+
+                    chis_LFP  = mne.pick_channels_regexp(chnames_cur,'LFP.*' )
+                    chis_msrc = mne.pick_channels_regexp(chnames_cur,'msrc.*')
+                    r.filter(l_freq=low,h_freq=high, n_jobs=n_jobs_maybe_cuda,
+                            skip_by_annotation='BAD_LFP{}'.format(opsidelet), pad='symmetric',
+                            phase=filter_phase, filter_length=filter_length, picks=chis_LFP )
+                    r.filter(l_freq=low,h_freq=high, n_jobs=n_jobs_maybe_cuda,
+                            skip_by_annotation='BAD_MEG', pad='symmetric',
+                            phase=filter_phase, filter_length=filter_length, picks=chis_msrc )
                 else: # we have only LFP channels then
+                    chnames_cur = subfeature_order_lfp_hires
                     r.set_annotations(anns_LFPartif)
-                r.filter(l_freq=low,h_freq=high, n_jobs=n_jobs_maybe_cuda,
-                        skip_by_annotation='BAD_{}'.format(opsidelet), pad='symmetric')#, filter_length="1s" )
+                    r.filter(l_freq=low,h_freq=high, n_jobs=n_jobs_maybe_cuda,
+                            skip_by_annotation='BAD_LFP{}'.format(opsidelet), pad='symmetric',
+                            phase=filter_phase, filter_length=filter_length )
+
+                r_data_interp_artif = utils.imputeInterpArtif(r.get_data().T,  r.annotations, \
+                                        chnames_cur, sfreq=sfreq_cur)
+                r2 = utils.makeSimpleRaw(r_data_interp_artif.T, ch_names=None,
+                                        sfreq=sfreq_cur, rescale=False,copy=True)
+                r2.set_annotations(r.annotations)
+
+                # for debug of some particular data
+                #if np.max( np.abs( r.get_data() [:,-1] ) ) > 1e-10:
+                #    import pdb; pdb.set_trace()
 
                 if sfreq_cur <= sfreq + 1e-10:
-                    rbp = r.copy()
+                    rbp = r2.copy()
                     #chnames_perband_flt[bandname] = chnames_tfr
                     #chnames_perband_bp [bandname]  =chnames_tfr
                     chnames_perband_flt[bandname]  =subfeature_order
                     chnames_perband_bp [bandname]  =subfeature_order
                 else:
-                    rbp = r  # we won't need filtered itself for hires
+                    rbp = r2  # we won't need filtered itself for hires
                     chnames_perband_bp [bandname] =subfeature_order_lfp_hires
                 rbp.apply_hilbert()
                 # zeroth is convolution with 1 elemnt. After strideing it
@@ -1790,7 +2000,7 @@ def bandFilter(rawnames, times_pri, main_sides_pri, side_switched_pri,
                     fn = lambda x: np.convolve(wnd_mav, np.abs(x), mode='full' )[:dat_cur.shape[-1] ]
                 else:
                     fn = np.abs
-                rbp.apply_function(fn, n_jobs=n_jobs_flt, dtype=np.float)
+                rbp.apply_function(fn, n_jobs=n_jobs_flt, dtype=float)
 
                 #raw_perband_flt += [ r  ]
                 #raw_perband_bp  += [ rbp]
@@ -1900,3 +2110,4 @@ def gatherMultiBandStats(rawnames,raw_perband_pri, times_pri, chnames_perband_pr
     #        means_perband_bp_pri[rawi][bandname] = means_bp_curband_pri[rawind]
 
     return means_perband_pri, stds_perband_pri
+

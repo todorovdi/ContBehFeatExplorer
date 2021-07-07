@@ -18,7 +18,6 @@ from sklearn.decomposition import PCA
 from os.path import join as pjoin
 
 
-from matplotlib.backends.backend_pdf import PdfPages
 import utils_tSNE as utsne
 import utils_genfeats as ugf
 import utils_preproc as upre
@@ -56,7 +55,7 @@ features_to_use = feat_types_all
 #cross_types = [ ('LFP.*','.?src.*'), ('.?src_.*' , '.?src.*' ) ]  # only couplings of LFP to sources
 # LFP to sources and Cerebellum vs everything else
 
-
+allow_CUDA = gv.CUDA_state == 'ok'
 
 msrc_inds = np.arange(8,dtype=int)  #indices appearing in channel (sources) names, not channnel indices
 
@@ -79,6 +78,7 @@ src_type_to_use  = 'parcel_ICA'     # or mean_td
 #             ('Cerebellum_R', 'notCerebellum_R'), ('Cerebellum_L', 'notCerebellum_R') ]
 
 only_load_data               = 0
+use_preloaded_data           = 0
 exit_after_TFR               = 0
 #
 load_TFR                     = 2
@@ -119,6 +119,8 @@ skip_div_TFR = 1
 log_before_bandaver = False
 spec_uselog = False
 log_during_csd = True
+# no need to do across datasets because multiplicative constants should pop out
+# and I will normalize resulting features in the end anyway
 normalize_TFR = "separately"  # 'across_datasets', 'no' # needed to avoid too small numbers
 recalc_stats_multi_band = True  # if false, I will try to load
 
@@ -133,17 +135,6 @@ elif n_jobs == -1:
     n_jobs = mpr.cpu_count()
 
 
-if mne.utils.get_config('MNE_USE_CUDA'):
-    n_jobs_tfr = 'cuda'
-else:
-    n_jobs_tfr = n_jobs
-
-if mne.utils.get_config('MNE_USE_CUDA'):
-    n_jobs_flt = 'cuda'
-else:
-    n_jobs_flt = n_jobs
-
-print('run_genfeats: n_jobs = {}, MNE_USE_CUDA = {}'.format(n_jobs, mne.utils.get_config('MNE_USE_CUDA')) )
 
 
 ##########################
@@ -166,7 +157,9 @@ save_rbcorr = 0
 load_bpcorr = 0
 load_rbcorr = 0
 rescale_feats = 0  # individual rescale in the end
+prescale_data = 1
 logH = 1
+feat_stats_artif_handling = 'reject'
 
 coupling_types = ['self', 'motorlike_vs_motorlike', 'LFP_vs_all']
 ##############################
@@ -189,7 +182,9 @@ opts, args = getopt.getopt(effargv,"hr:",
          "Kalman_smooth=", "save_bpcorr=", "save_rbcorr=", "load_rbcorr=", "load_bpcorr=",
          "load_TFRCSD_max_age_h=", "load_only=", "input_subdir=", "output_subdir=",
          "rbcorr_use_local_means=", "scale_data_combine_type=", "stats_fn_prefix=",
-         "param_file=", "coupling_types="])
+         "param_file=", "coupling_types=", "use_preloaded_data=", "feat_stats_artif_handling=",
+         "prescale_data=", "rescale_feats=", "allow_CUDA=", "n_jobs=", "save_feat=",
+         "normalize_TFR="])
 print('opts is ',opts)
 print('args is ',args)
 
@@ -231,6 +226,18 @@ for opt,arg in pars.items():
         load_CSD_max_age_h = int(arg)
     elif opt == "load_only":
         only_load_data = int(arg)
+    elif opt == "prescale_data":
+        prescale_data = int(arg)
+    elif opt == "rescale_feats":
+        rescale_feats = int(arg)
+    elif opt == "normalize_TFR":
+        normalize_TFR = arg
+    elif opt == "allow_CUDA":
+        allow_CUDA = int(arg)
+    elif opt == "use_preloaded_data":
+        use_preloaded_data = int(arg)
+    elif opt == "feat_stats_artif_handling":
+        feat_stats_artif_handling = arg
     elif opt == "coupling_types":
         coupling_types = arg.split(',')
     elif opt == "stats_fn_prefix":
@@ -309,6 +316,8 @@ for opt,arg in pars.items():
         else:
             load_feat = 0
             save_feat = 1
+    elif opt == 'save_feat':
+        save_feat = int(arg)
     elif opt == 'plot_types':
         plot_types = arg.split(',')  #lfp of msrc
         if 'raw_stats' in plot_types:
@@ -361,6 +370,8 @@ for opt,arg in pars.items():
         load_bpcorr = int(arg)
     elif opt == 'Kalman_smooth':
         do_Kalman = int(arg)
+    elif opt == 'n_jobs':
+        n_jobs = int(arg)
     elif opt == 'use_existing_TFR':
         use_existing_TFR = int(arg)
     elif opt.startswith('iniAdd'):
@@ -376,6 +387,9 @@ rawnstr = ','.join(rawnames)
 test_mode = int(rawnames[0][1:3]) > 50
 crop_to_integer_second = False
 
+if allow_CUDA and gv.CUDA_state == 'ok':
+    mne.cuda.init_cuda()
+print('run_genfeats: n_jobs = {}, MNE_USE_CUDA = {}'.format(n_jobs, mne.utils.get_config('MNE_USE_CUDA')) )
 #############
 assert set(coupling_types).issubset(set( gv.data_coupling_types_all ) )
 
@@ -463,46 +477,54 @@ if force_consistent_main_sides:
 
 ms_letter = main_side[0].upper()
 
+#####
+
+n_jobs_tfr = n_jobs  # CUDA not allowed :(
+n_jobs_flt = n_jobs
+
 ###################################################
 
 
-dat_pri                         = [0]*len(rawnames)
-dat_lfp_hires_pri               = [0]*len(rawnames)
-times_pri                       = [0]*len(rawnames)
-times_hires_pri                 = [0]*len(rawnames)
-subfeature_order_pri            = [0]*len(rawnames)
-subfeature_order_lfp_hires_pri  = [0]*len(rawnames)
-extdat_pri                      = [0]*len(rawnames)
-ivalis_pri                      = [0]*len(rawnames)
+if use_preloaded_data:
+    print('DEBUG: USE PRELOADED DATA')
+else:
+    dat_pri                         = [0]*len(rawnames)
+    dat_lfp_hires_pri               = [0]*len(rawnames)
+    times_pri                       = [0]*len(rawnames)
+    times_hires_pri                 = [0]*len(rawnames)
+    subfeature_order_pri            = [0]*len(rawnames)
+    subfeature_order_lfp_hires_pri  = [0]*len(rawnames)
+    extdat_pri                      = [0]*len(rawnames)
+    ivalis_pri                      = [0]*len(rawnames)
 
-aux_info_perraw = {}
-for rawi in range(len(rawnames)):
-    rawn=rawnames[rawi]
-    fname = utils.genPrepDatFn(rawn, new_main_side, data_modalities,
-                                use_main_LFP_chan, src_file_grouping_ind,
-                                src_grouping)
-    fname_dat_full = pjoin(gv.data_dir, input_subdir, fname)
-    f = np.load(fname_dat_full, allow_pickle=True)
-    # for some reason if I don't do it explicitly, it has int64 type which
-    # offends MNE
-    sfreq =         int( f['sfreq'] )
-    sfreq_hires =   int( f['sfreq_hires'] )
+    aux_info_perraw = {}
+    for rawi in range(len(rawnames)):
+        rawn=rawnames[rawi]
+        fname = utils.genPrepDatFn(rawn, new_main_side, data_modalities,
+                                    use_main_LFP_chan, src_file_grouping_ind,
+                                    src_grouping)
+        fname_dat_full = pjoin(gv.data_dir, input_subdir, fname)
+        f = np.load(fname_dat_full, allow_pickle=True)
+        # for some reason if I don't do it explicitly, it has int64 type which
+        # offends MNE
+        sfreq =         int( f['sfreq'] )
+        sfreq_hires =   int( f['sfreq_hires'] )
 
-    ivalis_pri[rawi] = f['ivalis'][()]
+        ivalis_pri[rawi] = f['ivalis'][()]
 
-    dat_pri[rawi] = f['dat']
-    dat_lfp_hires_pri[rawi] = f['dat_lfp_hires']
-    extdat_pri[rawi] = f['extdat']
-    # for some reason pickling of ordered dicts does not work well
-    #anns_pri[rawi] = f['anns']
-    times_pri[rawi] = f['times']
-    times_hires_pri[rawi] = f['times_hires']
-    subfeature_order_pri[rawi] = list( f['subfeature_order_pri'] )
-    subfeature_order_lfp_hires_pri[rawi] = list ( f['subfeature_order_lfp_hires_pri'] )
-    aux_info_perraw[rawn] = f['aux_info'][()]
+        dat_pri[rawi] = f['dat']
+        dat_lfp_hires_pri[rawi] = f['dat_lfp_hires']
+        extdat_pri[rawi] = f['extdat']
+        # for some reason pickling of ordered dicts does not work well
+        #anns_pri[rawi] = f['anns']
+        times_pri[rawi] = f['times']
+        times_hires_pri[rawi] = f['times_hires']
+        subfeature_order_pri[rawi] = list( f['subfeature_order_pri'] )
+        subfeature_order_lfp_hires_pri[rawi] = list ( f['subfeature_order_lfp_hires_pri'] )
+        aux_info_perraw[rawn] = f['aux_info'][()]
 
-    assert set(data_modalities) == set(f['data_modalities'])
-    #fname = '{}_'.format(rawn) + fn_suffix_dat
+        assert set(data_modalities) == set(f['data_modalities'])
+        #fname = '{}_'.format(rawn) + fn_suffix_dat
 
 prefix = stats_fn_prefix
 fname_stats = utils.genStatsFn(None, new_main_side, data_modalities,
@@ -627,6 +649,7 @@ if show_plots:
                                  rawnstr,show_plots, use_main_moveside,
                                  int(use_main_LFP_chan), bands_only,
                                  len(data_modalities),len(features_to_use)   ))
+    from matplotlib.backends.backend_pdf import PdfPages
     pdf= PdfPages(fig_fname  )
 
 #############################################################
@@ -755,9 +778,9 @@ assert len(roi_labels) == 1, 'several groupings in single run -- not implmemente
 ################# scale raw data
 
 # here we plot even if we don't actually rescale
-if do_plot_stat_scatter and len(set( n_channels_pri ) ) == 1 :
+if show_plots and do_plot_stat_scatter and len(set( n_channels_pri ) ) == 1 :
     main_side_let = new_main_side[0].upper()
-    artif_handling = 'reject'
+    artif_handling_ = 'reject'
 
     dat_T_pri = [0]*len(dat_pri)
     for dati in range(len(dat_pri) ):
@@ -767,13 +790,12 @@ if do_plot_stat_scatter and len(set( n_channels_pri ) ) == 1 :
     upre.plotFeatStatsScatter(rawnames,dat_T_pri, int_types_to_stat,
                         subfeature_order_pri,sfreq,
                         times_pri,side_switched_pri, wbd_pri=None,
-                                save_fig=False, separate_by='mod', artif_handling=artif_handling )
+                                save_fig=False, separate_by='mod', artif_handling=artif_handling_ )
     plt.suptitle('Stats of nonHFO data before rescaling')
     pdf.savefig()
     plt.close()
     gc.collect()
 
-artif_handling = 'reject'
 main_side_let = new_main_side[0].upper()
 baseline_int = 'notrem_{}'.format(main_side_let )
 # rescales separately, just to make TFR more robust to numerical issues
@@ -785,7 +807,7 @@ if scale_data_combine_type != 'no_scaling':
           format(combine_type,main_side_let ) )
 
     #combine_type = 'no'
-    #artif_handling = 'no'
+    #feat_stats_artif_handling = 'no'
     #baseline_int = 'entire'
 
     dat_T_pri = [0]*len(dat_pri)
@@ -827,49 +849,60 @@ if scale_data_combine_type != 'no_scaling':
     stds = [ stds[i] for i in indsetis_valid ]
 
     #which indset I current raw belogns to?
+    if gv.DEBUG_MODE:
+        from inspect import currentframe, getframeinfo
+        frameinfo = getframeinfo(currentframe())
+        #print(frameinfo.filename, frameinfo.lineno)
+        debug_plot_ctr = 0
+        plt.figure()
+        plt.plot( dat_pri[0][0])
+        plt.title(f'Line {frameinfo.lineno} plot N={debug_plot_ctr}')
 
-    # rescaling
-    dat_T_scaled, indsets, means, stds = upre.rescaleFeats(rawnames, dat_T_pri, subfeature_order_pri, None,
-                    sfreq, times_pri, int_type = baseline_int,
-                    main_side = None, side_rev_pri = side_switched_pri,
-                    minlen_bins = 5 * sfreq, combine_within=combine_type,
-                    artif_handling=artif_handling, means=means, stds=stds, indsets= newindsets )
-    for dati in range(len(dat_pri) ):
-        dat_pri[dati] = dat_T_scaled[dati].T
-
-    # plotting
-    if do_plot_stat_scatter and len(set( n_channels_pri ) ) == 1 :
-        int_types_to_stat = [it + '_{}'.format(main_side_let) for it in gp.int_types_basic]
-        upre.plotFeatStatsScatter(rawnames,dat_T_scaled, int_types_to_stat,
-                         subfeature_order_pri,sfreq,
-                         times_pri,side_switched_pri, wbd_pri=None,
-                                  save_fig=False, separate_by = 'mod', artif_handling=artif_handling )
-        plt.suptitle('Stats of nonHFO data after rescaling')
-        pdf.savefig()
-        plt.close()
-        gc.collect()
-
-
-    if use_lfp_HFO:
-        dat_T_pri = [0]*len(dat_lfp_hires_pri)
-        for dati in range(len(dat_lfp_hires_pri) ):
-            dat_T_pri[dati] = dat_lfp_hires_pri[dati].T
-
-        curstatinfo = stats_HFO_per_ct[combine_type]
-        indsets =   curstatinfo['indsets']
-        means =   curstatinfo['means']
-        stds =   curstatinfo['stds']
-        means = [ means[i] for i in indsetis_valid ]
-        stds = [ stds[i] for i in indsetis_valid ]
-
-        dat_T_scaled, indsets, means_lfp_hires, stds_lfp_hires = upre.rescaleFeats(rawnames, dat_T_pri,
-                                       subfeature_order_lfp_hires_pri, None,
-                        sfreq_hires, times_hires_pri, int_type = baseline_int ,
+    # prescaling is necessary because sometimes values for spectral
+    # computations can be below double precision
+    if prescale_data:
+        # rescaling
+        dat_T_scaled, indsets, means, stds = upre.rescaleFeats(rawnames, dat_T_pri, subfeature_order_pri, None,
+                        sfreq, times_pri, int_type = baseline_int,
                         main_side = None, side_rev_pri = side_switched_pri,
-                        minlen_bins = 5 * sfreq_hires, combine_within=combine_type,
-                                   means=means, stds=stds, indsets= newindsets )
-        for dati in range(len(dat_lfp_hires_pri) ):
-            dat_lfp_hires_pri[dati] = dat_T_scaled[dati].T
+                        minlen_bins = 5 * sfreq, combine_within=combine_type,
+                        artif_handling=feat_stats_artif_handling, means=means, stds=stds, indsets= newindsets )
+        for dati in range(len(dat_pri) ):
+            dat_pri[dati] = dat_T_scaled[dati].T
+
+        # plotting
+        if show_plots and do_plot_stat_scatter and len(set( n_channels_pri ) ) == 1 :
+            int_types_to_stat = [it + '_{}'.format(main_side_let) for it in gp.int_types_basic]
+            upre.plotFeatStatsScatter(rawnames,dat_T_scaled, int_types_to_stat,
+                            subfeature_order_pri,sfreq,
+                            times_pri,side_switched_pri, wbd_pri=None,
+                                    save_fig=False, separate_by = 'mod', artif_handling=feat_stats_artif_handling )
+            plt.suptitle('Stats of nonHFO data after rescaling')
+            pdf.savefig()
+            plt.close()
+            gc.collect()
+
+
+        if use_lfp_HFO:
+            dat_T_pri = [0]*len(dat_lfp_hires_pri)
+            for dati in range(len(dat_lfp_hires_pri) ):
+                dat_T_pri[dati] = dat_lfp_hires_pri[dati].T
+
+            curstatinfo = stats_HFO_per_ct[combine_type]
+            indsets =   curstatinfo['indsets']
+            means =   curstatinfo['means']
+            stds =   curstatinfo['stds']
+            means = [ means[i] for i in indsetis_valid ]
+            stds = [ stds[i] for i in indsetis_valid ]
+
+            dat_T_scaled, indsets, means_lfp_hires, stds_lfp_hires = upre.rescaleFeats(rawnames, dat_T_pri,
+                                        subfeature_order_lfp_hires_pri, None,
+                            sfreq_hires, times_hires_pri, int_type = baseline_int ,
+                            main_side = None, side_rev_pri = side_switched_pri,
+                            minlen_bins = 5 * sfreq_hires, combine_within=combine_type,
+                                    means=means, stds=stds, indsets= newindsets )
+            for dati in range(len(dat_lfp_hires_pri) ):
+                dat_lfp_hires_pri[dati] = dat_T_scaled[dati].T
 
 if only_load_data:
     print(' only_load_data, exiting! ')
@@ -1223,6 +1256,8 @@ else:
     # -- here I don't need to unify the scales, only to get rid of too
     # small values (because later when computing CSD I will mutiply them
     # and it falls below double precision)
+    # here I don't really care about normalizing robustly (I will normalize
+    # again after features are constructed anyway)
     if normalize_TFR == 'across_datasets':
         print('Start computing TFR stats for normalization')
         s1,s2,s3 = tfrres_pri[0].shape
@@ -1399,6 +1434,14 @@ else:
     fband_names_HFO = fband_names_inc_HFO[len(fband_names):]  # that HFO names go after
 
 
+if gv.DEBUG_MODE:
+    frameinfo = getframeinfo(currentframe())
+    debug_plot_ctr += 1
+    plt.figure()
+    plt.plot( dat_pri[0][0])
+    plt.title(f'Line {frameinfo.lineno} plot N={debug_plot_ctr}')
+
+
 print('Averaging over freqs within bands')
 #csdord_strs is longer than csdord because it
 #currently (Jan 5, 2021) bpow_imagcsd is useless
@@ -1431,6 +1474,12 @@ if do_plot_CSD:
             plt.close()
 
 
+if gv.DEBUG_MODE:
+    frameinfo = getframeinfo(currentframe())
+    debug_plot_ctr += 1
+    plt.figure()
+    plt.plot( dat_pri[0][0])
+    plt.title(f'Line {frameinfo.lineno} plot N={debug_plot_ctr}')
 ############################## Hjorth
 
 if 'Hjorth' in features_to_use or 'H_act' in features_to_use or 'H_mob' in features_to_use or 'H_compl' in features_to_use:
@@ -1578,6 +1627,13 @@ if 'Hjorth' in features_to_use or 'H_act' in features_to_use or 'H_mob' in featu
     #compl = compl[:,::skip]
     gc.collect()
 
+if gv.DEBUG_MODE:
+    frameinfo = getframeinfo(currentframe())
+    debug_plot_ctr += 1
+    plt.figure()
+    plt.plot( dat_pri[0][0])
+    plt.title(f'Line {frameinfo.lineno} plot N={debug_plot_ctr}')
+
 for rawind in range(len(dat_pri)):
     a,b = tfrres_wbd_pri[rawind], wbd_H_pri[rawind]
     if a.shape != b.shape:
@@ -1614,8 +1670,15 @@ if ('rbcorr' in features_to_use and not load_rbcorr) or ('bpcorr' in features_to
     raw_perband_flt_pri, raw_perband_bp_pri, chnames_perband_flt_pri, chnames_perband_bp_pri  = \
         ugf.bandFilter(rawnames, times_pri, main_sides_pri, side_switched_pri,
               sfreqs, skips, dat_pri_persfreq, fband_names_inc_HFO, gv.fband_names_HFO_all,
-              fbands, n_jobs_flt, subfeature_order, subfeature_order_lfp_hires,
+              fbands, n_jobs_flt, allow_CUDA, subfeature_order, subfeature_order_lfp_hires,
               smoothen_bandpow, ann_MEGartif_prefix_to_use)
+
+    if gv.DEBUG_MODE:
+        frameinfo = getframeinfo(currentframe())
+        debug_plot_ctr += 1
+        plt.figure()
+        plt.plot( dat_pri[0][0])
+        plt.title(f'Line {frameinfo.lineno} plot N={debug_plot_ctr}')
 
     #raws_flt_pri_perband_ = {}
 
@@ -1624,12 +1687,12 @@ if ('rbcorr' in features_to_use and not load_rbcorr) or ('bpcorr' in features_to
         ugf.gatherMultiBandStats(rawnames,raw_perband_flt_pri, times_pri,
                                 chnames_perband_flt_pri, side_switched_pri, sfreq,
                                 baseline_int, scale_data_combine_type,
-                                artif_handling)
+                                feat_stats_artif_handling)
         means_perband_bp_pri_,_ = \
         ugf.gatherMultiBandStats(rawnames,raw_perband_bp_pri, times_pri,
                                 chnames_perband_bp_pri, side_switched_pri, sfreq,
                                 baseline_int, scale_data_combine_type,
-                                artif_handling)
+                                feat_stats_artif_handling)
     else:
         prefix = stats_fn_prefix
         fname_stats_multi_band = utils.genStatsMultiBandFn(None, new_main_side, data_modalities,
@@ -1654,6 +1717,13 @@ if ('rbcorr' in features_to_use and not load_rbcorr) or ('bpcorr' in features_to
         for bandname in means_perband_bp_pri_[rawind]:
             means_perband_bp_pri[rawind][bandname] = \
                 means_perband_bp_pri_[rawind][bandname][baseline_int]
+
+if gv.DEBUG_MODE:
+    frameinfo = getframeinfo(currentframe())
+    debug_plot_ctr += 1
+    plt.figure()
+    plt.plot( dat_pri[0][0])
+    plt.title(f'Line {frameinfo.lineno} plot N={debug_plot_ctr}')
 
 if 'rbcorr' in features_to_use:  #raw band corr
     if bands_only == 'fine':
@@ -1731,6 +1801,13 @@ else:
     rbcorrs_pri = None
     rbcor_names = None
     wbd_rbcorr_pri = None
+
+if gv.DEBUG_MODE:
+    frameinfo = getframeinfo(currentframe())
+    debug_plot_ctr += 1
+    plt.figure()
+    plt.plot( dat_pri[0][0])
+    plt.title(f'Line {frameinfo.lineno} plot N={debug_plot_ctr}')
 
 if 'bpcorr' in features_to_use:
     if bands_only == 'fine':
@@ -1813,6 +1890,13 @@ else:
     bpcor_names = None
     wbd_bpcorr_pri = None
 
+
+if gv.DEBUG_MODE:
+    frameinfo = getframeinfo(currentframe())
+    debug_plot_ctr += 1
+    plt.figure()
+    plt.plot( dat_pri[0][0])
+    plt.title(f'Line {frameinfo.lineno} plot N={debug_plot_ctr}')
 
 # at these stage numbers of channels and channel names should be consistent
 # across datasets
@@ -2017,7 +2101,7 @@ for rawind in range(len(dat_pri) ):
         wbd = curfeat['wbd']
         minlen = min( minlen, wbd.shape[1] )
         cd = curfeat['data']
-        assert cd.shape[1] == wbd.shape[1]
+        assert cd.shape[1] == wbd.shape[1], (feat_name, cd.shape, wbd.shape)
 
     # check that all wbds are are the same
     wbd_l = [feat_dict[feat_name]['wbd'][:,:minlen] for feat_name in features_to_use]
@@ -2178,6 +2262,7 @@ if save_feat:
         # I don't do anything with edgeBins all indices should be valid now
         # TODO: maybe I need to get wbd from somewhere else because I might
         # have changed something else
+        # TODO: save dict(enumerate( _pri ))  so that numpy does not complain
         np.savez(fname_feat_full,Xtimes=Xtimes_cur,X=X_cur,
                  X_smooth=X_pri_smooth[rawind],
                  rawname_=rawname_,skip=skip,
@@ -2189,7 +2274,7 @@ if save_feat:
         #ip = feat_inds_cur[0],feat_inds_cur[-1]
         print('{} Features shape {} saved to\n  {}'.format(rawind,X_cur.shape,fname_feat_full) )
 
-if do_plot_feat_stat_scatter:
+if show_plots and do_plot_feat_stat_scatter:
     int_types_to_stat = [it + '_{}'.format(main_side_let) for it in gp.int_types_basic]
     upre.plotFeatStatsScatter(rawnames,X_pri, int_types_to_stat,
                         feature_names_all,sfreq,
@@ -2201,7 +2286,7 @@ if do_plot_feat_stat_scatter:
     gc.collect()
 
 
-if do_plot_feat_stats:
+if show_plots and do_plot_feat_stats:
     print('Starting plotting stats of features' )
     #  Plots stats for subsampled data
     utsne.plotBasicStatsMultiCh(X.T, feature_names_all, printMeans = 0)
@@ -2212,7 +2297,7 @@ if do_plot_feat_stats:
 
 
 # Plot evolutions for subsampled data
-if do_plot_feat_timecourse:
+if show_plots and do_plot_feat_timecourse:
     extdat = np.hstack(extdat_pri)
     extdat_resampled = [ np.convolve(extdat[i], np.ones(skip) , mode='same') for i in range(extdat.shape[0]) ]
     extdat_resampled = [ed[nedgeBins:-nedgeBins:skip] for ed in extdat_resampled]

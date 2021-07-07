@@ -628,11 +628,11 @@ def gatherFeatStats(rawnames, X_pri, featnames_pri, wbd_pri,
                             raise ValueError('not implemented')
 
                         n = np.sum(mask)
-                        if n  < minlen_bins:
+                        if (n  < minlen_bins) and (not gv.DEBUG_MODE):
                             print('feature {}, nremaining bins {}, percentage {}, total in interval {} LFPaftif {} MEGartif'.
                                 format(featn, n, n/mask.size, nbinstot_mvt,
                                        nbinstot_LFP_artif, nbinstot_MEG_artif) )
-                            raise ValueError('too few bins to compute stats')
+                            raise ValueError(f'too few bins to compute stats {int_type_cur}: {n}<{minlen_bins}')
 
                         dat_forstat = dat[mask]
                     dats_forstat += [dat_forstat]
@@ -986,9 +986,10 @@ def getCleanIntervalBins(rawname_,sfreq, times, suffixes = ['_ann_LFPartif'],ver
 
 def loadRaws(rawnames,mods_to_load, sources_type = None, src_type_to_use=None,
              src_file_grouping_ind=None, use_saved = True, highpass_lfreq = None,
-             input_subdir="", n_jobs=1):
+             input_subdir="", n_jobs=1, filter_phase = 'minimum'  ):
     '''
     use_saved means using previously done preproc
+    filter_phase can be 'minimum' (gives causal) or 'zero'
     '''
     import globvars as gv
     data_dir = gv.data_dir
@@ -1104,7 +1105,7 @@ def loadRaws(rawnames,mods_to_load, sources_type = None, src_type_to_use=None,
                     continue
                 raw_permod_both_sides_cur[mod].\
                 filter(l_freq=highpass_lfreq, h_freq=None,picks='all',
-                       n_jobs = n_jobs)
+                       n_jobs = n_jobs, phase=filter_phase)
 
 
         #raw_permod_both_sides_cur['afterICA']

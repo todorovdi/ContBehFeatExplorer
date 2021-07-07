@@ -33,6 +33,7 @@ global dir_fig
 global dir_fig_preproc
 global fbands
 global EMG_per_hand
+global DEBUG_MODE
 
 specgrams                           = None
 freqBands                           = None
@@ -76,6 +77,8 @@ dir_fig_preproc = os.path.join(dir_fig,'preproc')
 
 
 hostname = socket.gethostname()
+
+DEBUG_MODE = False
 
 CUDA_state = 'no'
 try:

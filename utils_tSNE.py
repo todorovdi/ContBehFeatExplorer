@@ -1485,6 +1485,8 @@ def concatAnns(rawnames, Xtimes_pri, suffixes=['_anns'], crop=(None,None),
         #raw.set_annotations(anns)
         anns_pri += [anns]
 
+        print(anns.onset,anns.duration,anns)
+
         dt = Xtimes_pri[0][1] - Xtimes_pri[0][0]  #note that this is not 1/sfreq (since we skipped)
         dt_pri += [dt]
 
@@ -1537,14 +1539,27 @@ def concatAnns(rawnames, Xtimes_pri, suffixes=['_anns'], crop=(None,None),
         #print(ann_cur.onset, ann_cur.duration )
         if len(ann_cur):
             #print(ann_cur.onset, ann_cur.description)
-            onset_ = np.maximum(Xtimes_shifted[0],ann_cur.onset + timeshift)   # kill negatives
+            go = []
+            for oi,onset_cur in enumerate(ann_cur.onset):
+                if onset_cur + timeshift  >  Xtimes_shifted[-1]:
+                    continue
+                elif onset_cur + ann_cur.duration[oi] + timeshift  <  Xtimes_shifted[0]:
+                    continue
+                else:
+                    go += [oi]
+
+            #print(go,anns)
+
+            # max between start of the current dataset and onset
+            onset_ = np.maximum(Xtimes_shifted[0],ann_cur.onset[go] + timeshift)   # kill negatives
+            # min between end of the current dataset and onset
             onset_ = np.minimum(Xtimes_shifted[-1], onset_ )
-            end_ = np.minimum(onset_ + ann_cur.duration, Xtimes_shifted[-1] )  # kill over-end
+            end_ = np.minimum(onset_ + ann_cur.duration[go], Xtimes_shifted[-1] )  # kill over-end
 
             duration_ = np.maximum(0, end_ - onset_)
             if (not allow_short_intervals) and (dt_sec is not None):
                 assert np.all(duration_ > dt_sec )
-            anns.append(onset_ , duration_,ann_cur.description)
+            anns.append(onset_ , duration_,ann_cur.description[go] )
 
         if wbd_pri is not None:
             cur_zeroth_bin += wbd[1,-1] + skip
