@@ -44,7 +44,7 @@ data_modalities = ['LFP', 'msrc']
 #data_modalities = ['LFP']
 #data_modalities = ['msrc']
 
-feat_types_all = [ 'con',  'Hjorth', 'H_act', 'H_mob', 'H_compl', 'bpcorr', 'rbcorr']
+feat_types_all = gv.feat_types_all
 #features_to_use = [ 'con',  'H_act', 'H_mob', 'H_compl']  #csd includes tfr in my implementation
 #features_to_use = [ 'con',  'H_act', 'H_mob', 'H_compl', 'bpcorr']
 #features_to_use = [ 'con',  'H_act', 'H_mob', 'H_compl']
@@ -162,6 +162,7 @@ logH = 1
 feat_stats_artif_handling = 'reject'
 
 coupling_types = ['self', 'motorlike_vs_motorlike', 'LFP_vs_all']
+DEBUG_shorten_couplings = 'no'   # use small set of channel coupling for faster computations
 ##############################
 
 print('sys.argv is ',sys.argv)
@@ -175,7 +176,7 @@ params_read = {}
 helpstr = 'Usage example\nrun_genfeats.py --rawnames <rawname_naked> '
 opts, args = getopt.getopt(effargv,"hr:",
         ["mods=","msrc_inds=","feat_types=","bands=","rawnames=",
-            "show_plots=", "load_TFR=", "side=", "LFPchan=", "useHFO=",
+            "show_plots=", "side=", "LFPchan=", "useHFO=",
          "plot_types=", "plot_only=", "sources_type=", "crop=" ,
          "src_grouping=", "src_grouping_fn=",
          "load_TFR=", "save_TFR=", "save_CSD=", "load_CSD=", "use_existing_TFR=",
@@ -184,7 +185,7 @@ opts, args = getopt.getopt(effargv,"hr:",
          "rbcorr_use_local_means=", "scale_data_combine_type=", "stats_fn_prefix=",
          "param_file=", "coupling_types=", "use_preloaded_data=", "feat_stats_artif_handling=",
          "prescale_data=", "rescale_feats=", "allow_CUDA=", "n_jobs=", "save_feat=",
-         "normalize_TFR="])
+         "normalize_TFR=", "SLURM_job_id=", "DEBUG_shorten_couplings=" ])
 print('opts is ',opts)
 print('args is ',args)
 
@@ -236,12 +237,18 @@ for opt,arg in pars.items():
         allow_CUDA = int(arg)
     elif opt == "use_preloaded_data":
         use_preloaded_data = int(arg)
+    elif opt == "SLURM_job_id":
+        SLURM_job_id = arg
+    elif opt == "recalc_stats_multi_band":
+        recalc_stats_multi_band = arg
     elif opt == "feat_stats_artif_handling":
         feat_stats_artif_handling = arg
     elif opt == "coupling_types":
         coupling_types = arg.split(',')
     elif opt == "stats_fn_prefix":
         stats_fn_prefix = arg
+    elif opt == "DEBUG_shorten_couplings":
+        DEBUG_shorten_couplings == arg
     elif opt == "src_grouping":
         src_grouping = int(arg)
     elif opt == "rbcorr_use_local_means":
@@ -496,10 +503,10 @@ else:
     subfeature_order_lfp_hires_pri  = [0]*len(rawnames)
     extdat_pri                      = [0]*len(rawnames)
     ivalis_pri                      = [0]*len(rawnames)
+    anndict_per_intcat_per_rawn    = {}
 
     aux_info_perraw = {}
-    for rawi in range(len(rawnames)):
-        rawn=rawnames[rawi]
+    for rawi,rawn in enumerate(rawnames):
         fname = utils.genPrepDatFn(rawn, new_main_side, data_modalities,
                                     use_main_LFP_chan, src_file_grouping_ind,
                                     src_grouping)
@@ -522,6 +529,8 @@ else:
         subfeature_order_pri[rawi] = list( f['subfeature_order_pri'] )
         subfeature_order_lfp_hires_pri[rawi] = list ( f['subfeature_order_lfp_hires_pri'] )
         aux_info_perraw[rawn] = f['aux_info'][()]
+
+        anndict_per_intcat_per_rawn[rawn] = f['anndict_per_intcat'][()]
 
         assert set(data_modalities) == set(f['data_modalities'])
         #fname = '{}_'.format(rawn) + fn_suffix_dat
@@ -866,7 +875,8 @@ if scale_data_combine_type != 'no_scaling':
                         sfreq, times_pri, int_type = baseline_int,
                         main_side = None, side_rev_pri = side_switched_pri,
                         minlen_bins = 5 * sfreq, combine_within=combine_type,
-                        artif_handling=feat_stats_artif_handling, means=means, stds=stds, indsets= newindsets )
+                        artif_handling=feat_stats_artif_handling, means=means, stds=stds, indsets= newindsets,
+                        bindict_per_rawn=bindict_per_rawn)
         for dati in range(len(dat_pri) ):
             dat_pri[dati] = dat_T_scaled[dati].T
 
@@ -900,7 +910,8 @@ if scale_data_combine_type != 'no_scaling':
                             sfreq_hires, times_hires_pri, int_type = baseline_int ,
                             main_side = None, side_rev_pri = side_switched_pri,
                             minlen_bins = 5 * sfreq_hires, combine_within=combine_type,
-                                    means=means, stds=stds, indsets= newindsets )
+                                    means=means, stds=stds, indsets= newindsets,
+                                    bindict_per_rawn=bindict_per_rawn)
             for dati in range(len(dat_lfp_hires_pri) ):
                 dat_lfp_hires_pri[dati] = dat_T_scaled[dati].T
 
@@ -1025,7 +1036,7 @@ else:
 #def computeTFR():
 #    return
 
-gs_tfr = np.zeros(len(rawnames) )
+gs_tfr = np.zeros(len(rawnames) )    # ages
 gs_csd = np.zeros(len(rawnames) )
 fname_tfr_full_pri = [0]*len(rawnames)
 fname_csd_full_pri = [0]*len(rawnames)
@@ -1055,6 +1066,8 @@ for rawi in range(len(rawnames)):
 cond_load_CSD = (load_CSD > 0) and np.all(gs_csd > 0)
 cond2_CSD = ( (load_CSD == 1) or \
                         (load_CSD == 2 and np.all(gs_csd > 1) ) )
+
+#sys.exit(0)
 
 if not (use_existing_TFR and have_TFR):
     cond_load_TFR = (load_TFR > 0) and np.all(gs_tfr > 0)
@@ -1246,7 +1259,7 @@ if cond_load_CSD and cond2_CSD:
 
     _,names_src = utsne.selFeatsRegex(None, subfeature_order, ['msrc.*'])
     _,names_lfp = utsne.selFeatsRegex(None, subfeature_order, ['LFP.*'])
-    chnames_tfr = list(names_src) + list(names_lfp)
+    chnames_tfr = list(names_lfp) + list(names_src)
 else:
     chnames_nicened = utils.nicenMEGsrc_chnames(chnames_tfr, roi_labels, srcgrouping_names_sorted,
                             prefix='msrc_')
@@ -1408,6 +1421,44 @@ else:
 
     if do_cleanup:
         del tfrres_pri
+
+assert chnames_tfr[0].startswith('LFP')
+assert subfeature_order[0].startswith('LFP')
+assert tuple(chnames_tfr) == tuple(subfeature_order)  # is needed for bandFilter, because later computeCorr uses indexing based on chnames_tfr
+
+if DEBUG_shorten_couplings != 'no':
+    parcel_couplings_short = {}
+    LFP2parcel_couplings_short = {}
+    LFP2LFP_couplings_short = {}
+    if DEBUG_shorten_couplings == 'first':
+        for pc,pcl in parcel_couplings.items():
+            parcel_couplings[pc] = [pcl[0]]
+
+        for pc,pcl in LFP2parcel_couplings.items():
+            LFP2parcel_couplings_short[pc] = [pcl[0]]
+
+        for pc,pcl in LFP2LFP_couplings.items():
+            LFP2LFP_couplings_short[pc] = [pcl[0]]
+    elif DEBUG_shorten_couplings == 'random_one':
+        for pc,pcl in parcel_couplings.items():
+            a = list ( np.array( pcl ) [  np.random.choice( len(pcl), 1 ) ] )
+            parcel_couplings[pc] = a
+
+        for pc,pcl in LFP2parcel_couplings.items():
+            a = list ( np.array( pcl ) [  np.random.choice( len(pcl), 1 ) ] )
+            LFP2parcel_couplings_short[pc] = a
+
+        for pc,pcl in LFP2LFP_couplings.items():
+            a = list ( np.array( pcl ) [  np.random.choice( len(pcl), 1 ) ] )
+            LFP2LFP_couplings_short[pc] = a
+
+    parcel_couplings_backup     = parcel_couplings
+    LFP2parcel_couplings_backup = LFP2parcel_couplings
+    LFP2LFP_couplings_backup    = LFP2LFP_couplings
+
+    parcel_couplings     = parcel_couplings_short
+    LFP2parcel_couplings = LFP2parcel_couplings_short
+    LFP2LFP_couplings    = LFP2LFP_couplings_short
 
 for csdi in range(len(csd_pri) ):
     assert not ( np.any( np.isnan ( csd_pri[csdi] ) )    or np.any( np.isinf ( csd_pri[csdi] ) )    )
@@ -1671,7 +1722,7 @@ if ('rbcorr' in features_to_use and not load_rbcorr) or ('bpcorr' in features_to
         ugf.bandFilter(rawnames, times_pri, main_sides_pri, side_switched_pri,
               sfreqs, skips, dat_pri_persfreq, fband_names_inc_HFO, gv.fband_names_HFO_all,
               fbands, n_jobs_flt, allow_CUDA, subfeature_order, subfeature_order_lfp_hires,
-              smoothen_bandpow, ann_MEGartif_prefix_to_use)
+              smoothen_bandpow, ann_MEGartif_prefix_to_use, anndict_per_intcat= anndict_per_intcat)
 
     if gv.DEBUG_MODE:
         frameinfo = getframeinfo(currentframe())
@@ -1683,16 +1734,18 @@ if ('rbcorr' in features_to_use and not load_rbcorr) or ('bpcorr' in features_to
     #raws_flt_pri_perband_ = {}
 
     if recalc_stats_multi_band:
-        means_perband_flt_pri_,_ = \
+        #means_perband_flt_pri_,_ = \
+        indsets, means_perband_flt_pri_, stds_perband_flt_pri_, stats_per_indset_per_band_flt =  \
         ugf.gatherMultiBandStats(rawnames,raw_perband_flt_pri, times_pri,
                                 chnames_perband_flt_pri, side_switched_pri, sfreq,
                                 baseline_int, scale_data_combine_type,
-                                feat_stats_artif_handling)
-        means_perband_bp_pri_,_ = \
+                                feat_stats_artif_handling, bindict_per_rawn=bindict_per_rawn)
+        #means_perband_bp_pri_,_ = \
+        indsets, means_perband_bp_pri_, stds_perband_bp_pri_, stats_per_indset_per_band_bp =  \
         ugf.gatherMultiBandStats(rawnames,raw_perband_bp_pri, times_pri,
                                 chnames_perband_bp_pri, side_switched_pri, sfreq,
                                 baseline_int, scale_data_combine_type,
-                                feat_stats_artif_handling)
+                                feat_stats_artif_handling, bindict_per_rawn=bindict_per_rawn)
     else:
         prefix = stats_fn_prefix
         fname_stats_multi_band = utils.genStatsMultiBandFn(None, new_main_side, data_modalities,
@@ -1702,21 +1755,46 @@ if ('rbcorr' in features_to_use and not load_rbcorr) or ('bpcorr' in features_to
         f = np.load(fname_stats_full, allow_pickle=True)
         rawnames_stats =  f['rawnames']
         assert set(rawnames).issubset(rawnames_stats)
-        means_perband_flt_pri_ =  f['stats_multiband_flt_per_ct'][()][scale_data_combine_type]['means']
-        means_perband_bp_pri_  =  f['stats_multiband_bp_per_ct'][()][scale_data_combine_type]['means']
+        #means_perband_flt_pri_ =  f['stats_multiband_flt_per_ct'][()][scale_data_combine_type]['means']
+        #means_perband_bp_pri_  =  f['stats_multiband_bp_per_ct'][()][scale_data_combine_type]['means']
+
+        stats_multiband_flt =  f['stats_multiband_flt_per_ct'][()][scale_data_combine_type]
+        stats_multiband_bp  =  f['stats_multiband_bp_per_ct'][()][scale_data_combine_type]
+
+        indsets = stats_multiband_bp['indsets']
+
+        stats_per_indset_per_band_flt
 
     ################# extract stats for the given baseline int
-    means_perband_flt_pri = len(rawnames) * [dict()]
-    for rawind in range(len(rawnames)):
-        for bandname in means_perband_flt_pri_[rawind]:
-            means_perband_flt_pri[rawind][bandname] = \
-                means_perband_flt_pri_[rawind][bandname][baseline_int]
 
+    rawi_mask = upre.getIndsetMask(indsets, allow_repeating=False, allow_holes = False)
+
+    means_perband_flt_pri = len(rawnames) * [dict()]
     means_perband_bp_pri = len(rawnames) * [dict()]
-    for rawind in range(len(rawnames)):
-        for bandname in means_perband_bp_pri_[rawind]:
-            means_perband_bp_pri[rawind][bandname] = \
-                means_perband_bp_pri_[rawind][bandname][baseline_int]
+
+    statdicts =[stats_multiband_flt, stats_multiband_bp ]
+    mdicts =[means_perband_flt_pri, means_perband_bp_pri ]
+    for mdi,md in enumerate(mdicts):
+        for rawind in range(len(rawnames)):
+            indseti = rawi_mask[rawind]
+            for bandname in statdicts[mdi]:
+                mdicts[mdi][rawind][bandname] = statdicts[mdi][bandname][indseti][baseline_int]
+
+                #means_perband_flt_pri[rawind][bandname] = \
+                #    means_perband_flt_pri_[rawind][bandname][baseline_int]
+
+
+    #means_perband_flt_pri = len(rawnames) * [dict()]
+    #for rawind in range(len(rawnames)):
+    #    for bandname in means_perband_flt_pri_[rawind]:
+    #        means_perband_flt_pri[rawind][bandname] = \
+    #            means_perband_flt_pri_[rawind][bandname][baseline_int]
+
+    #means_perband_bp_pri = len(rawnames) * [dict()]
+    #for rawind in range(len(rawnames)):
+    #    for bandname in means_perband_bp_pri_[rawind]:
+    #        means_perband_bp_pri[rawind][bandname] = \
+    #            means_perband_bp_pri_[rawind][bandname][baseline_int]
 
 if gv.DEBUG_MODE:
     frameinfo = getframeinfo(currentframe())
@@ -1759,7 +1837,7 @@ if 'rbcorr' in features_to_use:  #raw band corr
             for bp in bandPairs:
                 print('band pair ',bp)
                 rbcorrs_curbp,rbcor_names_curbp,dct_nums, wbd_rbcorr = \
-                computeCorr(raw_perband, names=chnames_perband,
+                computeCorr(raw_perband, chnames_per_band=chnames_perband,
                                         defnames=chnames_tfr,
                                         parcel_couplings=parcel_couplings,
                                         LFP2parcel_couplings=LFP2parcel_couplings,
@@ -1849,7 +1927,7 @@ if 'bpcorr' in features_to_use:
             for bp in bandPairs:
                 print('band pair ',bp)
                 bpcorrs_curbp,bpcor_names_curbp,dct_nums,wbd_bpcorr =\
-                computeCorr(raw_perband, names=chnames_perband,
+                computeCorr(raw_perband, chnames_perband=chnames_perband,
                                         defnames=chnames_tfr,
                                         parcel_couplings=parcel_couplings,
                                         LFP2parcel_couplings=LFP2parcel_couplings,

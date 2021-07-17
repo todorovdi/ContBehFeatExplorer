@@ -11,7 +11,8 @@ from globvars import gp
 from matplotlib.backends.backend_pdf import PdfPages
 
 from os.path import join as pjoin
-import mpr, mne
+import mne
+import multiprocessing as mpr
 
 pdf = None
 
@@ -41,6 +42,9 @@ data_modalities = ['LFP', 'msrc']
 params_read = {}
 params_cmd = {}
 
+exit_after = 'end'
+use_preloaded_raws = False
+
 print('sys.argv is ',sys.argv)
 effargv = sys.argv[1:]  # to skip first
 if sys.argv[0].find('ipykernel_launcher') >= 0:
@@ -53,7 +57,8 @@ opts, args = getopt.getopt(effargv,"hr:",
           "sources_type=", "crop=" ,
          "src_grouping=", "src_grouping_fn=",
          "input_subdir=", "save_dat=", "save_stats=", "param_file=",
-         "bands_precision=", "calc_stats_multi_band="])
+         "bands_precision=", "calc_stats_multi_band=", "exit_after=",
+         "use_preloaded_raws=" ])
 print('opts is ',opts)
 print('args is ',args)
 
@@ -93,6 +98,8 @@ for opt,arg in pars.items():
         save_stats = int(arg)
     elif opt == "save_dat":
         save_dat = int(arg)
+    elif opt == "exit_after":
+        exit_after = arg
     elif opt == "src_grouping":
         src_grouping = int(arg)
     elif opt == "input_subdir":
@@ -112,6 +119,8 @@ for opt,arg in pars.items():
     elif opt == "sources_type":
         if len(arg):
             sources_type = arg
+    elif opt == "use_preloaded_raws":
+        use_preloaded_raws = int(arg)
     elif opt in 'rawnames':
         if len(arg) < 5:
             print('Empty raw name provided, exiting')
@@ -212,8 +221,11 @@ mods_to_load = ['LFP', 'src', 'EMG']
 if use_lfp_HFO:
     mods_to_load += ['LFP_hires']
 
-raws_permod_both_sides = upre.loadRaws(rawnames,mods_to_load, sources_type, src_type_to_use,
-             src_file_grouping_ind,input_subdir=input_subdir,n_jobs=n_jobs)
+if not use_preloaded_raws:
+    raws_permod_both_sides = upre.loadRaws(rawnames,mods_to_load, sources_type, src_type_to_use,
+                src_file_grouping_ind,input_subdir=input_subdir,n_jobs=n_jobs)
+else:
+    print('----------  USING PRELOADED RAWS!!!!!')
 
 sfreqs = [ int(raws_permod_both_sides[rn]['LFP'].info['sfreq']) for rn in rawnames]
 assert len(set(sfreqs)) == 1
@@ -240,13 +252,25 @@ for rawname_ in rawnames:
     rec_info_pri += [rec_info]
 
 # the output is dat only from the selected hemisphere
-dat_pri, dat_lfp_hires_pri, extdat_pri, anns_pri, times_pri,\
-times_hires_pri, subfeature_order_pri, subfeature_order_lfp_hires_pri, aux_info_perraw = \
-    ugf.collectDataFromMultiRaws(rawnames, raws_permod_both_sides, sources_type,
+r = ugf.collectDataFromMultiRaws(rawnames, raws_permod_both_sides, sources_type,
                              src_file_grouping_ind, src_grouping, use_main_LFP_chan,
                              side_to_use, new_main_side, data_modalities,
                              crop_start,crop_end,msrc_inds, rec_info_pri)
 
+dat_pri, dat_lfp_hires_pri, extdat_pri, anns_pri, anndict_per_intcat_per_rawn_, times_pri,\
+times_hires_pri, subfeature_order_pri, subfeature_order_lfp_hires_pri, aux_info_perraw = r
+
+if not use_preloaded_raws:
+    anndict_per_intcat_per_rawn = anndict_per_intcat_per_rawn_
+
+bindict_per_rawn = {}
+for rawn,anndict_per_intcat in anndict_per_intcat_per_rawn.items():
+    # here side is not important
+    times_cur = raws_permod_both_sides[rawn]['LFP'].times
+    bindict_per_rawn[rawn] = upre.markedIntervals2Bins(anndict_per_intcat,times_cur,sfreq)
+
+if exit_after == 'collectDataFromMultiRaws':
+    sys.exit(0)
 
 #fn_suffix_dat = 'dat_{}_newms{}_mainLFP{}_grp{}-{}.npz'.format(new_main_side,
 #                                                              ','.join(data_modalities),
@@ -267,6 +291,7 @@ if save_dat:
                  extdat = extdat_pri[rawi],
                  ivalis = utils.ann2ivalDict(anns_pri[rawi] ),
                  ivalis_artif = None,
+                 anndict_per_intcat = anndict_per_intcat_per_rawn[rawn],
                  times = times_pri[rawi],
                  times_hires = times_hires_pri[rawi],
                  subfeature_order_pri = subfeature_order_pri[rawi],
@@ -285,14 +310,14 @@ subfeature_order_lfp_hires = subfeature_order_lfp_hires_pri[0]
 
 main_side_let = new_main_side[0].upper()
 artif_handling = 'reject'
+intervals_for_stats = [it + '_{}'.format(main_side_let) for it in gp.int_types_basic]
 # here we plot even if we don't actually rescale
 if plot_stat_scatter and len(set( n_channels_pri ) ) == 1 :
     dat_T_pri = [0]*len(dat_pri)
     for dati in range(len(dat_pri) ):
         dat_T_pri[dati] = dat_pri[dati].T
 
-    int_types_to_stat = [it + '_{}'.format(main_side_let) for it in gp.int_types_basic]
-    upre.plotFeatStatsScatter(rawnames,dat_T_pri, int_types_to_stat,
+    upre.plotFeatStatsScatter(rawnames,dat_T_pri, intervals_for_stats,
                         subfeature_order_pri,sfreq,
                         times_pri,side_switched_pri, wbd_pri=None,
                                 save_fig=False, separate_by='mod', artif_handling=artif_handling )
@@ -310,17 +335,17 @@ for combine_type in gv.rawnames_combine_types_rawdata:
     for dati in range(len(dat_pri) ):
         dat_T_pri[dati] = dat_pri[dati].T
 
-    indsets, means, stds = \
+    indsets, means, stds, stats_per_indset = \
         upre.gatherFeatStats(rawnames, dat_T_pri, subfeature_order_pri, None, sfreq, times_pri,
-                baseline_int, side_rev_pri = side_switched_pri,
-                combine_within = combine_type, minlen_bins = 5*sfreq,
-                        artif_handling=artif_handling)
-    curstatinfo = {'indsets':indsets, 'means':means, 'stds':stds, 'rawnames':rawnames }
+                intervals_for_stats, side_rev_pri = side_switched_pri,
+                combine_within = combine_type, minlen_bins = 5*sfreq, require_intervals_present = [baseline_int],
+                        artif_handling=artif_handling, bindict_per_rawn=bindict_per_rawn )
+    curstatinfo = {'indsets':indsets, 'means':means, 'stds':stds, 'rawnames':rawnames, 'stats_per_indset':stats_per_indset }
     stats_per_ct[combine_type] = curstatinfo
 
     #X_pri_rescaled, indsets, means, stds
     #dat_T_scaled, indsets, means, stds = upre.rescaleFeats(rawnames, dat_T_pri, subfeature_order_pri, None,
-    #                sfreq, times_pri, int_type = baseline_int,
+    #                sfreq, times_pri, int_type = intervals_for_stats,
     #                main_side = None, side_rev_pri = side_switched_pri,
     #                minlen_bins = 5 * sfreq, combine_within=combine_type,
     #                artif_handling=artif_handling )
@@ -332,15 +357,18 @@ for combine_type in gv.rawnames_combine_types_rawdata:
         for dati in range(len(dat_lfp_hires_pri) ):
             dat_T_pri[dati] = dat_lfp_hires_pri[dati].T
 
-        indsets, means, stds = upre.gatherFeatStats(rawnames, dat_T_pri, subfeature_order_lfp_hires_pri,
+        indsets, means, stds, stats_per_indset = upre.gatherFeatStats(rawnames, dat_T_pri, subfeature_order_lfp_hires_pri,
                              None, sfreq_hires, times_hires_pri,
-                baseline_int, side_rev_pri = side_switched_pri,
-                combine_within = combine_type, minlen_bins = 5*sfreq,
-                        artif_handling=artif_handling)
+                intervals_for_stats, side_rev_pri = side_switched_pri,
+                combine_within = combine_type, minlen_bins = 5*sfreq, require_intervals_present = [baseline_int],
+                        artif_handling=artif_handling, bindict_per_rawn=bindict_per_rawn)
 
-        curstatinfo = {'indsets':indsets, 'means':means, 'stds':stds, 'rawnames':rawnames }
+        curstatinfo = {'indsets':indsets, 'means':means, 'stds':stds, 'rawnames':rawnames, 'stats_per_indset':stats_per_indset }
         stats_HFO_per_ct[combine_type] = curstatinfo
 
+
+if exit_after == 'gatherFeatStats':
+    sys.exit(0)
 
 if save_stats:
     subjs_analyzed, subjs_analyzed_glob = upre.getRawnameListStructure(rawnames, ret_glob=True)
@@ -391,8 +419,9 @@ if calc_stats_multi_band:
         ugf.bandFilter(rawnames, times_pri, main_sides_pri, side_switched_pri,
                 sfreqs, skips, dat_pri_persfreq, fband_names_inc_HFO, gv.fband_names_HFO_all,
                 fbands, n_jobs_flt, allow_CUDA and n_jobs == 'cuda',
-                       subfeature_order, subfeature_order_lfp_hires,
-                smoothen_bandpow, ann_MEGartif_prefix_to_use)
+                subfeature_order, subfeature_order_lfp_hires,
+                smoothen_bandpow, ann_MEGartif_prefix_to_use,
+                anndict_per_intcat_per_rawn= anndict_per_intcat_per_rawn)
 
     #raws_flt_pri_perband_ = {}
 
@@ -400,27 +429,42 @@ if calc_stats_multi_band:
     stats_multiband_bp_per_ct  = {}
 
     for combine_type in gv.rawnames_combine_types_rawdata:
-        means_perband_flt_pri, stds_perband_flt_pri = \
+
+
+        #means_perband_flt_pri, stds_perband_flt_pri = \
+        indsets, means_per_indset_per_band_flt, stds_per_indset_per_band_flt, stats_per_indset_per_band_flt = \
         ugf.gatherMultiBandStats(rawnames,raw_perband_flt_pri, times_pri,
                                     chnames_perband_flt_pri, side_switched_pri, sfreq,
-                                    baseline_int, combine_type,
-                                    artif_handling)
-        d = {}
-        d['means'] = means_perband_flt_pri
-        d['stds'] = stds_perband_flt_pri
-        d['rawnames'] = rawnames
-        stats_multiband_flt_per_ct[combine_type] = d
+                                    intervals_for_stats, combine_type,
+                                    artif_handling, require_intervals_present = [baseline_int],
+                                    bindict_per_rawn=bindict_per_rawn)
+        #d = {}
+        #d['means'] = means_perband_flt_pri
+        #d['stds'] = stds_perband_flt_pri
+        #d['rawnames'] = rawnames
+        #stats_multiband_flt_per_ct[combine_type] = d
+        curstatinfo = {'indsets':indsets, 'rawnames':rawnames, 'stats_per_indset':stats_per_indset_per_band_flt }
+        curstatinfo['means' ]  = means_per_indset_per_band_flt
+        curstatinfo['stds' ]  = stds_per_indset_per_band_flt
+        stats_multiband_flt_per_ct[combine_type] = curstatinfo
 
-        means_perband_bp_pri,stds_perband_bp_pri = \
+        #means_perband_bp_pri,stds_perband_bp_pri = \
+        indsets, means_per_indset_per_band_bp, stds_per_indset_per_band_bp, stats_per_indset_per_band_bp =  \
         ugf.gatherMultiBandStats(rawnames,raw_perband_bp_pri, times_pri,
                                     chnames_perband_bp_pri, side_switched_pri, sfreq,
-                                    baseline_int, combine_type,
-                                    artif_handling)
-        d = {}
-        d['means'] = means_perband_bp_pri
-        d['stds'] = stds_perband_bp_pri
-        d['rawnames'] = rawnames
-        stats_multiband_bp_per_ct[combine_type] = d
+                                    intervals_for_stats, combine_type,
+                                    artif_handling, require_intervals_present = [baseline_int],
+                                    bindict_per_rawn=bindict_per_rawn)
+        #d = {}
+        #d['means'] = means_perband_bp_pri
+        #d['stds'] = stds_perband_bp_pri
+        #d['rawnames'] = rawnames
+        #stats_multiband_bp_per_ct[combine_type] = d
+
+        curstatinfo = {'indsets':indsets, 'rawnames':rawnames, 'stats_per_indset':stats_per_indset_per_band_bp }
+        curstatinfo['means' ]  = means_per_indset_per_band_bp
+        curstatinfo['stds' ]  = stds_per_indset_per_band_bp
+        stats_multiband_bp_per_ct[combine_type] = curstatinfo
 
 
     if save_stats:

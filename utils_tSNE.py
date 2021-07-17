@@ -1379,24 +1379,41 @@ def concatAnnsNaive(rawnames,true_times_pri, suffixes=['_anns']):
 
 def _rev_descr_side(descr):
     assert isinstance(descr,str)
-    if descr.startswith('BAD_LFPR'):
-        newdescr = 'BAD_LFPL'
-    elif descr.startswith('BAD_LFPL'):
-        newdescr = 'BAD_LFPR'
-    elif descr.startswith('BAD_MEGR'):
-        newdescr = 'BAD_MEGL'
-    elif descr.startswith('BAD_MEGL'):
-        newdescr = 'BAD_MEGR'
-    elif descr.endswith('_L'):
-        tmp = list(descr)
-        tmp[-1] = 'R'
-        newdescr = ''.join(tmp)
-    elif descr.endswith('_R'):
-        tmp = list(descr)
-        tmp[-1] = 'L'
-        newdescr = ''.join(tmp)
-    else:
-        raise ValueError('wrong descr {} !'.format(descr) )
+    tpls0 = [ ('BAD_LFPR','BAD_LFPL'), ('BAD_MEGR', 'BAD_MEGL')    ]
+    tpls1 = []
+    for tpl in tpls0:
+        tpls1 += [ tpl,  (tpl[1],tpl[0]) ]
+    #d = dict(tpls1)
+
+    was_some = False
+    for d1,d2 in tpls1:
+        if descr.startswith(d1):
+            add_str = ''
+            # if the artifact specification is more specific
+            if len(descr) > len(d1):
+                add_str = descr[ len(d1): ]
+            newdescr = d2 + add_str
+            was_some = True
+
+    #if descr.startswith('BAD_LFPR'):
+    #    newdescr = 'BAD_LFPL'
+    #elif descr.startswith('BAD_LFPL'):
+    #    newdescr = 'BAD_LFPR'
+    #elif descr.startswith('BAD_MEGR'):
+    #    newdescr = 'BAD_MEGL'
+    #elif descr.startswith('BAD_MEGL'):
+    #    newdescr = 'BAD_MEGR'
+    if not was_some:
+        if descr.endswith('_L'):
+            tmp = list(descr)
+            tmp[-1] = 'R'
+            newdescr = ''.join(tmp)
+        elif descr.endswith('_R'):
+            tmp = list(descr)
+            tmp[-1] = 'L'
+            newdescr = ''.join(tmp)
+        else:
+            raise ValueError('wrong descr {} !'.format(descr) )
 
     return newdescr
 
@@ -1485,7 +1502,7 @@ def concatAnns(rawnames, Xtimes_pri, suffixes=['_anns'], crop=(None,None),
         #raw.set_annotations(anns)
         anns_pri += [anns]
 
-        print(anns.onset,anns.duration,anns)
+        #print(anns.onset,anns.duration,anns)
 
         dt = Xtimes_pri[0][1] - Xtimes_pri[0][0]  #note that this is not 1/sfreq (since we skipped)
         dt_pri += [dt]
@@ -1591,6 +1608,7 @@ def concatAnns(rawnames, Xtimes_pri, suffixes=['_anns'], crop=(None,None),
 def getAnnBins(ivalis,Xtimes_almost,nedgeBins, sfreq,totskip, windowsz, dataset_bounds,
                set_empty_arrays = 0, force_all_arrays_nonzero=1):
     '''
+      returns dict of bin indices (both boundaries and filled) for each interval in ivalis
     nedgeBins -- currently unused
     windowsz -- in bins, we'll shift this forward
     totskip -- in bins
@@ -1609,8 +1627,7 @@ def getAnnBins(ivalis,Xtimes_almost,nedgeBins, sfreq,totskip, windowsz, dataset_
 
     edge_window_nbins = windowsz
     #
-    for itype in ivalis:
-        intervals = ivalis[itype]
+    for itype, intervals in ivalis.items():
         intervals_bins = []
         cur_indarr = []
         #print(itype)

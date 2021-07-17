@@ -5,6 +5,7 @@ import gc
 import utils
 import utils_tSNE as utsne
 import globvars as gv
+from os.path import join as pjoin
 
 def getFileAge(fname_full, ret_hours=True):
     import os, datetime
@@ -271,14 +272,14 @@ def plotFeatStatsScatter(rawnames,X_pri, int_types_to_stat,
             wbd_pri += [temp]
 
 
-    indsets, means_combine_all, stds_combine_all = \
+    indsets, means_combine_all, stds_combine_all, stats_per_indset_combine_all = \
         gatherFeatStats(rawnames, X_pri, feature_names_pri,
                              wbd_pri, sfreq, rawtimes_pri,int_types_to_stat
                 , side_rev_pri = side_switch_happened_pri,
                 combine_within = combine_couple[0],require_all_intervals_present=False,
                         printLog=False, minlen_bins = 2, artif_handling = artif_handling)
 
-    indsets, means_combine_no, stds_combine_no = \
+    indsets, means_combine_no, stds_combine_no, stats_per_indset_combine_no = \
         gatherFeatStats(rawnames, X_pri, feature_names_pri,
                              wbd_pri, sfreq, rawtimes_pri,
                 int_types_to_stat, side_rev_pri = side_switch_happened_pri,
@@ -403,13 +404,580 @@ def plotFeatStatsScatter(rawnames,X_pri, int_types_to_stat,
         plt.savefig(figfn)
 
 
+def getArtifForChnOrFeat(s,bindict,lendat):
+    chnstarts = ['msrc', 'LFP', 'MEG', 'EMG', 'src']
+    chn_mode = False
+    for chns in chnstarts:
+        if s.startswith(chns):
+            chn_mode = True
+    if chn_mode:
+        return getArtifForChn(s, bindict,lendat)
+    else:
+        return getArtifForFeat(s, bindict,lendat)
+
+def getArtifForFeat(featn,bindict,lendat):
+    import featlist
+    r = featlist.parseFeatName(featn)
+    chns = [ r['ch1'], r['ch2'] ]
+    mask = np.zeros(lendat, dtype=bool)
+    res_artif = {}
+    for chn in chns:
+        if chn is None:
+            continue
+        artif_cur = getArtifForChn(chn,bindict,lendat)
+        mask = mask | artif_cur
+        res_artif.update(artif_cur)
+    return res_artif,mask
+
+def getArtifForChn(chn,bindict,lendat):
+    mask = np.zeros(lendat, dtype=bool)
+
+    sidelet = ''
+    artif_basename = ''
+    if chn.startswith('msrc'):
+        artif = bindict['artif'].get('MEG',[])
+        artif_basename = 'MEG'
+        sidelet = chn[4]
+    elif chn.startswith('MEG'):
+        artif = bindict['artif'].get('MEG',[])
+        artif_basename = 'MEG'
+        # I need to find the side by looking at coordinates
+        #sidelet = chn[3]
+    elif chn.startswith('LFP'):
+        artif = bindict['artif'].get('LFP',[])
+        artif_basename = 'LFP'
+        sidelet = chn[3]
+    else:
+        raise ValueError(f'wrong chn format {chn}')
+
+    assert sidelet in ['L','R']
+
+    res_artif = {}
+    for artif_itname,bins in artif.items():
+        good_to_put = False
+        # it should be really '==', not just part of the string
+        if artif_itname == f'BAD_{artif_basename}':
+            good_to_put = True
+        elif artif_itname == f'BAD_{artif_basename}{sidelet}':
+            good_to_put = True
+        elif artif_itname == f'BAD_{chn}':
+            good_to_put = True
+
+        if good_to_put:
+            res_artif[artif_itname] = bins
+            mask[bins] = True
+
+    return  res_artif, mask
+
+def collectAllMarkedIntervals( rn,times, main_side, side_rev, sfreq=256,
+            ann_MEGartif_prefix_to_use = '_ann_MEGartif_flt',
+            printLog=True, allow_missing_files=False,
+                              remove_nonmain_artif=True):
+    # main_side -- main side AFTER reversal
+
+    anndict_per_intcat = {'artif':{}, 'beh_state':{} }
+    wbd = np.vstack([times*sfreq,1 + times*sfreq] ).astype(int)
+    wrong_brain_sidelet = main_side[0].upper()
+
+    anns_mvt, anns_artif_pri, times2, dataset_bounds = \
+    utsne.concatAnns([rn],[times],side_rev_pri=[side_rev],
+                     allow_missing=allow_missing_files)
+    #ivalis_mvt = utils.ann2ivalDict(anns_mvt)
+    lens_mvt = utils.getIntervalsTotalLens(anns_mvt, include_unlabeled
+                                            =False, times=times)
+    if printLog:
+        print(rn,lens_mvt)
+
+    anndict_per_intcat['beh_state'] = anns_mvt
+
+
+    anns_MEGartif, anns_artif_pri, times2, dataset_bounds = \
+        utsne.concatAnns([rn],[times],[ann_MEGartif_prefix_to_use],
+                         side_rev_pri=[side_rev],
+                         allow_missing=allow_missing_files )
+    lens_MEGartif = utils.getIntervalsTotalLens(anns_MEGartif, include_unlabeled =False,
+                                            times=times)
+    if printLog:
+        print(rn,lens_MEGartif)
+    # here I don't want to remove artifacts from "wrong" brain side because
+    # we use ipsilateral CB
+    anndict_per_intcat['artif']['MEG'] = anns_MEGartif
+
+    anns_LFPartif, anns_artif_pri, times2, dataset_bounds = \
+        utsne.concatAnns([rn],[times],['_ann_LFPartif'],
+                         side_rev_pri=[side_rev],
+                         allow_missing=allow_missing_files )
+    lens_LFPartif = utils.getIntervalsTotalLens(anns_LFPartif, include_unlabeled =False,
+                                            times=times)
+    if printLog:
+        print(rn,lens_LFPartif)
+
+    if remove_nonmain_artif:
+        anns_LFPartif = utils.removeAnnsByDescr(anns_LFPartif,\
+                ['artif_LFP{}'.format(wrong_brain_sidelet) ])
+
+    anndict_per_intcat['artif']['LFP'] = anns_LFPartif
+
+    return anndict_per_intcat
+
+def markedIntervals2Bins(anndict_per_intcat,times,sfreq):
+    bindict_per_bintype = {'artif':{}, 'beh_state':{} }
+    wbd = np.vstack([times*sfreq,1 + times*sfreq] ).astype(int)
+
+
+    #anns_mvt, anns_artif_pri, times2, dataset_bounds = \
+    #utsne.concatAnns([rn],[times],side_rev_pri=[side_rev],
+    #                 allow_missing=allow_missing_files)
+    ##ivalis_mvt = utils.ann2ivalDict(anns_mvt)
+    #lens_mvt = utils.getIntervalsTotalLens(anns_mvt, include_unlabeled
+    #                                        =False, times=times)
+    #if printLog:
+    #    print(rn,lens_mvt)
+    #import pdb; pdb.set_trace()
+    anns_mvt = anndict_per_intcat['beh_state']
+
+    ib_mvt_perit_merged = \
+    utils.getWindowIndicesFromIntervals(wbd,utils.ann2ivalDict(anns_mvt) ,
+                    sfreq,ret_type='bins_contig',
+                    wbd_type='contig',
+                    ret_indices_type =
+                        'window_inds', nbins_total=len(times) )
+
+    bindict_per_bintype['beh_state'] = ib_mvt_perit_merged
+
+
+    #anns_MEGartif, anns_artif_pri, times2, dataset_bounds = \
+    #    utsne.concatAnns([rn],[times],[ann_MEGartif_prefix_to_use],
+    #                     side_rev_pri=[side_rev],
+    #                     allow_missing=allow_missing_files )
+    #lens_MEGartif = utils.getIntervalsTotalLens(anns_MEGartif, include_unlabeled =False,
+    #                                        times=times)
+    #if printLog:
+    #    print(rn,lens_MEGartif)
+
+    anns_MEGartif = anndict_per_intcat['artif']['MEG']
+    # here I don't want to remove artifacts from "wrong" brain side because
+    # we use ipsilateral CB
+    ib_MEG_perit_merged = \
+        utils.getWindowIndicesFromIntervals(wbd,utils.ann2ivalDict(anns_MEGartif) ,
+                                        sfreq,ret_type='bins_contig',
+                                        wbd_type='contig',
+                                        ret_indices_type =
+                                            'window_inds', nbins_total=len(times) )
+    bindict_per_bintype['artif']['MEG'] = ib_MEG_perit_merged
+
+    #anns_LFPartif, anns_artif_pri, times2, dataset_bounds = \
+    #    utsne.concatAnns([rn],[times],['_ann_LFPartif'],
+    #                     side_rev_pri=[side_rev],
+    #                     allow_missing=allow_missing_files )
+    #lens_LFPartif = utils.getIntervalsTotalLens(anns_LFPartif, include_unlabeled =False,
+    #                                        times=times)
+    #if printLog:
+    #    print(rn,lens_LFPartif)
+    #anns_LFPartif = utils.removeAnnsByDescr(anns_LFPartif, ['artif_LFP{}'.format(wrong_brain_sidelet) ])
+    anns_LFPartif = anndict_per_intcat['artif']['LFP']
+
+    ib_LFP_perit_merged = \
+            utils.getWindowIndicesFromIntervals(wbd,utils.ann2ivalDict(anns_LFPartif) ,
+                                            sfreq,ret_type='bins_contig',
+                                            wbd_type='contig',
+                                            ret_indices_type =
+                                                'window_inds', nbins_total=len(times) )
+
+    bindict_per_bintype['artif']['LFP'] = ib_LFP_perit_merged
+
+    return bindict_per_bintype
+
+def collectAllMarkedIntervalBins(rn,times,main_side, side_rev,
+            sfreq=256, ann_MEGartif_prefix_to_use = '_ann_MEGartif_flt',
+                                 printLog=True,
+                                 allow_missing_files=False,
+                                remove_nonmain_artif=True ):
+
+    anndict_per_intcat = collectAllMarkedIntervals(rn,times,main_side,
+        side_rev, sfreq=sfreq,
+        ann_MEGartif_prefix_to_use = ann_MEGartif_prefix_to_use,
+        printLog=printLog, allow_missing_files=allow_missing_files,
+        remove_nonmain_artif=remove_nonmain_artif)
+
+    return markedIntervals2Bins(anndict_per_intcat,times,sfreq)
+
+    #bindict_per_bintype = {'artif':{}, 'beh_state':{} }
+    #wbd = np.vstack([times*sfreq,1 + times*sfreq] ).astype(int)
+
+
+    ##anns_mvt, anns_artif_pri, times2, dataset_bounds = \
+    ##utsne.concatAnns([rn],[times],side_rev_pri=[side_rev],
+    ##                 allow_missing=allow_missing_files)
+    ###ivalis_mvt = utils.ann2ivalDict(anns_mvt)
+    ##lens_mvt = utils.getIntervalsTotalLens(anns_mvt, include_unlabeled
+    ##                                        =False, times=times)
+    ##if printLog:
+    ##    print(rn,lens_mvt)
+    ##import pdb; pdb.set_trace()
+    #anns_mvt = anndict_per_intcat['beh_state']
+
+    #ib_mvt_perit_merged = \
+    #utils.getWindowIndicesFromIntervals(wbd,utils.ann2ivalDict(anns_mvt) ,
+    #                sfreq,ret_type='bins_contig',
+    #                wbd_type='contig',
+    #                ret_indices_type =
+    #                    'window_inds', nbins_total=len(times) )
+
+    #bindict_per_bintype['beh_state'] = ib_mvt_perit_merged
+
+
+    ##anns_MEGartif, anns_artif_pri, times2, dataset_bounds = \
+    ##    utsne.concatAnns([rn],[times],[ann_MEGartif_prefix_to_use],
+    ##                     side_rev_pri=[side_rev],
+    ##                     allow_missing=allow_missing_files )
+    ##lens_MEGartif = utils.getIntervalsTotalLens(anns_MEGartif, include_unlabeled =False,
+    ##                                        times=times)
+    ##if printLog:
+    ##    print(rn,lens_MEGartif)
+
+    #anns_MEGartif = anndict_per_intcat['artif']['MEG']
+    ## here I don't want to remove artifacts from "wrong" brain side because
+    ## we use ipsilateral CB
+    #ib_MEG_perit_merged = \
+    #    utils.getWindowIndicesFromIntervals(wbd,utils.ann2ivalDict(anns_MEGartif) ,
+    #                                    sfreq,ret_type='bins_contig',
+    #                                    wbd_type='contig',
+    #                                    ret_indices_type =
+    #                                        'window_inds', nbins_total=len(times) )
+    #bindict_per_bintype['artif']['MEG'] = ib_MEG_perit_merged
+
+    ##anns_LFPartif, anns_artif_pri, times2, dataset_bounds = \
+    ##    utsne.concatAnns([rn],[times],['_ann_LFPartif'],
+    ##                     side_rev_pri=[side_rev],
+    ##                     allow_missing=allow_missing_files )
+    ##lens_LFPartif = utils.getIntervalsTotalLens(anns_LFPartif, include_unlabeled =False,
+    ##                                        times=times)
+    ##if printLog:
+    ##    print(rn,lens_LFPartif)
+    ##anns_LFPartif = utils.removeAnnsByDescr(anns_LFPartif, ['artif_LFP{}'.format(wrong_brain_sidelet) ])
+    #anns_LFPartif = anndict_per_intcat['artif']['LFP']
+
+    #ib_LFP_perit_merged = \
+    #        utils.getWindowIndicesFromIntervals(wbd,utils.ann2ivalDict(anns_LFPartif) ,
+    #                                        sfreq,ret_type='bins_contig',
+    #                                        wbd_type='contig',
+    #                                        ret_indices_type =
+    #                                            'window_inds', nbins_total=len(times) )
+
+    #bindict_per_bintype['artif']['LFP'] = ib_LFP_perit_merged
+
+    #return bindict_per_bintype
+
+
+def collecInfoForPlotHistAcrossDatasets(raws_permod_both_sides,
+    aux_info_perraw=None, fnames_noext = None,  modalities = ['src', 'LFP'],
+    qch_hist_xshift = 0.1, qmult = 1.15,
+    side_to_use =  'main_move', int_types_templ=None,
+     ann_MEGartif_prefix_to_use = '_ann_MEGartif_flt'           ):
+    '''
+    qmult  # how much to multiply the qunatile span
+    qch_hist_xshift
+    '''
+    if fnames_noext is None:
+       fnames_noext = list(sorted(raws_permod_both_sides.keys() ))
+
+    assert int_types_templ is not None
+
+
+
+    xshifts_rel_perint_permod = {}  # set shifts for displaying so that histograms don't interesect
+    dat_permod_perraw_perint = {}
+    for mod in modalities:
+        dat_permod_perraw_perint[mod] = {}
+        xshifts_rel_perint = {}
+
+
+        n_channels_all = [ len(raws_permod_both_sides[rn][mod].ch_names) for rn in fnames_noext ]
+        nmn,nmx = np.min(n_channels_all), np.max(n_channels_all)
+        assert nmn==nmx, (nmn,nmx)
+        n_channels = n_channels_all[0]
+        for int_type in int_types_templ:
+            xshifts_rel = [0]*n_channels
+            xshifts_rel_perint[int_type] = xshifts_rel
+
+        # first gather info
+        for i in range(len(fnames_noext)):
+            rawind = i
+            rawname_ = fnames_noext[rawind]
+            dat_permod_perraw_perint[mod][rawname_] = {}
+            subj,medcond,task  = utils.getParamsFromRawname(rawname_)
+            #raw = subraws[mod ][rawind]
+            raw = raws_permod_both_sides[rawname_][mod]
+            sfreq = int(raw.info['sfreq'] )
+
+            #fname_full_LFPartif = os.path.join(gv.data_dir, '{}_ann_LFPartif.txt'.format(rawname_) )
+            #anns_LFP_artif = mne.read_annotations(fname_full_LFPartif)
+
+            anns_mvt, anns_artif_pri, times2, dataset_bounds = \
+            utsne.concatAnns([rawname_],[raw.times] )
+            ivalis_mvt = utils.ann2ivalDict(anns_mvt)
+            ivalis_mvt_tb, ivalis_mvt_tb_indarrays = utsne.getAnnBins(ivalis_mvt, raw.times,
+                                                                        0, sfreq, 1, 1,
+                                                                        dataset_bounds)
+            ivalis_mvt_tb_indarrays_merged = utsne.mergeAnnBinArrays(ivalis_mvt_tb_indarrays)
+
+
+            if mod == 'LFP':
+                prefixes = ['_ann_LFPartif']
+            elif mod in ['MEG','src']:
+                prefixes = [ann_MEGartif_prefix_to_use]
+            anns_artif, anns_artif_pri, times2, dataset_bounds = \
+            utsne.concatAnns([rawname_],[raw.times],prefixes )
+            ivalis_artif = utils.ann2ivalDict(anns_artif)
+            ivalis_artif_tb, ivalis_artif_tb_indarrays = utsne.getAnnBins(ivalis_artif, raw.times,
+                                                                        0, sfreq, 1, 1,
+                                                                        dataset_bounds)
+            ivalis_artif_tb_indarrays_merged = \
+                utsne.mergeAnnBinArrays(ivalis_artif_tb_indarrays)
+
+
+            for j in range(len(int_types_templ)):
+                if mod == 'MEG':
+                    chdata,times = raw[meg_chis,:]
+                    chnames = np.array(raw.ch_names)[meg_chis]
+                elif mod == 'msrc':
+                    chdata,times = raw[src_chis,:]
+                    chnames = np.array(raw.ch_names)[src_chis]
+                else:
+                    chdata = raw.get_data()
+                    chnames = raw.ch_names
+
+                #side = None
+                #if side_to_use == 'main_trem':
+                #    side = gv.gen_subj_info[subj]['tremor_side']
+                #elif side_to_use == 'main_move':
+                #    side = gv.gen_subj_info[subj].get('move_side',None)
+                #if side is None:
+                #    print('{}: {} is None'.format(rawname_, side_to_use))
+                #side_letter = side[0].upper()
+
+                #side_rev = aux_info_perraw[rawname_]['side_switched']
+                if aux_info_perraw is not None:
+                    main_side =  aux_info_perraw[rawname_]['main_body_side']
+                    side_letter = main_side[0].upper()
+                else:
+                    side_letter = utils.getMainSide(subj,side_to_use)
+
+                itcur = int_types_templ[j]
+                int_type_cur = itcur.format(side_letter)
+
+                ivalbins = ivalis_mvt_tb_indarrays_merged.get(int_type_cur, None )
+                if ivalbins is None:
+                    print(f'{rawname_},{mod}: No artifacts found for {int_type_cur}')
+                    continue
+                mask = np.zeros(chdata.shape[1], dtype=bool)
+                mask[ivalbins] = True
+                dat_permod_perraw_perint[mod][rawname_][itcur] = [0]*len(chnames) #chds
+
+                for chni,chn in enumerate(chnames):
+                    artif_bins_cur = ivalis_artif_tb_indarrays_merged.\
+                        get('BAD_{}'.format(chn),[])
+                    mbefore = np.sum(mask)
+                    mask[artif_bins_cur] = False
+                    mafter = np.sum(mask)
+                    ndiscard = mbefore - mafter
+                    if ndiscard > 0:
+                        print('{}:{} in {} {} artifact bins (={:5.2f}s) discarded'.\
+                            format(rawname_,chn,int_type_cur,ndiscard,ndiscard/sfreq))
+                    chd = chdata[chni,mask] # noe that it is not modified
+
+                    dat_permod_perraw_perint[mod][rawname_][itcur][chni] = chd
+
+                    #if chd.size < 10:
+                    #chd = chdata[0,sl]
+
+                    # compute spread
+                    r = np.quantile(chd,1-qch_hist_xshift)- np.quantile(chd,qch_hist_xshift)
+                    xshift = r * qmult
+                    xshifts_rel_perint[itcur][chni] = max(xshifts_rel_perint[itcur][chni], xshift)
+        xshifts_rel_perint_permod[mod] = xshifts_rel_perint
+
+    print('\nStats gather finished')
+    return dat_permod_perraw_perint, xshifts_rel_perint_permod
+
+
+
+def plotHistAcrossDatasets(raws_permod_both_sides, dat_permod_perraw_perint,
+        xshifts_rel_perint_permod, src_chis , aux_info_perraw,
+        artifact_handling = 'no', stat_per_int = None,
+        rawnames_to_show=None, modalities=['src', 'LFP'],
+        show_std = False,
+        int_types_templ = ['trem_{}', 'notrem_{}', 'hold_{}', 'move_{}'],
+        cmap = None, ann_MEGartif_prefix_to_use ='_ann_MEGartif_flt',
+        highpass_used = False, qsh = 5e-2, qsh_disp = 5e-3,
+        nbins_hist = 100, alpha=0.7):
+    '''
+    qsh = 5e-2  # what will be used for limits computations
+    qsh_disp = 5e-3 # what will be given to hist function
+    data is NOT scaled, only shifted
+    normally  dat_permod_perraw_perint  contain data with already rejected artif
+    mean_dict -- dict (interval name -> means)
+    '''
+
+    import matplotlib.pyplot as plt
+
+    if stat_per_int  is not None:
+        assert isinstance(stat_per_int,dict)
+
+    if int_types_templ is None:
+        int_types_templ = ['trem_{}', 'notrem_{}', 'hold_{}', 'move_{}']
+    if rawnames_to_show is None:
+        rawnames_to_show = list(sorted(raws_permod_both_sides.keys() ) )
+
+    if cmap is None:
+        vals = np.linspace(0,1, 20)
+        #np.random.shuffle(vals)
+        cmap = plt.cm.colors.ListedColormap(plt.cm.tab20(vals))
+
+    #timerange = 0,100
+    #timerange = None
+    nr = len(rawnames_to_show);
+    nc = len(int_types_templ)
+    #nr =2
+    ww = 10; hh = 3
+
+
+    subjinds = [ int( rn[1:3] ) for rn in rawnames_to_show]
+    subjinds = list(sorted(set(subjinds) ) )
+    subjindlist_str = ','.join(map(str,subjinds) )
+    for mod in modalities:
+        fig,axs = plt.subplots(nrows=nr, ncols=nc, figsize= (nc*ww,nr*hh), sharex='col')
+        axs = axs.reshape( (nr,nc) )
+        plt.subplots_adjust(left=0.03,right=0.99, bottom=0.02,top=0.97)
+        mns = nc*[np.inf]
+        mxs = nc*[-np.inf]
+
+        for i,rawname_ in enumerate(rawnames_to_show):
+            rawind = i
+            rawname_ = rawnames_to_show[rawind]
+            main_side =  aux_info_perraw[rawname_]['main_body_side']
+            main_side = main_side[0].upper()
+            side_rev = aux_info_perraw[rawname_]['side_switched']
+            raw = raws_permod_both_sides[rawname_][mod ]
+            sfreq = int( raw.info['sfreq'] )
+
+            bindict_per_bintype = collectAllMarkedIntervalBins(rawname_,
+                raw.times,main_side,
+                side_rev, sfreq,
+                ann_MEGartif_prefix_to_use = ann_MEGartif_prefix_to_use)
+
+            for j in range(nc):
+                ax = axs[i,j]
+                itcur = int_types_templ[j]
+
+                # it will be reset later if interval is indeed found
+                ax.set_title('{} {} interval_type={}, 0s'.\
+                            format(rawnames_to_show[rawind], mod, itcur) )
+
+
+                chds = dat_permod_perraw_perint[mod][rawname_].get(itcur,None)
+                if chds is None:
+                    continue
+                if mod == 'MEG':
+                    chnames = np.array(raw.ch_names)[meg_chis]
+                elif mod == 'src':
+                    chnames = np.array(raw.ch_names)[src_chis]
+                else:
+                    chnames = raw.ch_names
+                for chni,chn in enumerate(chnames):
+                    chdata, times = raw[chn]
+                    clr = cmap(vals[chni ])
+
+                    chd = chds[chni]
+
+                    if artifact_handling == 'reject':
+                        _,artif_mask = getArtifForChn(chn, bindict_per_bintype,
+                                                    chd.shape[-1] )
+                        adur = np.sum(artif_mask) / sfreq
+                        print(f'{rawname_},{chn}: Rejecting {adur}s of artifacts')
+                        chd = chd[~artif_mask]
+
+                    # sum shifts over all prev channel indices
+                    xshift = np.sum( xshifts_rel_perint_permod[mod][itcur][:chni] )
+                    chd2 = chd + xshift
+                    if chd2.size == 0:
+                        print('fdf')
+                        continue
+
+                    # I have to do it per channel because chds is a list0.7 of
+                    # arrays of varying length (because different channels have
+                    # different artifacts)
+                    q0 = np.quantile(chd2,qsh)
+                    q1 = np.quantile(chd2,1-qsh)
+                    q0_disp = np.quantile(chd2,qsh_disp)
+                    q1_disp = np.quantile(chd2,1-qsh_disp)
+
+                    lbl = f'{chn}:{chd2.size}'
+                    ax.hist(chd2, bins=nbins_hist, label=lbl, alpha = alpha,
+                            range=(q0_disp,q1_disp), color=clr )
+                    if stat_per_int is None:
+                        # normal mean of the data with (hand-marked)
+                        # artifacts discarded
+                        mean_cur =  np.mean(chd2)
+                        if show_std:
+                            std_cur =  np.std(chd2)
+                    else:
+                        a = stat_per_int[itcur.format(main_side) ]
+                        if a is not None:
+                            mean_cur,std_cur = a[chn]
+                        else:
+                            mean_cur =  np.mean(chd2)
+                            if show_std:
+                                std_cur =  np.std(chd2)
+                        # robust mean of the data with (hand-marked)
+                        # artifacts discarded
+                        #mean_cur_ = mean_dict[itcur.format(main_side) ]
+                        #if mean_cur_ is not None:
+                        #    mean_cur = mean_cur_[chni] + xshift
+                        #else:
+                        #    mean_cur =  np.mean(chd2)
+                    ax.axvline(x=mean_cur, c=clr, ls=':')
+                    if show_std:
+                        ax.axvline(x=mean_cur - std_cur, c=clr, ls=':')
+                        ax.axvline(x=mean_cur + std_cur, c=clr, ls=':')
+
+                    mns[j] = min(mns[j], q0)
+                    mxs[j] = max(mxs[j], q1)
+
+    #                 if chn == 'LFPL12':
+    #                     print(mod,rawname_,itcur,'LFPL12',np.min(chd2),np.max(chd2))
+
+                    #print('{} shift {}  q = {},{}'.format(chn,xshift,q0,q1) )
+
+
+                ax.legend(loc='upper left')
+                ax.grid()
+                ax.set_title('{} {} interval_type={}, {:.2f}s'.
+                            format(rawnames_to_show[rawind], mod, itcur, len(chd2)/raw.info['sfreq'] ) )
+
+            print('  {} of {} finished'.format(mod, rawname_))
+        for i in range(nr):
+            for j in range(nc):
+                if not np.any( np.isinf([mns[j], mxs[j] ] ) ):
+                    axs[i,j].set_xlim(mns[j],mxs[j])
+
+        fig_fname = '{}_stat_across_subj_highpass{}_{}_artif_{}_locmeans{}.pdf'.\
+            format(subjindlist_str,highpass_used,mod,artifact_handling,
+                   int(stat_per_int is None) )
+        fig_fname_full = pjoin(gv.dir_fig,fig_fname)
+        plt.savefig(fig_fname_full)
+        plt.close()
+        print('{} finished'.format(fig_fname))
+
 def gatherFeatStats(rawnames, X_pri, featnames_pri, wbd_pri,
                  sfreq, times_pri, int_types, main_side=None,
                  side_rev_pri = None,
                  minlen_bins = 5 * 256 / 32, combine_within='no',
-                    require_all_intervals_present=True,
+                    require_intervals_present = 1,
                     ann_MEGartif_prefix_to_use = '_ann_MEGartif_flt',
-                    printLog=True, artif_handling = 'reject' ):
+                    printLog=True, artif_handling = 'reject',
+                   bindict_per_rawn = None ):
     '''
     it assumes that featnams are constant across datasets WITHIN indset.
         So I cannot apply it to raws from different subjects really. But from the same subject I can
@@ -417,8 +985,21 @@ def gatherFeatStats(rawnames, X_pri, featnames_pri, wbd_pri,
     main_side -- AFTER reversal (because I pass side_rev to concatAnns)
     usually notrem_<sidelet>
 
+    bindict_per_rawn[rawn ]['beh_state'] and bindict_per_rawn[rawn ]['artif']['MEG' | 'LFP']
+
     returns indsets,means,stds each is a list of dicts (key = interval type)
     '''
+    if isinstance(require_intervals_present, int) or isinstance(require_intervals_present, bool):
+        require_all_intervals_present = require_intervals_present
+        if require_all_intervals_present:
+            intervals_required = int_types
+        else:
+            intervals_required = []
+    elif isinstance(require_intervals_present, list):
+        intervals_required = require_intervals_present
+    else:
+        raise ValueError(f"wrong type of require_intervals_present {type(require_intervals_present) }")
+
     if int_types is None:
         int_types = [ 'entire' ]
     for int_type in int_types:
@@ -481,71 +1062,86 @@ def gatherFeatStats(rawnames, X_pri, featnames_pri, wbd_pri,
     indsets = genCombineIndsets(rawnames, combine_within)
 
     # collect annotations
-    ib_MEG_perit_perraw = {}
-    ib_LFP_perit_perraw = {}
-    ib_mvt_perit_perraw = {}
+    #ib_MEG_perit_perraw = {}
+    #ib_LFP_perit_perraw = {}
+    #ib_mvt_perit_perraw = {}
+    if bindict_per_rawn is None:
+        bindict_per_rawn = {}
+        bindict_set = False
+    else:
+        bindict_set = True
     for rawi,rn in enumerate(rawnames):
         #ib_MEG_perit = getCleanIntervalBins(rn,sfreq, times,['_ann_MEGartif'] )
         #ib_LFP_perit = getCleanIntervalBins(rn,sfreq, times,['_ann_LFPartif'] )
-        wrong_brain_sidelet = main_side[0].upper()
 
         wbd = wbd_pri[rawi]
         times = times_pri[rawi]
         side_rev = side_rev_pri[rawi]
 
-        anns_mvt, anns_artif_pri, times2, dataset_bounds = \
-        utsne.concatAnns([rn],[times],side_rev_pri=[side_rev])
-        #ivalis_mvt = utils.ann2ivalDict(anns_mvt)
-        lens_mvt = utils.getIntervalsTotalLens(anns_mvt, include_unlabeled =False,
-                                               times=times_pri[rawi])
-        print(rn,lens_mvt)
+
+        if not bindict_set :
+            bindict_per_bintype = collectAllMarkedIntervalBins(rn,times,main_side,
+                side_rev, sfreq,
+                ann_MEGartif_prefix_to_use = ann_MEGartif_prefix_to_use,
+                allow_missing_files=False)
+
+            bindict_per_rawn[rn ] =bindict_per_bintype
+
+        #anns_mvt, anns_artif_pri, times2, dataset_bounds = \
+        #utsne.concatAnns([rn],[times],side_rev_pri=[side_rev])
+        ##ivalis_mvt = utils.ann2ivalDict(anns_mvt)
+        #lens_mvt = utils.getIntervalsTotalLens(anns_mvt, include_unlabeled
+        #                                       =False, times=times_pri[rawi])
+        #print(rn,lens_mvt)
+        ##import pdb; pdb.set_trace()
+        #ib_mvt_perit_merged = \
+        #utils.getWindowIndicesFromIntervals(wbd,utils.ann2ivalDict(anns_mvt) ,
+        #                sfreq,ret_type='bins_contig',
+        #                wbd_type='contig',
+        #                ret_indices_type =
+        #                    'window_inds', nbins_total=len(times) )
+
+
+        #anns_MEGartif, anns_artif_pri, times2, dataset_bounds = \
+        #    utsne.concatAnns([rn],[times],[ann_MEGartif_prefix_to_use],
+        #                     side_rev_pri=[side_rev] ) lens_MEGartif =
+        #utils.getIntervalsTotalLens(anns_MEGartif, include_unlabeled =False,
+        #                            times=times_pri[rawi])
+        #print(rn,lens_MEGartif)
+        ## here I don't want to remove artifacts from "wrong" brain side because
+        ## we use ipsilateral CB
+        #ib_MEG_perit_merged = \
+        #    utils.getWindowIndicesFromIntervals(wbd,utils.ann2ivalDict(anns_MEGartif) ,
+        #                                    sfreq,ret_type='bins_contig',
+        #                                    wbd_type='contig',
+        #                                    ret_indices_type =
+        #                                        'window_inds', nbins_total=len(times) )
+
+        #anns_LFPartif, anns_artif_pri, times2, dataset_bounds = \
+        #    utsne.concatAnns([rn],[times],['_ann_LFPartif'], side_rev_pri=[side_rev] )
+        #lens_LFPartif = utils.getIntervalsTotalLens(anns_LFPartif, include_unlabeled =False,
+        #                                       times=times_pri[rawi])
+        #print(rn,lens_LFPartif)
+        #anns_LFPartif = utils.removeAnnsByDescr(anns_LFPartif, ['artif_LFP{}'.format(wrong_brain_sidelet) ])
+        #ib_LFP_perit_merged = \
+        #    utils.getWindowIndicesFromIntervals(wbd,utils.ann2ivalDict(anns_LFPartif) ,
+        #                                    sfreq,ret_type='bins_contig',
+        #                                    wbd_type='contig',
+        #                                    ret_indices_type =
+        #                                        'window_inds', nbins_total=len(times) )
+
+
+
         #import pdb; pdb.set_trace()
-        ib_mvt_perit_merged = \
-        utils.getWindowIndicesFromIntervals(wbd,utils.ann2ivalDict(anns_mvt) ,
-                                            sfreq,ret_type='bins_contig',
-                                            wbd_type='contig',
-                                            ret_indices_type =
-                                                'window_inds', nbins_total=len(times) )
 
-
-        anns_MEGartif, anns_artif_pri, times2, dataset_bounds = \
-            utsne.concatAnns([rn],[times],[ann_MEGartif_prefix_to_use], side_rev_pri=[side_rev] )
-        lens_MEGartif = utils.getIntervalsTotalLens(anns_MEGartif, include_unlabeled =False,
-                                               times=times_pri[rawi])
-        print(rn,lens_MEGartif)
-        # here I don't want to remove artifacts from "wrong" brain side because
-        # we use ipsilateral CB
-        ib_MEG_perit_merged = \
-            utils.getWindowIndicesFromIntervals(wbd,utils.ann2ivalDict(anns_MEGartif) ,
-                                            sfreq,ret_type='bins_contig',
-                                            wbd_type='contig',
-                                            ret_indices_type =
-                                                'window_inds', nbins_total=len(times) )
-
-        anns_LFPartif, anns_artif_pri, times2, dataset_bounds = \
-            utsne.concatAnns([rn],[times],['_ann_LFPartif'], side_rev_pri=[side_rev] )
-        lens_LFPartif = utils.getIntervalsTotalLens(anns_LFPartif, include_unlabeled =False,
-                                               times=times_pri[rawi])
-        print(rn,lens_LFPartif)
-        anns_LFPartif = utils.removeAnnsByDescr(anns_LFPartif, ['artif_LFP{}'.format(wrong_brain_sidelet) ])
-        ib_LFP_perit_merged = \
-            utils.getWindowIndicesFromIntervals(wbd,utils.ann2ivalDict(anns_LFPartif) ,
-                                            sfreq,ret_type='bins_contig',
-                                            wbd_type='contig',
-                                            ret_indices_type =
-                                                'window_inds', nbins_total=len(times) )
-
-
-
-        #import pdb; pdb.set_trace()
-
-        ib_MEG_perit_perraw[rn] = ib_MEG_perit_merged
-        ib_LFP_perit_perraw[rn] = ib_LFP_perit_merged
-        ib_mvt_perit_perraw[rn] = ib_mvt_perit_merged
+        #ib_MEG_perit_perraw[rn] = ib_MEG_perit_merged
+        #ib_LFP_perit_perraw[rn] = ib_LFP_perit_merged
+        #ib_mvt_perit_perraw[rn] = ib_mvt_perit_merged
 
         #it = int_type_pri[rawi]
-        print('rescaleFeats: Rescaling features for raw {} accodring to data in interval {}, combining within {}'.format(rn,
-                                                                                                    int_types,combine_within  ) )
+        print('gatherFeatStats: Rescaling features for raw {}'
+              ' accodring to data in interval {}, '
+              'combining within {}'.format(rn, int_types,combine_within  ) )
 
     for int_type_cur in int_types:
         for rawindseti_cur,indset_cur in enumerate(indsets):
@@ -555,14 +1151,14 @@ def gatherFeatStats(rawnames, X_pri, featnames_pri, wbd_pri,
                 if int_type_cur == 'entire':
                     int_found_within_indset = True
                     break
-                elif int_type_cur in ib_mvt_perit_perraw[rawn ]:
+                elif int_type_cur in bindict_per_rawn[rawn ]['beh_state']:
                     int_found_within_indset = True
                     break
             if not int_found_within_indset:
                 #s = "Warning, not data collected for interval {}".format(int_type_cur)
                 s = "gatherFeatStats: in {} there is no intervals in the indeset {} for interval {}".\
                     format(rawn, rawindseti_cur, int_type_cur)
-                if require_all_intervals_present:
+                if int_type_cur in intervals_required:
                     raise ValueError(s)
                 else:
                     print('Warninig ',s)
@@ -580,9 +1176,11 @@ def gatherFeatStats(rawnames, X_pri, featnames_pri, wbd_pri,
             featnames = featnames_pri[ indset_cur[0] ]  # they are supposed to be constant within indset
             me_perchan  = np.zeros( len(featnames) )
             std_perchan = np.zeros( len(featnames) )
+            # FIRST over features, THEN over datasets
             for feati,featn in enumerate(featnames):
+                stat_perchan[featn] = None
                 dats_forstat = []
-                # for each dataset separtely we rescale features accodring to an
+                # for each dataset separtely we collect features accodring to an
                 # interval
                 for rawi in indset_cur:
                     assert len(featnames) == len(featnames_pri[rawi] )
@@ -590,9 +1188,10 @@ def gatherFeatStats(rawnames, X_pri, featnames_pri, wbd_pri,
                     #    chnames_nicened = utils.nicenMEGsrc_chnames(chnames, roi_labels, srcgrouping_names_sorted,
                     #                                    prefix='msrc_')
                     rn = rawnames[rawi]
-                    ib_MEG_perit =  ib_MEG_perit_perraw[rn]
-                    ib_LFP_perit =  ib_LFP_perit_perraw[rn]
-                    ib_mvt_perit =  ib_mvt_perit_perraw[rn]
+                    ib_MEG_perit =  bindict_per_rawn[rn]['artif'].get('MEG',{})
+                    ib_LFP_perit =  bindict_per_rawn[rn]['artif'].get('LFP',{})
+                    ib_mvt_perit =  bindict_per_rawn[rn]['beh_state']
+                    #print(rn, ib_mvt_perit.keys() )
 
                     if (int_type_cur != 'entire') and (int_type_cur not in ib_mvt_perit):
                         if printLog:
@@ -611,27 +1210,40 @@ def gatherFeatStats(rawnames, X_pri, featnames_pri, wbd_pri,
                         mask[ib_mvt] = 1
                         nbinstot_mvt = np.sum(mask)
 
-                        nbinstot_LFP_artif = 0
-                        nbinstot_MEG_artif = 0
+                        #nbinstot_LFP_artif = 0
+                        #nbinstot_MEG_artif = 0
                         if artif_handling == 'reject':
-                            if featn.find('LFP' ) >= 0:
-                                for bins in ib_LFP_perit.values():
-                                    #print('LFP artif nbins ',len(bins))
-                                    mask[bins] = 0
-                                nbinstot_LFP_artif = nbinstot_mvt - np.sum(mask)
-                            if featn.find('msrc' ) >= 0:
-                                for bins in ib_MEG_perit.values():
-                                    #print('MEG artif nbins ',len(bins))
-                                    mask[bins] = 0
-                                nbinstot_MEG_artif = nbinstot_mvt - nbinstot_LFP_artif - np.sum(mask)
+                            artif,mask_artif = getArtifForChnOrFeat(featn,bindict_per_rawn[rn],lendat)
+                            mask[mask_artif] = 0
+                            n = np.sum(mask)
+                            # TODO: I don't want to merge artifacts from all
+                            # LFP channels together
+                            #if featn.find('LFP' ) >= 0:
+                            #    for bins in ib_LFP_perit.values():
+                            #        #print('LFP artif nbins ',len(bins))
+                            #        mask[bins] = 0
+                            #    nbinstot_LFP_artif = nbinstot_mvt - np.sum(mask)
+                            #if featn.find('msrc' ) >= 0:
+                            #    for bins in ib_MEG_perit.values():
+                            #        #print('MEG artif nbins ',len(bins))
+                            #        mask[bins] = 0
+                            #    nbinstot_MEG_artif = nbinstot_mvt - nbinstot_LFP_artif - np.sum(mask)
+                            if gv.DEBUG_MODE:
+                                print('{} {}, nremaining bins {}, '
+                                    ' removed {} bins, '
+                                    ' intlen/n {:.3f}, intlen {}'.
+                                    format(int_type_cur,featn, n,  nbinstot_mvt - n,
+                                        100*n/nbinstot_mvt, nbinstot_mvt,
+                                            ) )
                         elif artif_handling == 'impute':
                             raise ValueError('not implemented')
 
                         n = np.sum(mask)
+
                         if (n  < minlen_bins) and (not gv.DEBUG_MODE):
-                            print('feature {}, nremaining bins {}, percentage {}, total in interval {} LFPaftif {} MEGartif'.
-                                format(featn, n, n/mask.size, nbinstot_mvt,
-                                       nbinstot_LFP_artif, nbinstot_MEG_artif) )
+                            #print('feature {}, nremaining bins {}, percentage {}, total in interval {} LFPaftif {} MEGartif'.
+                            #    format(featn, n, n/mask.size, nbinstot_mvt,
+                            #           nbinstot_LFP_artif, nbinstot_MEG_artif) )
                             raise ValueError(f'too few bins to compute stats {int_type_cur}: {n}<{minlen_bins}')
 
                         dat_forstat = dat[mask]
@@ -643,10 +1255,16 @@ def gatherFeatStats(rawnames, X_pri, featnames_pri, wbd_pri,
                     dats_forstat = np.hstack(dats_forstat)  # over datasets
                     if artif_handling == 'reject':
                         me,std = utsne.robustMean(dats_forstat,ret_std=1)
+                        if gv.DEBUG_MODE:
+                            print('robust ',dats_forstat.shape, me,std)
                     else:
                         me = np.mean(dats_forstat, axis=0)
                         std = np.std(dats_forstat, axis=0)
-                    assert abs(std) > 1e-20
+                        if gv.DEBUG_MODE:
+                            print('normal ',dats_forstat.shape, me,std)
+                    assert abs(std) > 1e-20, \
+                        (f'Std is small for {rawnames[rawi]}'
+                         f' {featn} {int_type_cur}')
                 else:
                     if printLog:
                         print('gatherFeatStats: Nothing found of {} in {}'.format(int_type_cur,rn) )
@@ -654,23 +1272,30 @@ def gatherFeatStats(rawnames, X_pri, featnames_pri, wbd_pri,
                 stat_perchan[featn] = (me,std)
                 me_perchan [feati] = me
                 std_perchan[feati] = std
+                #print('-------------LENS ', len(me_perchan), len(stat_perchan) )
 
-            mean_per_int_type[int_type_cur] = me_perchan
-            std_per_int_type [int_type_cur] = std_perchan
-            stat_per_int_type[int_type_cur] = stat_perchan
+            if np.all(np.isnan(me_perchan) ):
+                mean_per_int_type[int_type_cur] = None
+                std_per_int_type [int_type_cur] = None
+                stat_per_int_type[int_type_cur] = None
+            else:
+                mean_per_int_type[int_type_cur] = me_perchan
+                std_per_int_type [int_type_cur] = std_perchan
+                stat_per_int_type[int_type_cur] = stat_perchan
+            print(mean_per_int_type.keys() )
 
         means_per_indset += [mean_per_int_type]
         stds_per_indset   += [std_per_int_type ]
         stats_per_indset += [stat_per_int_type]
 
-    return indsets, means_per_indset, stds_per_indset
+    return indsets, means_per_indset, stds_per_indset, stats_per_indset
 
 def rescaleFeats(rawnames, X_pri, featnames_pri, wbd_pri,
                  sfreq, times_pri, int_type, main_side=None,
                  side_rev_pri = None,
                  minlen_bins = 5 * 256 / 32, combine_within='no',
                  means=None, stds=None, indsets=None, stat_fname_full=None,
-                 artif_handling = 'reject' ):
+                 artif_handling = 'reject', bindict_per_rawn=None ):
     '''
     rescales in-place
     usually notrem_<sidelet>
@@ -716,11 +1341,12 @@ def rescaleFeats(rawnames, X_pri, featnames_pri, wbd_pri,
             stds = f['stds']
             indsets = f['indsets']
         else:
-            indsets, means, stds = \
+            indsets, means, stds, stats_per_indset = \
                 gatherFeatStats(rawnames, X_pri, featnames_pri, wbd_pri, sfreq, times_pri,
                         int_type, side_rev_pri = side_rev_pri,
                         combine_within = combine_within, minlen_bins = minlen_bins,
-                                artif_handling=artif_handling)
+                                artif_handling=artif_handling,
+                                bindict_per_rawn= bindict_per_rawn)
     else:
         assert len(means) == len(stds)
         assert len(means) == len(indsets)
@@ -988,6 +1614,7 @@ def loadRaws(rawnames,mods_to_load, sources_type = None, src_type_to_use=None,
              src_file_grouping_ind=None, use_saved = True, highpass_lfreq = None,
              input_subdir="", n_jobs=1, filter_phase = 'minimum'  ):
     '''
+    only loads data from different files, does not do any magic with sides
     use_saved means using previously done preproc
     filter_phase can be 'minimum' (gives causal) or 'zero'
     '''
@@ -1733,11 +2360,28 @@ def getGenIntervalInfoFromRawname(rawname_, crop=None):
     #     print('!! There is no tremor, accdording to prev me')
 
 
-def getIndsetMask(indsets):
+def getIndsetMask(indsets, allow_repeating=False, allow_holes = False):
+    # indsets -- list of list of int
+    # takes list of indsets, extrats all indices that were there and then returns a
+    # (non-binary) mask, saying which index belongs to which indset
+    assert isinstance(indsets,list)
+    assert isinstance(indsets[0],list)
     allinds = []
     for iset in indsets:
         allinds += list(iset)
     allinds = sorted(allinds)
+    allinds_s = set( allinds )
+    if len(allinds_s) < len(allinds):
+        warns = 'Warning indsets list contain repeating indices!' + str(indsets)
+        print(warns)
+        if not allow_repeating:
+            raise ValueError(warns)
+    dai = np.diff(allinds)
+    if np.min(dai) < 0:
+        warns = 'Warning indsets contain indices with holes (some missign)!' + str(indsets)
+        if not allow_holes:
+            raise ValueError(warns)
+
     mask = -1 * np.ones( len(allinds), dtype=int)
     for ind in allinds:
         for iseti,iset in enumerate(indsets):

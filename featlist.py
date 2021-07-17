@@ -1,9 +1,14 @@
 import numpy as np
 import re
 import globvars as gv
+from collections.abc import Iterable
 
 def selFeatsRegexInds(names, regexs, unique=1):
-    # return indices of names that match at least one of the regexes
+    '''
+    names
+    regexs list
+    return indices of names that match at least one of the regexes
+    '''
     import re
     if isinstance(regexs,str):
         regexs = [regexs]
@@ -27,7 +32,6 @@ def selFeatsRegexInds(names, regexs, unique=1):
     return inds
 
 def parseFeatNames(fns,n_jobs=1):
-    from collections.abc import Iterable
     assert isinstance(fns,Iterable) and not isinstance(fns,str)
     pr = parseFeatName(fns, n_jobs=n_jobs)
     ftype, fb1,fb2,ch1,ch2,mod1,mod2 = [0]*len(fns),\
@@ -65,8 +69,6 @@ def parseFeatNames(fns,n_jobs=1):
 
 
 def parseFeatName(fn,  addarg = None, n_jobs=1):
-    from collections.abc import Iterable
-    import globvars as gv
 
     if isinstance(fn,Iterable) and not isinstance(fn,str):
         from joblib import Parallel, delayed, cpu_count

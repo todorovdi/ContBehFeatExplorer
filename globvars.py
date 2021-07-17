@@ -33,6 +33,7 @@ global dir_fig
 global dir_fig_preproc
 global fbands
 global EMG_per_hand
+global feat_types_all
 global DEBUG_MODE
 
 specgrams                           = None
@@ -120,6 +121,7 @@ wband_feat_types = ['rbcorr', 'bpcorr', 'con' ]
 bichan_feat_types = ['rbcorr', 'bpcorr', 'con' ]
 bichan_bifreq_feat_types = ['rbcorr', 'bpcorr' ]
 bichan_bifreq_cross_feat_types = [ 'bpcorr' ]
+feat_types_all = [ 'con',  'Hjorth', 'H_act', 'H_mob', 'H_compl', 'bpcorr', 'rbcorr']
 
 EMG_per_hand = {'right':['EMG061_old', 'EMG062_old'], 'left':['EMG063_old', 'EMG064_old' ] }
 EMG_per_hand_base = {'right':['EMG061', 'EMG062'], 'left':['EMG063', 'EMG064' ] }
@@ -257,11 +259,43 @@ class globparams:
                                           'subj': ['merge_within_subj'],
                                           }
 
+        #motor-related
         self.areas_list_aal_my_guess = ["Precentral", "Rolandic_Oper",
                                         "Supp_Motor_Area", "Postcentral",
                                         "Parietal_Sup", "Parietal_Inf",
                                         "Precuneus", "Paracentral_Lobule",
                                         "Cerebellum" ];
+
+        self.parcel_groupings_post0 = {}
+        self.parcel_groupings_post0['M1-ish'] = ['Precentral','Supp_Motor_Area', 'Rolandic_Oper',
+                                        'Postcentral', 'Paracentral_Lobule']
+        self.parcel_groupings_post0['Parietal'] = ['Parietal_Sup', 'Parietal_Inf']
+        self.parcel_groupings_post0['Cerebellum'] = ['Cerebellum']
+
+        # need to cover whole brain
+        # sent by Jan
+        #old_labels_MATLAB = [['Precentral','Postcentral','Rolandic_Oper','Supp_Motor_Area','Paracentral'],
+        # ['Frontal_Sup'],['Frontal_Mid','Frontal_Med'],['Frontal_Inf'],['Parietal_Sup','Precuneus'],
+        # ['Parietal_Inf'],['Temporal_Sup','Temporal_Pole_Sup'],['Temporal_Mid','Temporal_Pole_Mid'],
+        # ['Temporal_Inf','Fusiform'],['Occipital_Sup','Cuneus'],['Occipital_Mid'],
+        # ['Occipital_Inf','Calcarine','Lingual'],['Angular'],['Supra_Marginal'],['Cerebellum']];
+        #new_labels_MATLAB = [['Senorimotor'], ['FrontalSup'],['FrontalMed'], ['FrontalInf'],['ParietalSup'], ['ParietalInf'],['TemporalSup'], ['TemporalMid'] ,['TemporalInf'], ['OccipitalSup'], ['OccipitalMid'],['OccipitalInf'], ['Angular'],['SupraMarginal'],['Cerebellum']];
+        new_labels = ['Senorimotor', 'FrontalSup', 'FrontalMed', 'FrontalInf', 'ParietalSup',
+                      'ParietalInf', 'TemporalSup', 'TemporalMid', 'TemporalInf', 'OccipitalSup', 'OccipitalMid',
+                      'OccipitalInf', 'Angular', 'SupraMarginal', 'Cerebellum']
+
+        # sent by Jan was similar to AAL but not exactly
+        old_labels_MATLAB_mod = [['Precentral','Postcentral','Rolandic_Oper','Supp_Motor_Area','Paracentral_Lobule'],
+         ['Frontal_Sup','Frontal_Sup_Medial', 'Frontal_Sup_Orb'],['Frontal_Mid','Frontal_Mid_Orb','Frontal_Med_Orb'],
+                                 ['Frontal_Inf_Oper','Frontal_Inf_Orb','Frontal_Inf_Tri'],['Parietal_Sup','Precuneus'],
+         ['Parietal_Inf'],['Temporal_Sup'],['Temporal_Mid','Temporal_Pole_Mid'],
+         ['Temporal_Inf'],['Occipital_Sup','Cuneus'],['Occipital_Mid'],
+         ['Occipital_Inf','Calcarine','Lingual'],['Angular'],['SupraMarginal'],['Cerebellum']];
+
+        self.parcel_groupings_post = dict(zip(new_labels,old_labels_MATLAB_mod) )
+
+
+
 
         self.src_grouping_names_order = ['all', 'CB_vs_rest',
                                          'CBmerged_vs_rest', 'merged',

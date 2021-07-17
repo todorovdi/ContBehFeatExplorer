@@ -3359,7 +3359,7 @@ def getWindowIndicesFromIntervals(wbd,ivalis,sfreq, ret_type='bins_list',
         r = bins
     return r
 
-def setArtifNaN(X, ivalis_artif_tb_indarrays_merged, feat_names, ignore_shape_warning=False):
+def setArtifNaN(X, ivalis_artif_tb_indarrays_merged, feat_names, ignore_shape_warning=False, set_val=np.nan, in_place=False):
     '''
     ivalis -- dict, not necessarily containing only aritfacts
     copies input array
@@ -3376,38 +3376,169 @@ def setArtifNaN(X, ivalis_artif_tb_indarrays_merged, feat_names, ignore_shape_wa
     if not ignore_shape_warning:
         assert X.shape[0] > X.shape[1]
     assert isinstance(ivalis_artif_tb_indarrays_merged, dict)
-    Xout = X.copy()
+    if in_place:
+        Xout = X
+    else:
+        Xout = X.copy()
+
+    #nums =  [0] * len(feat_names)
+    num = 0
     for interval_name in ivalis_artif_tb_indarrays_merged:
-        templ = '^BAD_(.+)'
-        matchres = re.match(templ,interval_name).groups()
-        assert matchres is not None and len(matchres) > 0
-        artif_type = matchres[0]
+        r = parseIntervalName(interval_name)
+        assert r['interval_type'] == 'artif'
+        #templ = '^BAD_(.+)'
+        #matchres = re.match(templ,interval_name).groups()
+        #assert matchres is not None and len(matchres) > 0
+        #artif_type = matchres[0]
+
+        #r['artifact_modality'] = 'LFP'
+
         mode_MEG_artif = False
         mode_LFP_artif = False
-        if artif_type.find('MEG') >= 0:
-            mode_MEG_artif = True
+        if   r['artifact_modality'] == 'MEG':
+            affected_chn_mod = 'msrc'
+            #mode_MEG_artif = True
             #print('MEG',artif_type)
-        elif artif_type.find('LFP') >= 0:
-            mode_LFP_artif = True
-            artif_chn = artif_type
+        elif r['artifact_modality'] == 'LFP':
+            affected_chn_mod = 'LFP'
+        else:
+            affected_chn_mod = None
+            #mode_LFP_artif = True
+            #artif_chn = artif_type
             #print('LFP',artif_type)
         interval_bins = ivalis_artif_tb_indarrays_merged[interval_name]
+        num += len(interval_bins)
 
+        brain_side = r['artifact_brain_side']
         # over all features
         for feati,featn in enumerate(feat_names):
-            #print(featn)
+            do_set = False
             if mode_all_chans:
-                Xout[interval_bins,feati] = np.nan
-            elif mode_LFP_artif and featn.find(artif_chn) >= 0:
-                Xout[interval_bins,feati] = np.nan
+                do_set = True
+                print('-----------1')
+            elif r['artifact_chname'] is not None:
+                do_set = featn.find( r['artifact_chname'] ) >= 0
+                print('-----------2 ', do_set)
+            elif featn.find(affected_chn_mod) >= 0:
+                if brain_side is not None:
+                    do_set = (featn.find(affected_chn_mod+ brain_side) >= 0 )
+                # if no brain_side is found then we should have BAD_LFP
+                    #import pdb; pdb.set_trace()
+                    print(f'-----------3  {featn} {interval_name} {affected_chn_mod}', do_set, r)
+                else:
+                    do_set = True
+                    print('-----------4')
+
+            print('my imptuer ',interval_name, featn, do_set)
+            if do_set:
+                Xout[interval_bins,feati] = set_val
                 #print('fd')
-            elif mode_MEG_artif and featn.find('msrc') >= 0:
-                Xout[interval_bins,feati] = np.nan
-                #print('fd')
+            print(f'--in {featn} ----- set {num} bins to {set_val}')
 
     return Xout
 
-def imputeInterpArtif(X,anns_artif, featnames, wbd_merged=None, nbins_total=None, sfreq=256):
+def getArtifForFiltering(chn,ann_aritf):
+    # creates a new annotation tailored specifically for this channel using different levels
+    onsets = []
+    durations = []
+    descrs = []
+    for a in ann_aritf:
+        descr = a['description']
+        r = re.match('^BAD_(LFP|MEG)(.?)(.*)',descr)
+        mod,side,chn_sub_id = r.groups()
+        if mod == 'MEG':
+            mod_chn = 'msrc'
+        else:
+            mod_chn = mod
+        t = mod_chn +side+ chn_sub_id
+        print(r.groups(),descr, t)
+        if chn.find( t) >= 0:
+            onsets += [a['onset']]
+            durations += [a['duration']]
+            if mod == 'LFP':
+                descrs += [f'BAD_{chn}']
+            else:
+                descrs += [f'BAD_{mod}{side}']
+            print('badom')
+    return mne.Annotations(onsets,durations,descrs)
+
+def parseIntervalName(interval_name):
+    r = {}
+
+    matchres = re.match('^BAD_(LFP|MEG)(.?)(.*)',interval_name)
+    if matchres is not None:
+        mod,side,chn_sub_id = matchres.groups()
+        r['interval_type'] = 'artif'
+        r['artifact_modality'] = mod
+        r['artifact_brain_side'] = side
+        if (chn_sub_id is not None) and len(chn_sub_id) > 0:
+            r['artifact_chname'] = mod+side+chn_sub_id
+        else:
+            r['artifact_chname'] = None
+
+    #templ = r'^BAD_(LFP.*)'
+    #matchres = re.match(templ,interval_name)
+    #if matchres is not None:
+    #    chn_hint = matchres.groups()[0]
+    #    chn = None
+    #    side = None
+    #    if len(chn_hint) > 3:
+    #        side = chn_hint[3]
+    #    if len(chn_hint) > 4:
+    #        chn = chn_hint
+
+    #    r['interval_type'] = 'artif'
+    #    r['artifact_modality'] = 'LFP'
+    #    r['artifact_brain_side'] = side
+    #    r['artifact_chname'] = chn
+
+    #templ = r'^BAD_(MEG.*)'
+    #matchres = re.match(templ,interval_name)
+    #if matchres is not None:
+    #    chn_hint = matchres.groups()[0]
+    #    chn = None
+    #    side = None
+    #    if len(chn_hint) > 3:
+    #        side = chn_hint[3]
+    #    if len(chn_hint) > 4:
+    #        chn = chn_hint
+
+    #    r['interval_type'] = 'artif'
+    #    r['artifact_modality'] = 'LFP'
+    #    r['artifact_brain_side'] = side
+    #    r['artifact_chname'] = chn
+
+    if len(r) == 0:
+        from globvars import gp
+        for itp in gp.int_types_basic:
+            templ = '^' + itp + '_(.)'
+            matchres = re.match(templ,interval_name)
+            if matchres is not None:
+                side = matchres.groups()[0]
+                r['interval_type'] = 'beh_state'
+                r['beh_state_type'] = itp
+                r['body_side'] = side
+                r['brain_side'] = getOppositeSide(side )
+
+    return r
+
+
+def imputeConstArtif(X, anns_artif, featnames, wbd_merged=None, nbins_total=None, sfreq=256, set_val=0, in_place=False):
+    if wbd_merged is None:
+        wbd_merged= np.vstack( [np.arange(X.shape[0]),np.arange(X.shape[0]) + 1 ] )
+        #print(wbd_merged.shape)
+    ivalis_artif = ann2ivalDict(anns_artif)
+    ivalis_artif_tb_indarrays_merged = \
+        getWindowIndicesFromIntervals(wbd_merged,ivalis_artif,
+                                    sfreq,ret_type='bins_contig',
+                                    ret_indices_type = 'window_inds',
+                                        nbins_total=nbins_total )
+
+    X_imputed  = setArtifNaN(X, ivalis_artif_tb_indarrays_merged, featnames,
+                                       ignore_shape_warning=False, set_val =set_val, in_place=in_place)
+    return X_imputed
+
+def imputeInterpArtif(X, anns_artif, featnames, wbd_merged=None, nbins_total=None, sfreq=256, in_place=False):
     # X: nbins x nchans
     if wbd_merged is None:
         wbd_merged= np.vstack( [np.arange(X.shape[0]),np.arange(X.shape[0]) + 1 ] )
@@ -3420,7 +3551,7 @@ def imputeInterpArtif(X,anns_artif, featnames, wbd_merged=None, nbins_total=None
                                         nbins_total=nbins_total )
 
     X_artif_nan  = setArtifNaN(X, ivalis_artif_tb_indarrays_merged, featnames,
-                                       ignore_shape_warning=False)
+                                       ignore_shape_warning=False, in_place=in_place)
 
     import pandas as pd
     df = pd.DataFrame(X_artif_nan)
@@ -3479,7 +3610,7 @@ def makeSimpleRaw(dat,ch_names=None,sfreq=256,rescale=True,l=10,
         for chni in range(len(ch_names) ):
             ch_names[chni] = ch_names[chni][:l] + '_{}'.format(chni)
 
-    info_ = mne.create_info( ch_names=ch_names, ch_types= ['csd']*len(ch_names), sfreq=sfreq)
+    info_ = mne.create_info( ch_names=list(ch_names), ch_types= ['csd']*len(ch_names), sfreq=sfreq)
 
     if copy:
         dat = dat.copy()
@@ -3774,6 +3905,20 @@ def dispSrcGroupInfo(grps):
     print('min {}, max {}; ulen {}, umin {}, umax {}'.
           format(min(grps), max(grps), len(ugrps), min(ugrps), max(ugrps)) )
 
+def addSideToParcels(parcel_labels_no_side,body_side):
+    # accorindg to hemisphere
+    res = []
+    for p in parcel_labels_no_side:
+        assert not (p.endswith('_L') or p.endswith('_R') or p.endswith('_B') )
+        if p == 'Cerebellum':
+            rp = p + '_' + body_side[0].upper()
+        else:
+            opside = getOppositeSideStr(body_side)
+            rp = p+ '_' + opside[0].upper()
+
+        res += [rp]
+
+
 def vizGroup(sind_str,positions,labels,srcgroups, show=True, labels_to_skip = ['unlabeled'],
              show_legend=True):
     '''
@@ -3835,10 +3980,10 @@ def vizGroup(sind_str,positions,labels,srcgroups, show=True, labels_to_skip = ['
 
 def vizGroup2(sind_str, positions, labels, srcgroups,
               show=True, labels_to_skip = ['unlabeled'],
-             show_legend=True, alpha=0.1, seed=None, figsize_mult = 1, msz=15,
+             show_legend=True, alpha_surf=0.1, seed=None, figsize_mult = 1, msz=15,
               printLog=0, color_grouping = None,
              color_group_labels = None, sizes=None, def_alpha = 0.9,
-              msz_mult=0.25):
+              msz_mult=0.25, roi_labels_all = None):
     '''
     visualize src group. Slower than vizGroup, but allows to save things normally and legends as well
     positions -- 3D coords of ALL sources (not just subgroups)
@@ -3898,7 +4043,7 @@ def vizGroup2(sind_str, positions, labels, srcgroups,
     #x,y,z = positions[inds].T
     ax_top.view_init(90,-90)
     ax_top.plot_trisurf(rr_mm[:,0], rr_mm[:,1], rr_mm[:,2], triangles=tris-1,
-                    alpha=alpha)
+                    alpha=alpha_surf)
     ax_top.set_zticks([])
     #
     ax_top.set_yticks([])
@@ -3907,7 +4052,7 @@ def vizGroup2(sind_str, positions, labels, srcgroups,
 
     ax_side.view_init(0,0)
     ax_side.plot_trisurf(rr_mm[:,0], rr_mm[:,1], rr_mm[:,2], triangles=tris-1,
-                    alpha=alpha)
+                    alpha=alpha_surf)
     ax_side.set_xticks([])
     #
     ax_side.set_yticks([])
@@ -3942,13 +4087,18 @@ def vizGroup2(sind_str, positions, labels, srcgroups,
     msz = msz * figsize_mult
     color_list = []
     marker_sizes = []
-    for grpi in range(len(labels_cur)):
-        lab = labels_cur[grpi]
+    # plot positions acoording to scrgroups
+    for grpi,lab in enumerate(labels_cur):
         if printLog:
             print(lab)
         #inds = np.where(srcgroups_dict[sgdn] == grpi)
         # indices in srcgroups
-        inds = np.where(srcgroups == grpi)
+
+        if roi_labels_all is None:
+            group_code = grpi
+        else:
+            group_code = list(roi_labels_all).index(lab)
+        inds = np.where(srcgroups == group_code)
         if lab in labels_to_skip:
             print('  skipping {} {} points'.format(len(inds),lab) )
             continue
@@ -3990,26 +4140,27 @@ def vizGroup2(sind_str, positions, labels, srcgroups,
         legels = []
         s = 12
         if color_group_labels is None:
-            for i in range(len(labels)):
-                if labels[i] in labels_to_skip:
+            for labi,lab in enumerate(labels):
+                if lab in labels_to_skip:
                     continue
-                legel = mpl.lines.Line2D([0], [0], marker='o', color='w', label=labels[i],
-                                                markerfacecolor=clrs[i], markersize=s)
+                legel = mpl.lines.Line2D([0], [0], marker='o', color='w', label=lab,
+                                                markerfacecolor=clrs[labi], markersize=s)
                 legels += [legel]
+                #print(lab)
         else:
             for i in range(len(color_group_labels)):
                 legel = mpl.lines.Line2D([0], [0], marker='o', color='w',
                                          label=color_group_labels[i],
                                          markerfacecolor=clrs[i], markersize=s)
                 legels += [legel]
-                ax_leg.legend(handles = legels,loc='center', prop={'size':13} )
+        ax_leg.legend(handles = legels,loc='center', prop={'size':13} )
         ax_leg.set_xticks([])
         ax_leg.set_yticks([])
         ax_leg.set_zticks([])
         ax_leg.view_init(90,-90)
         ax_leg.grid(0)
 
-    return clrs
+    return axs, clrs
 
 def parseMEGsrcChnamesShortList(chnames):
     sides = []
@@ -4216,3 +4367,19 @@ def collectFeatTypeInfo(feature_names, keep_sides=0, ext_info = True):
     info['bichan_feat_info'] = bichan_feat_info
 
     return info
+
+def getMainSide(s, main_type = 'trem'):
+    if len(s) < 5:
+        subj = s
+    else:
+        subj,medcond_,task_ = getParamsFromRawname(s)
+    import globvars as gv
+    side = None
+    if main_type == 'trem':
+        side = gv.gen_subj_info[subj]['tremor_side']
+    elif main_type == 'move':
+        side = gv.gen_subj_info[subj].get('move_side',None)
+    if side is None:
+        print('{}: {} is None'.format(s, main_type))
+
+    return side[0].upper()

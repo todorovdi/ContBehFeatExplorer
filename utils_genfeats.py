@@ -22,12 +22,18 @@ def collectDataFromMultiRaws(rawnames, raws_permod_both_sides, sources_type,
                              crop_start,crop_end,msrc_inds, rec_info_pri,
                              mainLFPchans_pri=None, mainLFPchan_newname=None):
     '''
+    uses loaded data in different modalities and converts is to numpy arrays,
+    performing side switching if necessary
+
     side_to_use can be 'tremor_side', 'move_side' , 'both', 'left' , 'right'
     rawnames are important to have because they give ordering
     \<new_main_side\> is what will appear as main in the output
 
     usually mainLFPchan_newname wil not be used because I will better rename in run_PCA
     '''
+    import copy
+    from utils import changeRawInfoSides
+    from utils_tSNE import revAnnSides
 
     assert new_main_side in ['left','right']
     dat_pri = []
@@ -37,6 +43,7 @@ def collectDataFromMultiRaws(rawnames, raws_permod_both_sides, sources_type,
 
     extdat_pri = []
     anns_pri = []
+    anndict_per_intcat_per_rawn = {}
     #rec_info_pri = []
     subfeature_order_pri = []
     subfeature_order_lfp_hires_pri = []
@@ -74,8 +81,6 @@ def collectDataFromMultiRaws(rawnames, raws_permod_both_sides, sources_type,
         roi_labels_cur = roi_labels[srcgrouping_names_sorted[src_grouping ]  ]
 
 
-
-
         #############################################################
 
         raws = raws_permod_both_sides[rawname_]
@@ -102,9 +107,8 @@ def collectDataFromMultiRaws(rawnames, raws_permod_both_sides, sources_type,
         aux_info_per_raw[rawname_]['main_body_side'] = main_body_side
 
 
-        import copy
 
-        assert isinstance(main_body_side,str)
+        #assert isinstance(main_body_side,str)
 
 
         raw_lfponly       = raws['LFP']
@@ -136,17 +140,26 @@ def collectDataFromMultiRaws(rawnames, raws_permod_both_sides, sources_type,
             else:
                 chnames_lfp_to_use = chnames_lfp
 
-            raws_lfp_perside[side].pick_channels(   chnames_lfp_to_use )
-            if raw_lfp_hires is not None:
-                raws_lfp_hires_perside[side].pick_channels(   chnames_lfp_to_use  )
+            if len(chnames_lfp_to_use) == 0:
+                raws_lfp_perside[side] = None
+                if raw_lfp_hires is not None:
+                    raws_lfp_hires_perside[side] = None
+            else:
+                raws_lfp_perside[side].pick_channels(   chnames_lfp_to_use )
+                print('LFFFFP ',side, chnames_lfp_to_use, raws_lfp_perside[side].ch_names)
+                if raw_lfp_hires is not None:
+                    raws_lfp_hires_perside[side].pick_channels(   chnames_lfp_to_use  )
 
 
 
+            # old ver
             chis =  mne.pick_channels_regexp(raw_srconly.ch_names, 'msrc{}_all_*'.format(side)  )
             if len(chis) == 0:
                 chis =  mne.pick_channels_regexp(raw_srconly.ch_names, 'msrc{}_{}_[0-9]+_c[0-9]+'.
                                                 format(side, src_grouping)  )
+            nchis_before_CB_manip = len(chis)
 
+            print('brain side ',side,chis)
             if use_ipsilat_CB:
                 CB_contrahand_parcel_ind = roi_labels_cur.index('Cerebellum_{}'.format(side))
                 hand_side = getOppositeSideStr(side)
@@ -155,20 +168,33 @@ def collectDataFromMultiRaws(rawnames, raws_permod_both_sides, sources_type,
                                                             format(side,src_grouping,CB_contrahand_parcel_ind)  )
                 CB_ipsihand_inds = mne.pick_channels_regexp(raw_srconly.ch_names, 'msrc{}_{}_{}_c[0-9]+'.
                                                         format(hand_side,src_grouping,CB_ipsihand_parcel_ind)  )
+                print(chis, CB_contrahand_inds)
                 chis = np.setdiff1d(chis, CB_contrahand_inds)
-                chis = np.hstack( [chis, CB_ipsihand_inds])
+                print(chis)
+                chis = np.hstack( [chis, CB_ipsihand_inds]).astype(int)  # for some reason hstack converts to float
+                print(chis)
                 #TODO: remove Cerbellum sources, add Cerebellum sources from the other side
 
-            assert len(chis) > 0
+            assert len(chis) > 0, f'no source channels found at least on {side} side, before CB manip was {nchis_before_CB_manip}'
             chnames_src = [raw_srconly.ch_names[chi] for chi in chis]
             raws_srconly_perside[side].pick_channels(   chnames_src  )
 
 
 
-            print('{} side,  {} sources'.format(side, len(chis) ) )
+            print( raws_srconly_perside[side].ch_names)
+            print('{} brain side,  {} sources'.format(side, len(chis) ) )
 
-        from utils import changeRawInfoSides
-        from utils_tSNE import revAnnSides
+
+
+        import utils_preproc as upre
+        sfreq = int( raw_lfponly.info['sfreq'] )
+        anndict_per_intcat = upre.collectAllMarkedIntervals( rawname_, raw_lfponly.times,
+            new_main_side, side_switch_needed, sfreq=sfreq,
+            ann_MEGartif_prefix_to_use = '_ann_MEGartif_flt',
+            printLog=False, allow_missing_files=False,
+            remove_nonmain_artif= side_to_use != 'both' )
+        anndict_per_intcat_per_rawn[rawname_] = anndict_per_intcat
+
         anns_fn = rawname_ + '_anns.txt'
         anns_fn_full = os.path.join(gv.data_dir, anns_fn)
         anns = mne.read_annotations(anns_fn_full)
@@ -178,7 +204,7 @@ def collectDataFromMultiRaws(rawnames, raws_permod_both_sides, sources_type,
 
         if side_switch_needed:
             print('collectDataFromMultiRaws: Performing switching sides')
-            anns = revAnnSides(anns)
+            anns = revAnnSides(anns)      # revert anns
 
             raws_srconly_perside_new = {}
             raws_lfp_perside_new = {}
@@ -202,9 +228,13 @@ def collectDataFromMultiRaws(rawnames, raws_permod_both_sides, sources_type,
             raws_lfp_perside       = raws_lfp_perside_new
             raws_lfp_hires_perside = raws_lfp_hires_perside_new
 
-            main_body_side = new_main_side
+            if isinstance(main_body_side, str):
+                main_body_side = new_main_side
 
-        test_side_let =  main_body_side[0].upper()
+        if isinstance(main_body_side, str):
+            test_side_let =  main_body_side[0].upper()
+        else:
+            test_side_let =  main_body_side[0][0].upper()
         print(test_side_let, raws_lfp_perside[test_side_let].ch_names)
 
         anns_pri += [anns]
@@ -222,8 +252,7 @@ def collectDataFromMultiRaws(rawnames, raws_permod_both_sides, sources_type,
         rectconv_emg, ts_ = raw_emg_rectconv[chnames_emg]
         chnames_emg = [chn+'_rectconv' for chn in chnames_emg]
 
-
-        ############# Concatenate data
+        # select side to be outputted
         raws_permod = {'LFP' : raws_lfp_perside, 'msrc' : raws_srconly_perside }
         if isinstance(main_body_side,str):
             hand_sides = [main_body_side[0].upper() ]
@@ -237,6 +266,8 @@ def collectDataFromMultiRaws(rawnames, raws_permod_both_sides, sources_type,
             allowd_srcis_subregex = '[{}]'.format( ','.join( map(str, msrc_inds ) ))
         #else:
         #    allowd_srcis_subregex = '[{}]'.format( ','.join( map(str, msrc_inds ) ))
+
+        ############# Concatenate data
         subfeature_order = []
         dats = []
         for side_hand in hand_sides:
@@ -244,6 +275,7 @@ def collectDataFromMultiRaws(rawnames, raws_permod_both_sides, sources_type,
                 #sd = hand_sides_all[1-hand_sides.index(side_hand) ]  #
                 opside= getOppositeSideStr(side_hand)
                 #if mod in ['src','msrc']:  No! They are both in the brain, so both contralat!
+                opside = opside[0].upper()
 
                 curraw = raws_permod[mod][opside]
 
@@ -262,12 +294,16 @@ def collectDataFromMultiRaws(rawnames, raws_permod_both_sides, sources_type,
                     #msrc_inds
                     chnames_added = chns_selected
                 else:
+                    print(curraw.ch_names)
+                    #import pdb; pdb.set_trace()
+
                     curdat = curraw.get_data()
                     chnames_added = curraw.ch_names
                 dats += [ curdat ]
 
                 subfeature_order += chnames_added
-                print(mod,opside)
+                print(f'--  side_hand {side_hand}, opside {opside} modality {mod}')
+                print(chnames_added)
 
         if mainLFPchan_newname is not None:
             mainLFPchan_ind = subfeature_order.index(mainLFPchan)
@@ -287,6 +323,7 @@ def collectDataFromMultiRaws(rawnames, raws_permod_both_sides, sources_type,
             subfeature_order_lfp_hires = []
             for side_hand in hand_sides:
                 opside= getOppositeSideStr(side_hand)
+                opside = opside[0].upper()
                 #sd = hand_sides_all[1-hand_sides.index(side_hand) ]  #
                 curraw = raws_lfp_hires_perside[opside]
                 curdat  = curraw.get_data()
@@ -323,7 +360,7 @@ def collectDataFromMultiRaws(rawnames, raws_permod_both_sides, sources_type,
 
 
 
-    return dat_pri, dat_lfp_hires_pri, extdat_pri, anns_pri, times_pri,\
+    return dat_pri, dat_lfp_hires_pri, extdat_pri, anns_pri, anndict_per_intcat_per_rawn, times_pri,\
     times_hires_pri, subfeature_order_pri, subfeature_order_lfp_hires_pri, aux_info_per_raw
 
 # found on stackoverflow by someone called NaN. Some black magic I don't quite
@@ -1196,7 +1233,7 @@ def _feat_correl3(arg):
     # only the bn_From
     return rr,resname,bn_from,bn_to,pc,fromi,toi,oper,pos
 
-def computeCorr(raws, names, defnames, skip, windowsz, band_pairs,
+def computeCorr(raws, chnames_per_band, defnames, skip, windowsz, band_pairs,
                     parcel_couplings, LFP2parcel_couplings, LFP2LFP_couplings,
                     res_group_id = 9, n_jobs=None, positive=1, templ = None,
                     roi_labels = None, sort_keys=None, printLog=False, means=None,
@@ -1208,7 +1245,7 @@ def computeCorr(raws, names, defnames, skip, windowsz, band_pairs,
     windowz is in bins of Xtimes_full
     defnames -- only used to get LFP indices
     returns lists
-    names: dict of lists of strings with (short) channel names.
+    chnames_per_band: dict of lists of strings with (short) channel names.
         Before we assumed that ordering and indexing of channels is the same in all names
     '''
     #e.g  bandPairs = [('tremor','beta'), ('tremor','gamma'), ('beta','gamma') ]
@@ -1237,8 +1274,8 @@ def computeCorr(raws, names, defnames, skip, windowsz, band_pairs,
 
         # note that these names CAN be different if we couple LFP HFO to src
         # normal freqs
-        names_from = names[bn_from]
-        names_to   = names[bn_to]
+        names_from = chnames_per_band[bn_from]
+        names_to   = chnames_per_band[bn_to]
 
         # effind -- used to take raws,means and names
 
@@ -1858,10 +1895,11 @@ def bandAverage(freqs,freqs_inc_HFO,csd_pri,csdord_pri,csdord_LFP_HFO_pri,
 # (e.g. apply_function)
 def bandFilter(rawnames, times_pri, main_sides_pri, side_switched_pri,
                sfreqs, skips, dat_pri_persfreq, fband_names_inc_HFO, fband_names_HFO_all,
-               fbands, n_jobs_flt, allow_CUDA, subfeature_order, subfeature_order_lfp_hires,
+               fbands, n_jobs_flt, allow_CUDA, chnames, chnames_hires,
                smoothen_bandpow = 0, ann_MEGartif_prefix_to_use="_ann_MEGartif_flt",
                artif_handling = 'reject', anns_MEGartif=None, artif_LFPartif=None,
-              filter_phase='minimum' ):
+              filter_phase='minimum',  anndict_per_intcat_per_rawn = None,
+               artif_before_bandpow = 'impute_const', return_imputed_flt = True ):
     import utils_tSNE as utsne
     sfreq = sfreqs[0]
     raw_perband_flt_pri      = [0] * len(rawnames)
@@ -1883,7 +1921,7 @@ def bandFilter(rawnames, times_pri, main_sides_pri, side_switched_pri,
     if allow_CUDA and gv.CUDA_state == 'ok':
         n_jobs_maybe_cuda = 'cuda'
 
-    for rawind in range(len(rawnames)):
+    for rawind,rn in enumerate(rawnames):
         raw_perband_flt = {}
         raw_perband_bp  = {}
         chnames_perband_flt = {}
@@ -1891,9 +1929,9 @@ def bandFilter(rawnames, times_pri, main_sides_pri, side_switched_pri,
         #means_perband_flt = {}
         #means_perband_bp  = {}
 
-        rn = rawnames[rawind]
         main_side_before_change = main_sides_pri[rawind]  # side of body
         opsidelet = utils.getOppositeSideStr(main_side_before_change[0].upper() ) # side of brain
+
 
         #fname_full_LFPartif = os.path.join(gv.data_dir, '{}_ann_LFPartif.txt'.format(rn) )
         #fname_full_MEGartif = os.path.join(gv.data_dir, '{}{}.txt'.format(rn,ann_MEGartif_prefix_to_use) )
@@ -1906,17 +1944,21 @@ def bandFilter(rawnames, times_pri, main_sides_pri, side_switched_pri,
 
 
         if artif_handling == 'reject':
-            anns_MEGartif, _, _, _ = \
-                utsne.concatAnns([rn],[times_pri[rawind] ],[ann_MEGartif_prefix_to_use],
-                                    side_rev_pri=[side_switched_pri[rawind] ] )
+            if anndict_per_intcat_per_rawn is None:
+                anns_MEGartif, _, _, _ = \
+                    utsne.concatAnns([rn],[times_pri[rawind] ],[ann_MEGartif_prefix_to_use],
+                                        side_rev_pri=[side_switched_pri[rawind] ] )
 
-            anns_LFPartif, _, _, _ = \
-                utsne.concatAnns([rn],[times_pri[rawind] ],['_ann_LFPartif'],
-                                    side_rev_pri=[side_switched_pri[rawind] ]  )
-            #print(anns_MEGartif.onset)
-            #print(anns_LFPartif.onset)
-            anns_LFPartif = utils.removeAnnsByDescr(anns_LFPartif, ['artif_LFP{}'.format(wrong_brain_sidelet) ])
-            #print(anns_LFPartif.onset)
+                anns_LFPartif, _, _, _ = \
+                    utsne.concatAnns([rn],[times_pri[rawind] ],['_ann_LFPartif'],
+                                        side_rev_pri=[side_switched_pri[rawind] ]  )
+                #print(anns_MEGartif.onset)
+                #print(anns_LFPartif.onset)
+                anns_LFPartif = utils.removeAnnsByDescr(anns_LFPartif, ['artif_LFP{}'.format(wrong_brain_sidelet) ])
+                #print(anns_LFPartif.onset)
+            else:
+                anns_MEGartif = anndict_per_intcat_per_rawn[rn ]['artif']['MEG']
+                anns_LFPartif = anndict_per_intcat_per_rawn[rn ]['artif']['LFP']
         elif artif_handling == 'ignore':
             anns_MEGartif= mne.Annotations([],[],[])
             anns_LFPartif= mne.Annotations([],[],[])
@@ -1934,46 +1976,90 @@ def bandFilter(rawnames, times_pri, main_sides_pri, side_switched_pri,
             means_perchan_bp = {}
             for si,dat_pri_cur_sfreq in enumerate(dat_pri_persfreq):
                 sfreq_cur = sfreqs[si]
+
+                print(sfreq_cur,sfreq)
                 # for hires we will only process HFO bands
                 if sfreq_cur > sfreq + 1e-10 and (bandname not in fband_names_HFO_all):
                     continue
                 if abs(sfreq-sfreq_cur) < 1e-10 and (bandname in fband_names_HFO_all):
                     continue
 
-                #print(si,bandname)
+                if gv.DEBUG_MODE:
+                    print('bandFilter ',si,bandname)
 
                 dat_cur = dat_pri_cur_sfreq[rawind]
                 low,high = fbands[bandname]
+                # I don't want to put ch_namse because they can be too long
                 r = utils.makeSimpleRaw(dat_cur, ch_names=None,
                                         sfreq=sfreq_cur, rescale=False,copy=True)
                 filter_length = filter_length_dict[bandname]
 
+                #anns_LFPartif.description
 
+                # WARNING: this code does not check whether artifacs are
+                # relevant. I.e. if I have artifact of kind LFPR<number>, it
+                # will be counted REGARDLESS whether it is in the list of
+                # channels names
                 if bandname.find('HFO') < 0:
-                    chnames_cur = subfeature_order
-                    r.set_annotations(anns_MEGartif)
-                    r.set_annotations(anns_LFPartif)
+                    chnames_cur = chnames
+                    #r.set_annotations(anns_MEGartif)
+                    #r.set_annotations(anns_LFPartif)
 
                     chis_LFP  = mne.pick_channels_regexp(chnames_cur,'LFP.*' )
-                    chis_msrc = mne.pick_channels_regexp(chnames_cur,'msrc.*')
-                    r.filter(l_freq=low,h_freq=high, n_jobs=n_jobs_maybe_cuda,
-                            skip_by_annotation='BAD_LFP{}'.format(opsidelet), pad='symmetric',
-                            phase=filter_phase, filter_length=filter_length, picks=chis_LFP )
-                    r.filter(l_freq=low,h_freq=high, n_jobs=n_jobs_maybe_cuda,
-                            skip_by_annotation='BAD_MEG', pad='symmetric',
-                            phase=filter_phase, filter_length=filter_length, picks=chis_msrc )
-                else: # we have only LFP channels then
-                    chnames_cur = subfeature_order_lfp_hires
-                    r.set_annotations(anns_LFPartif)
-                    r.filter(l_freq=low,h_freq=high, n_jobs=n_jobs_maybe_cuda,
-                            skip_by_annotation='BAD_LFP{}'.format(opsidelet), pad='symmetric',
-                            phase=filter_phase, filter_length=filter_length )
+                    #chis_msrc = mne.pick_channels_regexp(chnames_cur,'msrc.*')
 
-                r_data_interp_artif = utils.imputeInterpArtif(r.get_data().T,  r.annotations, \
-                                        chnames_cur, sfreq=sfreq_cur)
-                r2 = utils.makeSimpleRaw(r_data_interp_artif.T, ch_names=None,
+                    ann_toghether = mne.Annotations([],[],[])
+                    for chni in chis_LFP:
+                        temp_ann = utils.getArtifForFiltering(chnames_cur[chni], anns_LFPartif )
+                        r.set_annotations(temp_ann)
+                        ann_toghether = ann_toghether + temp_ann
+                        r.filter(l_freq=low,h_freq=high, n_jobs=n_jobs_maybe_cuda,
+                                skip_by_annotation='BAD_LFP{}'.format(opsidelet), pad='symmetric',
+                                phase=filter_phase, filter_length=filter_length, picks=[chni] )
+
+                    #r.set_annotations(anns_MEGartif)
+                    for side in ['L','R']:
+                        chis_msrc = mne.pick_channels_regexp(chnames_cur,f'msrc{side}.*')
+                        temp_ann = utils.getArtifForFiltering(f'msrc{side}', anns_MEGartif )
+                        r.set_annotations(temp_ann)
+                        ann_toghether = ann_toghether + temp_ann
+                        print(anns_MEGartif.__dict__)
+                        print('LLLLLLLLLLLLLLLLLLLLLLll ',len(chis_msrc), side, len(temp_ann) )
+                        r.filter(l_freq=low,h_freq=high, n_jobs=n_jobs_maybe_cuda,
+                                skip_by_annotation=f'BAD_MEG{side}', pad='symmetric',
+                                phase=filter_phase, filter_length=filter_length, picks=chis_msrc )
+                    r.set_annotations(ann_toghether)
+                else: # we have only LFP channels then
+                    chnames_cur = chnames_hires
+                    ann_toghether = mne.Annotations([],[],[])
+                    for chni,chn in enumerate(chnames_cur):
+                        temp_ann = utils.getArtifForFiltering(chnames_cur[chni], anns_LFPartif )
+                        ann_toghether = ann_toghether + temp_ann
+                        r.set_annotations(temp_ann)
+                        r.filter(l_freq=low,h_freq=high, n_jobs=n_jobs_maybe_cuda,
+                                skip_by_annotation='BAD_LFP{}'.format(opsidelet), pad='symmetric',
+                                phase=filter_phase, filter_length=filter_length, picks=[chni] )
+
+                    r.set_annotations(ann_toghether)
+
+                print('TOGEYTEHR',r.annotations.__dict__)
+
+                # Imputing is necessary becaue when bandpower receives something
+                # with artifacats not removed, they have long influence, longer
+                # than timewindow length
+                # we give here annotations already filtered by side if necessary
+                if artif_before_bandpow == 'impute_interp':
+                    r_data_imputed = utils.imputeInterpArtif(r._data.T,  r.annotations, \
+                                            chnames_cur, sfreq=sfreq_cur, in_place=return_imputed_flt)
+                elif artif_before_bandpow == 'impute_const':
+                    r_data_imputed = utils.imputeConstArtif(r._data.T,  r.annotations, \
+                                            chnames_cur, sfreq=sfreq_cur, in_place=return_imputed_flt)
+
+                r2 = utils.makeSimpleRaw(r_data_imputed.T, ch_names=None,
                                         sfreq=sfreq_cur, rescale=False,copy=True)
                 r2.set_annotations(r.annotations)
+
+                #r2 = r
 
                 # for debug of some particular data
                 #if np.max( np.abs( r.get_data() [:,-1] ) ) > 1e-10:
@@ -1983,11 +2069,11 @@ def bandFilter(rawnames, times_pri, main_sides_pri, side_switched_pri,
                     rbp = r2.copy()
                     #chnames_perband_flt[bandname] = chnames_tfr
                     #chnames_perband_bp [bandname]  =chnames_tfr
-                    chnames_perband_flt[bandname]  =subfeature_order
-                    chnames_perband_bp [bandname]  =subfeature_order
+                    chnames_perband_flt[bandname]  =chnames
+                    chnames_perband_bp [bandname]  =chnames
                 else:
                     rbp = r2  # we won't need filtered itself for hires
-                    chnames_perband_bp [bandname] =subfeature_order_lfp_hires
+                    chnames_perband_bp [bandname] =chnames_hires
                 rbp.apply_hilbert()
                 # zeroth is convolution with 1 elemnt. After strideing it
                 # should be like in tfr/Hjorth
@@ -2040,11 +2126,16 @@ def bandFilter(rawnames, times_pri, main_sides_pri, side_switched_pri,
 
 def gatherMultiBandStats(rawnames,raw_perband_pri, times_pri, chnames_perband_pri,
                          side_switched_pri, sfreq,
-                         baseline_int, scale_data_combine_type, artif_handling):
+                         baseline_int, scale_data_combine_type, artif_handling,
+                         require_intervals_present, bindict_per_rawn=None):
     import utils_preproc as upre
 
-    means_perband_pri    = [ dict() ] * len(rawnames)
-    stds_perband_pri     = [ dict() ] * len(rawnames)
+    #means_perband_pri    = [ dict() ] * len(rawnames)
+    #stds_perband_pri     = [ dict() ] * len(rawnames)
+
+    means_per_indset_per_band = {}
+    stds_per_indset_per_band = {}
+    stats_per_indset_per_band = {}
 
     for bandname in raw_perband_pri[0].keys():
         #raws_pri_perband_[bandname] = [0]*len(rawnames)
@@ -2053,19 +2144,25 @@ def gatherMultiBandStats(rawnames,raw_perband_pri, times_pri, chnames_perband_pr
             dats_band_T_pri[rawind] = raw_perband_pri[rawind][bandname].get_data().T
 
         chns_pri = [ chnames_perband_pri[rawind][bandname] for rawind in range(len(rawnames) ) ]
-        indsets, means, stds = \
+        indsets, means, stds, stats_per_indset = \
             upre.gatherFeatStats(rawnames, dats_band_T_pri,
-                                 chns_pri, None, sfreq, times_pri,
-                    baseline_int, side_rev_pri = side_switched_pri,
-                    combine_within = scale_data_combine_type, minlen_bins = 5*sfreq,
-                            artif_handling=artif_handling)
+                chns_pri, None, sfreq, times_pri,
+                baseline_int, side_rev_pri = side_switched_pri,
+                combine_within = scale_data_combine_type, minlen_bins = 5*sfreq,
+                artif_handling=artif_handling,
+                require_intervals_present=require_intervals_present,
+                                 bindict_per_rawn= bindict_per_rawn)
 
-        means_curband_pri = upre.valsPerIndset2PerInd(indsets,means)
-        stds_curband_pri  = upre.valsPerIndset2PerInd(indsets,stds)
+        stats_per_indset_per_band[bandname] = stats_per_indset
+        means_per_indset_per_band[bandname] = means
+        stds_per_indset_per_band [bandname] = stds
 
-        for rawind in range(len(rawnames)):
-            means_perband_pri[rawind][bandname] = means_curband_pri[rawind]
-            stds_perband_pri[rawind][bandname] = stds_curband_pri[rawind]
+        #means_curband_pri = upre.valsPerIndset2PerInd(indsets,means)
+        #stds_curband_pri  = upre.valsPerIndset2PerInd(indsets,stds)
+
+        #for rawind in range(len(rawnames)):
+        #    means_perband_pri[rawind][bandname] = means_curband_pri[rawind]
+        #    stds_perband_pri[rawind][bandname] = stds_curband_pri[rawind]
 
 
 
@@ -2109,5 +2206,6 @@ def gatherMultiBandStats(rawnames,raw_perband_pri, times_pri, chnames_perband_pr
     #    for rawind in range(len(rawnames)):
     #        means_perband_bp_pri[rawi][bandname] = means_bp_curband_pri[rawind]
 
-    return means_perband_pri, stds_perband_pri
+    #return means_perband_pri, stds_perband_pri
+    return indsets, means_per_indset_per_band, stds_per_indset_per_band  , stats_per_indset_per_band
 
