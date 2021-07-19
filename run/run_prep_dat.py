@@ -58,7 +58,7 @@ opts, args = getopt.getopt(effargv,"hr:",
          "src_grouping=", "src_grouping_fn=",
          "input_subdir=", "save_dat=", "save_stats=", "param_file=",
          "bands_precision=", "calc_stats_multi_band=", "exit_after=",
-         "use_preloaded_raws=" ])
+         "use_preloaded_raws=", "allow_CUDA=" ])
 print('opts is ',opts)
 print('args is ',args)
 
@@ -116,6 +116,8 @@ for opt,arg in pars.items():
     elif opt == "bands_precision":
         assert arg in ['fine', 'crude']
         bands_precision = arg
+    elif opt == "allow_CUDA":
+        allow_CUDA = int(arg)
     elif opt == "sources_type":
         if len(arg):
             sources_type = arg
@@ -264,10 +266,14 @@ if not use_preloaded_raws:
     anndict_per_intcat_per_rawn = anndict_per_intcat_per_rawn_
 
 bindict_per_rawn = {}
+bindict_hires_per_rawn = {}
 for rawn,anndict_per_intcat in anndict_per_intcat_per_rawn.items():
     # here side is not important
     times_cur = raws_permod_both_sides[rawn]['LFP'].times
     bindict_per_rawn[rawn] = upre.markedIntervals2Bins(anndict_per_intcat,times_cur,sfreq)
+
+    times_hires_cur = raws_permod_both_sides[rawn]['LFP_hires'].times
+    bindict_hires_per_rawn[rawn] = upre.markedIntervals2Bins(anndict_per_intcat,times_hires_cur,sfreq_hires)
 
 if exit_after == 'collectDataFromMultiRaws':
     sys.exit(0)
@@ -284,7 +290,7 @@ if save_dat:
                                    src_grouping)
         #fname = '{}_'.format(rawn) + fn_suffix_dat
         fname_dat_full = pjoin(gv.data_dir, input_subdir, fname)
-        print('Saving ',fname_dat_full)
+        print('Saving data to ',fname_dat_full)
         np.savez(fname_dat_full,
                  dat=dat_pri[rawi],
                  dat_lfp_hires=dat_lfp_hires_pri[rawi],
@@ -310,7 +316,7 @@ subfeature_order_lfp_hires = subfeature_order_lfp_hires_pri[0]
 
 main_side_let = new_main_side[0].upper()
 artif_handling = 'reject'
-intervals_for_stats = [it + '_{}'.format(main_side_let) for it in gp.int_types_basic]
+intervals_for_stats = [it + '_{}'.format(main_side_let) for it in gp.int_types_basic] + ['entire']
 # here we plot even if we don't actually rescale
 if plot_stat_scatter and len(set( n_channels_pri ) ) == 1 :
     dat_T_pri = [0]*len(dat_pri)
@@ -361,7 +367,7 @@ for combine_type in gv.rawnames_combine_types_rawdata:
                              None, sfreq_hires, times_hires_pri,
                 intervals_for_stats, side_rev_pri = side_switched_pri,
                 combine_within = combine_type, minlen_bins = 5*sfreq, require_intervals_present = [baseline_int],
-                        artif_handling=artif_handling, bindict_per_rawn=bindict_per_rawn)
+                        artif_handling=artif_handling, bindict_per_rawn=bindict_hires_per_rawn)
 
         curstatinfo = {'indsets':indsets, 'means':means, 'stds':stds, 'rawnames':rawnames, 'stats_per_indset':stats_per_indset }
         stats_HFO_per_ct[combine_type] = curstatinfo
@@ -381,7 +387,7 @@ if save_stats:
                                    use_main_LFP_chan, src_file_grouping_ind,
                                    src_grouping )
     fname_stats_full = pjoin( gv.data_dir, input_subdir, fname_stats)
-    print('Saving ',fname_stats_full)
+    print('Saving stats to',fname_stats_full)
     np.savez(fname_stats_full, stats_per_ct=stats_per_ct, stats_HFO_per_ct=stats_HFO_per_ct,
              rawnames=rawnames, cmd=(opts,args), pars=pars)
 
@@ -431,6 +437,8 @@ if calc_stats_multi_band:
     for combine_type in gv.rawnames_combine_types_rawdata:
 
 
+        # note that here I don not have to worry about hifreq because
+        # everything is sampled with sfreq
         #means_perband_flt_pri, stds_perband_flt_pri = \
         indsets, means_per_indset_per_band_flt, stds_per_indset_per_band_flt, stats_per_indset_per_band_flt = \
         ugf.gatherMultiBandStats(rawnames,raw_perband_flt_pri, times_pri,
@@ -478,7 +486,10 @@ if calc_stats_multi_band:
                                     use_main_LFP_chan, src_file_grouping_ind,
                                     src_grouping, bands_precision )
         fname_stats_full = pjoin( gv.data_dir, input_subdir, fname_stats)
-        print('Saving ',fname_stats_full)
+        print('Saving multiband stats ',fname_stats_full)
         np.savez(fname_stats_full, stats_multiband_bp_per_ct=stats_multiband_bp_per_ct,
                 stats_multiband_flt_per_ct=stats_multiband_flt_per_ct,
                 rawnames=rawnames, cmd=(opts,args))
+
+
+

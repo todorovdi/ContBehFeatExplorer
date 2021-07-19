@@ -3415,25 +3415,25 @@ def setArtifNaN(X, ivalis_artif_tb_indarrays_merged, feat_names, ignore_shape_wa
             do_set = False
             if mode_all_chans:
                 do_set = True
-                print('-----------1')
+                #print('-----------1')
             elif r['artifact_chname'] is not None:
                 do_set = featn.find( r['artifact_chname'] ) >= 0
-                print('-----------2 ', do_set)
+                #print('-----------2 ', do_set)
             elif featn.find(affected_chn_mod) >= 0:
                 if brain_side is not None:
                     do_set = (featn.find(affected_chn_mod+ brain_side) >= 0 )
                 # if no brain_side is found then we should have BAD_LFP
                     #import pdb; pdb.set_trace()
-                    print(f'-----------3  {featn} {interval_name} {affected_chn_mod}', do_set, r)
+                    #print(f'-----------3  {featn} {interval_name} {affected_chn_mod}', do_set, r)
                 else:
                     do_set = True
-                    print('-----------4')
+                    #print('-----------4')
 
-            print('my imptuer ',interval_name, featn, do_set)
+            #print('my imptuer ',interval_name, featn, do_set)
             if do_set:
                 Xout[interval_bins,feati] = set_val
                 #print('fd')
-            print(f'--in {featn} ----- set {num} bins to {set_val}')
+            #print(f'--in {featn} ----- set {num} bins to {set_val}')
 
     return Xout
 
@@ -3451,7 +3451,7 @@ def getArtifForFiltering(chn,ann_aritf):
         else:
             mod_chn = mod
         t = mod_chn +side+ chn_sub_id
-        print(r.groups(),descr, t)
+        #print(r.groups(),descr, t)
         if chn.find( t) >= 0:
             onsets += [a['onset']]
             durations += [a['duration']]
@@ -3459,7 +3459,7 @@ def getArtifForFiltering(chn,ann_aritf):
                 descrs += [f'BAD_{chn}']
             else:
                 descrs += [f'BAD_{mod}{side}']
-            print('badom')
+            #print('badom')
     return mne.Annotations(onsets,durations,descrs)
 
 def parseIntervalName(interval_name):
@@ -4213,7 +4213,8 @@ def genStatsFn(rawnames,
 def genStatsMultiBandFn(rawnames,
                new_main_side, data_modalities, use_main_LFP_chan, src_file_grouping_ind,
                  src_grouping, bands_precision, prefix=None):
-    fn_suffix_dat = 'dat_{}_newms{}_mainLFP{}_grp{}-{}.npz'.format(','.join(data_modalities),
+    fn_suffix_dat = '{}_dat_{}_newms{}_mainLFP{}_grp{}-{}.npz'.format(bands_precision,
+                                                                      ','.join(data_modalities),
                                                                    new_main_side[0].upper(),
                                                                 use_main_LFP_chan,
                                                                 src_file_grouping_ind, src_grouping)
@@ -4224,7 +4225,7 @@ def genStatsMultiBandFn(rawnames,
         nr = len(rawnames)
         l = list( sorted( set([rawn[0:3] for rawn in rawnames] ) ))
         inds_str = ','.join(l )
-        fname_stats = 'stats_{}_{}_{}_'.format(inds_str,nr,bands_precision)  + fn_suffix_dat
+        fname_stats = 'stats_{}_{}_'.format(inds_str,nr)  + fn_suffix_dat
     return fname_stats
 
 def genMLresFn(rawnames, sources_type, src_file_grouping_ind, src_grouping,
@@ -4383,3 +4384,21 @@ def getMainSide(s, main_type = 'trem'):
         print('{}: {} is None'.format(s, main_type))
 
     return side[0].upper()
+
+def freqs2relevantBands(relevant_freqs, fband_names = None, bands_acc = 'crude'):
+    import globvars as gv
+    if fband_names is None:
+        if bands_acc == 'crude':
+            fbl = gv.fband_names_crude
+        else:
+            fbl = gv.fband_names_fine
+    else:
+        fbl = fband_names
+    desired_fbands = []
+    for rf in relevant_freqs:
+        for fbname in fbl:
+            fb = gv.fbands[fbname]
+            t = (rf >= fb[0]) and (rf <= fb[1])
+            if t:
+                desired_fbands += [fbname]
+    return desired_fbands

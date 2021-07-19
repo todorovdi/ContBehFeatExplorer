@@ -110,6 +110,11 @@ def collectDataFromMultiRaws(rawnames, raws_permod_both_sides, sources_type,
 
         #assert isinstance(main_body_side,str)
 
+        if crop_start is not None or crop_end is not None:
+            for rt in raws:
+                raw = raws[rt]
+                raw.crop(crop_start, crop_end)
+
 
         raw_lfponly       = raws['LFP']
         raw_lfp_hires     = raws.get('LFP_hires',None)
@@ -146,7 +151,7 @@ def collectDataFromMultiRaws(rawnames, raws_permod_both_sides, sources_type,
                     raws_lfp_hires_perside[side] = None
             else:
                 raws_lfp_perside[side].pick_channels(   chnames_lfp_to_use )
-                print('LFFFFP ',side, chnames_lfp_to_use, raws_lfp_perside[side].ch_names)
+                #print('LFFFFP ',side, chnames_lfp_to_use, raws_lfp_perside[side].ch_names)
                 if raw_lfp_hires is not None:
                     raws_lfp_hires_perside[side].pick_channels(   chnames_lfp_to_use  )
 
@@ -159,7 +164,7 @@ def collectDataFromMultiRaws(rawnames, raws_permod_both_sides, sources_type,
                                                 format(side, src_grouping)  )
             nchis_before_CB_manip = len(chis)
 
-            print('brain side ',side,chis)
+            #print('brain side ',side,chis)
             if use_ipsilat_CB:
                 CB_contrahand_parcel_ind = roi_labels_cur.index('Cerebellum_{}'.format(side))
                 hand_side = getOppositeSideStr(side)
@@ -168,11 +173,11 @@ def collectDataFromMultiRaws(rawnames, raws_permod_both_sides, sources_type,
                                                             format(side,src_grouping,CB_contrahand_parcel_ind)  )
                 CB_ipsihand_inds = mne.pick_channels_regexp(raw_srconly.ch_names, 'msrc{}_{}_{}_c[0-9]+'.
                                                         format(hand_side,src_grouping,CB_ipsihand_parcel_ind)  )
-                print(chis, CB_contrahand_inds)
+                #print(chis, CB_contrahand_inds)
                 chis = np.setdiff1d(chis, CB_contrahand_inds)
-                print(chis)
+                #print(chis)
                 chis = np.hstack( [chis, CB_ipsihand_inds]).astype(int)  # for some reason hstack converts to float
-                print(chis)
+                #print(chis)
                 #TODO: remove Cerbellum sources, add Cerebellum sources from the other side
 
             assert len(chis) > 0, f'no source channels found at least on {side} side, before CB manip was {nchis_before_CB_manip}'
@@ -181,7 +186,7 @@ def collectDataFromMultiRaws(rawnames, raws_permod_both_sides, sources_type,
 
 
 
-            print( raws_srconly_perside[side].ch_names)
+            #print( raws_srconly_perside[side].ch_names)
             print('{} brain side,  {} sources'.format(side, len(chis) ) )
 
 
@@ -247,7 +252,7 @@ def collectDataFromMultiRaws(rawnames, raws_permod_both_sides, sources_type,
         else:
             chnames_emg = raw_emg_rectconv.ch_names
 
-        print(rawname_,chnames_emg)
+        #print(rawname_,chnames_emg)
 
         rectconv_emg, ts_ = raw_emg_rectconv[chnames_emg]
         chnames_emg = [chn+'_rectconv' for chn in chnames_emg]
@@ -294,7 +299,7 @@ def collectDataFromMultiRaws(rawnames, raws_permod_both_sides, sources_type,
                     #msrc_inds
                     chnames_added = chns_selected
                 else:
-                    print(curraw.ch_names)
+                    #print(curraw.ch_names)
                     #import pdb; pdb.set_trace()
 
                     curdat = curraw.get_data()
@@ -303,7 +308,7 @@ def collectDataFromMultiRaws(rawnames, raws_permod_both_sides, sources_type,
 
                 subfeature_order += chnames_added
                 print(f'--  side_hand {side_hand}, opside {opside} modality {mod}')
-                print(chnames_added)
+                #print(chnames_added)
 
         if mainLFPchan_newname is not None:
             mainLFPchan_ind = subfeature_order.index(mainLFPchan)
@@ -2023,8 +2028,8 @@ def bandFilter(rawnames, times_pri, main_sides_pri, side_switched_pri,
                         temp_ann = utils.getArtifForFiltering(f'msrc{side}', anns_MEGartif )
                         r.set_annotations(temp_ann)
                         ann_toghether = ann_toghether + temp_ann
-                        print(anns_MEGartif.__dict__)
-                        print('LLLLLLLLLLLLLLLLLLLLLLll ',len(chis_msrc), side, len(temp_ann) )
+                        #print(anns_MEGartif.__dict__)
+                        #print('LLLLLLLLLLLLLLLLLLLLLLll ',len(chis_msrc), side, len(temp_ann) )
                         r.filter(l_freq=low,h_freq=high, n_jobs=n_jobs_maybe_cuda,
                                 skip_by_annotation=f'BAD_MEG{side}', pad='symmetric',
                                 phase=filter_phase, filter_length=filter_length, picks=chis_msrc )
@@ -2042,7 +2047,7 @@ def bandFilter(rawnames, times_pri, main_sides_pri, side_switched_pri,
 
                     r.set_annotations(ann_toghether)
 
-                print('TOGEYTEHR',r.annotations.__dict__)
+                #print('TOGETHER',r.annotations.__dict__)
 
                 # Imputing is necessary becaue when bandpower receives something
                 # with artifacats not removed, they have long influence, longer

@@ -334,6 +334,35 @@ class globparams:
 
         self.class_id_neut = 0
 
+        templs = ['{}_off_move','{}_on_move','{}_off_hold','{}_on_hold']
+        self.rawnames_debug =  []
+        for ds in ['S95', 'S94', 'S97', 'S99', 'S98']:
+            for t in templs:
+                self.rawnames_debug += [t.format(ds) ]
+        #self.rawnames_debug += ['S94_off_move','S94_on_move','S94_off_hold','S94_on_hold']
+
 
 global gp
 gp = globparams()
+
+
+#normally
+#roi_labels['all_raw'] =
+roi_labels_def = \
+ ['unlabeled', 'Precentral_L', 'Precentral_R', 'Frontal_Sup_L',
+  'Frontal_Sup_R', 'Frontal_Sup_Orb_L', 'Frontal_Sup_Orb_R', 'Frontal_Mid_L',
+  'Frontal_Mid_R', 'Frontal_Mid_Orb_L', 'Frontal_Mid_Orb_R',
+  'Frontal_Inf_Oper_L', 'Frontal_Inf_Oper_R', 'Frontal_Inf_Tri_L',
+  'Frontal_Inf_Tri_R', 'Frontal_Inf_Orb_L', 'Frontal_Inf_Orb_R',
+  'Rolandic_Oper_L', 'Rolandic_Oper_R', 'Supp_Motor_Area_L',
+  'Supp_Motor_Area_R', 'Frontal_Sup_Medial_L', 'Frontal_Sup_Medial_R',
+  'Frontal_Med_Orb_L', 'Frontal_Med_Orb_R', 'Calcarine_L', 'Calcarine_R',
+  'Cuneus_L', 'Cuneus_R', 'Lingual_L', 'Lingual_R', 'Occipital_Sup_L',
+  'Occipital_Sup_R', 'Occipital_Mid_L', 'Occipital_Mid_R', 'Occipital_Inf_L',
+  'Occipital_Inf_R', 'Postcentral_L', 'Postcentral_R', 'Parietal_Sup_L',
+  'Parietal_Sup_R', 'Parietal_Inf_L', 'Parietal_Inf_R', 'SupraMarginal_L',
+  'SupraMarginal_R', 'Angular_L', 'Angular_R', 'Precuneus_L', 'Precuneus_R',
+  'Paracentral_Lobule_L', 'Paracentral_Lobule_R', 'Temporal_Mid_L',
+  'Temporal_Mid_R', 'Temporal_Pole_Mid_L', 'Temporal_Pole_Mid_R',
+  'Temporal_Inf_L', 'Temporal_Inf_R', 'Temporal_Sup_L', 'Temporal_Sup_R',
+  'Cerebellum_R', 'Cerebellum_L']

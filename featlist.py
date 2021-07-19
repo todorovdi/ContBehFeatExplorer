@@ -2,6 +2,7 @@ import numpy as np
 import re
 import globvars as gv
 from collections.abc import Iterable
+import utils
 
 def selFeatsRegexInds(names, regexs, unique=1):
     '''
@@ -773,3 +774,98 @@ def filterFeats(feature_names_all, chnames_LFP, LFP_related_only, parcel_types,
 
 def genFeatnamesGroupCodes():
     return
+
+
+def replaceMEGsrcChnamesParams(chns,old_group=None,new_group=None,old_comp=None,new_comp=None):
+    import re
+    assert not ((old_group is None) and (new_group is None) and (old_comp is None) and (new_comp is None))
+    newchns = []
+    sides,groups,pcs,comps = utils.parseMEGsrcChnamesShortList(chns)
+    for i,chn in enumerate(chns):
+        if not np.isnan(groups[i] ):
+            g = groups[i]
+            c = comps[i]
+            if re.match( str(old_group) , str( g ) ):
+                g = new_group
+            if re.match( str(old_comp) , str( c ) ):
+                c = new_comp
+            newchn = f'msrc{sides[i]}_{g}_{pcs[i]}_c{c}'
+        else:
+            newchn = chn
+
+        newchns += [newchn]
+    return newchns
+
+# select feature names realated to current sanity check
+def selectFeatNames(fts,relevant_freqs,desired_chns, feature_names_all,
+                    fband_names = None, bands_acc = 'crude'):
+    featnames_parse_res = parseFeatNames(feature_names_all)
+#     for loc,v in locals().items():
+#         if len(v) < 40:
+#             print(loc,v)
+
+#     if bands_acc == 'crude':
+#         fbl = gv.fband_names_crude
+#     else:
+#         fbl = gv.fband_names_fine
+#     desired_fbands = []
+#     for rf in relevant_freqs:
+#         for fbname in fbl:
+#             fb = gv.fbands[fbname]
+#             t = (rf >= fb[0]) and (rf <= fb[1])
+#             if t:
+#                 desired_fbands += [fbname]
+    if relevant_freqs is not None:
+        desired_fbands = utils.freqs2relevantBands(relevant_freqs,fband_names,bands_acc)
+    else:
+        desired_fbands = None
+    #print(desired_fbands)
+
+    fis = []
+    for fi in range(len(feature_names_all)):
+    #     if feature_names_all[fi] != 'con_tremor_LFPR092,msrcR_9_3_c0':
+    #         continue
+        if fts is not None:
+            cond_ft = featnames_parse_res['ftype'][fi] in fts
+        else:
+            cond_ft = True
+
+        chns_cur = [ featnames_parse_res['ch1'][fi] , featnames_parse_res['ch2'][fi] ]
+        cond_chns = True
+    #     for chn in desired_chns:
+    #         cond_chns &= chn in chns_cur
+    #         print(chns_cur   cond_chns,chn)
+        desired_chns_processed = replaceMEGsrcChnamesParams(desired_chns, 0,9, '.*', 0)
+        cond_chns = set(chns_cur) <= set(desired_chns_processed)
+        #print(set(chns_cur), set(desired_chns_processed) )
+
+        cond_bands = True
+
+
+        fbs_cur = [ featnames_parse_res['fb1'][fi] , featnames_parse_res['fb2'][fi] ]
+
+
+
+#         click = 0
+#     #     if tuple(fbs_cur) == ('tremor','gamma'):
+#     #         print('  fd')
+#         for fb in fbs_cur:
+#             for rf in relevant_freqs:
+#                 if (fb is not None):
+#                     t = (rf >= gv.fbands[fb][0]) and (rf <= gv.fbands[fb][1])
+#                     click += int(t)
+#     #                 if tuple(fbs_cur) == ('tremor','gamma'):
+#     #                     print(fb,rf, t, click )
+#                     #cond_bands &=  (rf >= gv.fbands[fb][0]) and (rf <= gv.fbands[fb][1])
+#         cond_bands = (click == len(relevant_freqs))
+        if desired_fbands is not None:
+            cond_bands =  set(fbs_cur) <= set(desired_fbands)
+        else:
+            cond_bands = True
+
+        if cond_ft and cond_bands and cond_chns:
+            fis += [fi]
+
+        #print(feature_names_all[fi],fbs_cur,chns_cur, fts,relevant_freqs,cond_ft,cond_bands,cond_chns)
+        #print(feature_names_all[fi],desired_fbands,fbs_cur,cond_bands)
+    return [feature_names_all[fi] for fi in fis]

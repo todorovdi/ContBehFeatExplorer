@@ -1188,13 +1188,15 @@ def gatherFeatStats(rawnames, X_pri, featnames_pri, wbd_pri,
                     #    chnames_nicened = utils.nicenMEGsrc_chnames(chnames, roi_labels, srcgrouping_names_sorted,
                     #                                    prefix='msrc_')
                     rn = rawnames[rawi]
+                    subj,medcond,task  = utils.getParamsFromRawname(rn)
+
                     ib_MEG_perit =  bindict_per_rawn[rn]['artif'].get('MEG',{})
                     ib_LFP_perit =  bindict_per_rawn[rn]['artif'].get('LFP',{})
                     ib_mvt_perit =  bindict_per_rawn[rn]['beh_state']
                     #print(rn, ib_mvt_perit.keys() )
 
                     if (int_type_cur != 'entire') and (int_type_cur not in ib_mvt_perit):
-                        if printLog:
+                        if printLog and task == int_type_cur[:-2]:
                             print('gatherFeatStats: interval {} is not present in {}'.format(int_type_cur,rn) )
                         continue
 
@@ -1267,7 +1269,13 @@ def gatherFeatStats(rawnames, X_pri, featnames_pri, wbd_pri,
                          f' {featn} {int_type_cur}')
                 else:
                     if printLog:
-                        print('gatherFeatStats: Nothing found of {} in {}'.format(int_type_cur,rn) )
+                        show_warn = False
+                        for tk in list(set( [ utils.getParamsFromRawname(rawnames[rawi])[-1] for rawi in indset_cur ] )):
+                            if tk == int_type_cur[:-2]:
+                                show_warn = True
+                        if show_warn:
+                            rn_str = ','.join( [rawnames[rawi]  for rawi in indset_cur ] )
+                            print('gatherFeatStats: Nothing found of {} in raws {}'.format(int_type_cur,rn_str) )
                     me,std = np.nan, np.nan
                 stat_perchan[featn] = (me,std)
                 me_perchan [feati] = me
@@ -1282,7 +1290,7 @@ def gatherFeatStats(rawnames, X_pri, featnames_pri, wbd_pri,
                 mean_per_int_type[int_type_cur] = me_perchan
                 std_per_int_type [int_type_cur] = std_perchan
                 stat_per_int_type[int_type_cur] = stat_perchan
-            print(mean_per_int_type.keys() )
+            #print(mean_per_int_type.keys() )
 
         means_per_indset += [mean_per_int_type]
         stds_per_indset   += [std_per_int_type ]
@@ -1359,6 +1367,8 @@ def rescaleFeats(rawnames, X_pri, featnames_pri, wbd_pri,
             #rn = rawnames[rawi]
             X_pri[rawi] -= mn[None,:]
             X_pri[rawi] /= std[None,:]
+            if gv.DEBUG_MODE:
+                print(f'perform scaling, shift by {mn}, divide by {std}')
 
     return X_pri, indsets, means, stds
     #fname_stats = rwnstr + '_stats.npz'

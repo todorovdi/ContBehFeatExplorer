@@ -396,6 +396,44 @@
         "tremfreq": 4,
         "tremor_side": "right"
     },
+    "S95": {
+        "bad_channels": {
+            "off": {
+                "hold": [ ], 
+                "move": [ ]
+            },
+            "on": {
+                "hold": [ ],
+                "move": [ ]
+            }
+        },
+        "dbs_system": "medtronic",
+        "lfpchan_used_in_paper": "LFPR01",
+        "lfpchan_selected_by_pipeline": "LFPR01", 
+        "move_side": "left",
+        "tremfreq": 6,
+        "tremor_side": "left",
+        "descr": "artificial. Generated in jupyter"
+    },
+    "S94": {
+        "bad_channels": {
+            "off": {
+                "hold": [ ], 
+                "move": [ ]
+            },
+            "on": {
+                "hold": [ ],
+                "move": [ ]
+            }
+        },
+        "dbs_system": "medtronic",
+        "lfpchan_used_in_paper": "LFPR01",
+        "lfpchan_selected_by_pipeline": "LFPR01", 
+        "move_side": "left",
+        "tremfreq": 6,
+        "tremor_side": "left",
+        "descr": "artificial. Generated in jupyter"
+    },
     "S97": {
         "bad_channels": {
             "off": {
@@ -450,6 +488,7 @@
         "lfpchan_selected_by_pipeline": "LFPR01", 
         "move_side": "left",
         "tremfreq": 6,
-        "tremor_side": "left"
+        "tremor_side": "left",
+        "descr": "generated all the way from the sensor level-data"
     }
 }
