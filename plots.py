@@ -70,6 +70,7 @@ def shadeAnn(ax,anns,ymin,ymax,color='red',alpha=0.2, sfreq=256, skip=32, plot_b
 def plotMeansPerIt(ax,anns,means_per_it,chi, sfreq=256, plot_bins=0,
                    alpha=0.5,ls=':', attrs_per_descr=None, c=None,lw=None,
                    printLog = False):
+    ctr = 0
     for ann in anns:
         pa = ann['onset'],ann['onset'] + ann['duration']
         descr = ann['description']
@@ -79,6 +80,7 @@ def plotMeansPerIt(ax,anns,means_per_it,chi, sfreq=256, plot_bins=0,
                 if printLog:
                     print(f'plotMeansPerIt: Warning: {descr} not in means_per_it')
                 continue
+            ctr += 1
             me = means_per_it[descr][chi]
             ys = [me,me]
             xs = np.array( list(pa) )
@@ -90,6 +92,8 @@ def plotMeansPerIt(ax,anns,means_per_it,chi, sfreq=256, plot_bins=0,
             elif c is not None:
                 color = c
             ax.plot(xs,ys, ls=ls, alpha=alpha, c=color, lw=lw)
+    if ctr == 0:
+        print(f'plotMeansPerIt: nothing was plotted because {set(anns.description)} are not part of  {means_per_it.keys()}')
 
 
 def plotDataAnnStat(rawnames,dat_pri,times_pri,chnames_pri,
@@ -137,7 +141,7 @@ def plotDataAnnStat(rawnames,dat_pri,times_pri,chnames_pri,
                 print(chi)
                 dat_to_plot0 = dat_hires_pri[rawi][chi]
                 chn = chnames_hires_pri[rawi][chi]
-                print("BBBBBBBBAND ", band)
+                #print("BBBBBBBBAND ", band)
             else:
                 times = times_pri[rawi]
                 dat_to_plot0 = dat_pri[rawi][chi]
@@ -331,3 +335,204 @@ def plotFeatsAndRelDat(rawnames,featnames_sel, dat_pri,chnames_all_pri,
     print('plotting')
 
     return axs
+
+
+
+def plotTFRlike(dat_pri, dat_hires_pri,  tfrres_pri, tfrres_HFO_pri, csd_pri,
+                bpow_abscsd_pri,
+                wbd, feat_dict,
+                times_pri, times_hires_pri,
+                subfeature_order_pri, subfeature_order_newsrcgrp_pri,
+                csdord_pri, csdord_strs_pri,
+                bands,chns,
+                freqs, sfreq,
+                normalize=True):
+
+    from featlist import selFeatsRegexInds
+    import globvars as gv
+    rawi = 0
+    Xtimes = wbd[rawi][1] / sfreq
+
+    #chn = subfeature_order[chi]
+    freqis = {}
+    for band in bands:
+        freqis_cur = np.where( (freqs >= gv.fbands[band][0]) & (freqs <= gv.fbands[band][1]) )[0]
+        freqis[band] = freqis_cur
+
+
+    #nlowfreq = np.where( (n_cycles / freqs) < 2  )[0][0]
+    #lowfreqbd = freqs[nlowfreq]
+    N = dat_pri[0].shape[-1]
+    print(tfrres_pri[0].shape)
+    nc = 5 * len(chns) * len(bands)
+
+    fig,axs = plt.subplots(nc,1,figsize=(12,2*nc)) #, sharex='col')
+    axind = 0
+
+
+    ##################################################
+    for band in bands:
+        chis = []
+        for chn in chns:
+            chi = subfeature_order_pri[rawi].index(chn)
+            chis += [chi]
+
+            if band != 'HFO':
+                ax = axs[axind];
+                axind += 1
+                for fi in freqis[band]:
+                    d = np.abs( tfrres_pri[rawi][chi,fi] )
+                    if normalize:
+                        d /= np.std(d)
+                    ax.plot(Xtimes,  d)
+                ax.set_title(f'{rawi} TFR {chn} {band}')
+
+                # recall that for LFP we have put hires TFR in normal TFR
+                if chn.startswith('LFP'):
+                    a,b = ax.get_ylim(); rng = b-a;
+                    d = dat_hires_pri[rawi][chi]; mn,mx = np.min(d),np.max(d); ts = times_hires_pri[rawi]
+                    ax.plot(ts, (d -mn) / (mx-mn) * rng + a, alpha = 0.5 )
+                else:
+                    a,b = ax.get_ylim(); rng = b-a; d = dat_pri[rawi][chi]; mn,mx = np.min(d),np.max(d); ts = times_pri[rawi]
+                    assert mx - mn >= 1e-14
+                    #if mx - mn <= 1e-10:
+                    #    d = dat_hires_pri[rawi][chi]; mn,mx = np.min(d),np.max(d); ts = times_hires_pri[rawi]
+                    ax.plot(ts, (d -mn) / (mx-mn) * rng + a, alpha = 0.5 )
+                    print(a,b)
+
+            if chn.startswith('LFP') and band == 'HFO':
+                ax = axs[axind];
+                axind += 1
+                for fi in freqis[band]:
+                    d = np.abs( tfrres_HFO_pri[rawi][chi,fi] )
+                    if normalize:
+                        d /= np.std(d)
+                    ax.plot(Xtimes,  d)
+                ax.set_title(f'{rawi} TFR hires {chn} {band}')
+                a,b = ax.get_ylim(); rng = b-a;
+                d = dat_hires_pri[rawi][chi]; mn,mx = np.min(d),np.max(d); ts = times_hires_pri[rawi]
+                ax.plot(ts, (d -mn) / (mx-mn) * rng + a, alpha = 0.5 )
+
+    ###################################
+#     delim = 6
+#     for chn in chns:
+#         chi = subfeature_order_pri[rawi].index(chn)
+#         chis += [chi]
+
+#         ax = axs[axind];
+#         axind += 1
+#         for fi in freqis[:delim]:
+#             ax.plot(Xtimes, np.abs( tfrres_pri[rawi][chi,fi] * np.conj(tfrres_pri[rawi][chi,fi] ) ) )
+#         ax.set_title(f'{rawi} TFR {chn} {band}')
+#         a,b = ax.get_ylim(); rng = b-a
+#         #ax.plot(times_pri[rawi], dat_pri[rawi][chi] / rng, alpha = 0.5 )
+#         print(a,b)
+
+#     for chn in chns:
+#         chi = subfeature_order_pri[rawi].index(chn)
+#         chis += [chi]
+
+#         ax = axs[axind];
+#         axind += 1
+#         for fi in freqis[delim:]:
+#             ax.plot(Xtimes, np.abs( tfrres_pri[rawi][chi,fi] * np.conj(tfrres_pri[rawi][chi,fi] ) ) )
+#         ax.set_title(f'{rawi} TFR {chn} {band}')
+#         a,b = ax.get_ylim(); rng = b-a
+#         #ax.plot(times_pri[rawi], dat_pri[rawi][chi] / rng, alpha = 0.5 )
+#         print(a,b)
+
+    #########################
+
+    mask1 = np.in1d(csdord_pri[rawi][0], chis)
+    mask2 = np.in1d(csdord_pri[rawi][1], chis)
+    mask = mask1 & mask2 #& (csdord_pri[rawi][1] != csdord_pri[rawi][0] )
+
+
+    #for chn in chns:
+    #chi = subfeature_order_pri[rawi].index(chn)
+    csdis_rel = np.unique ( np.where( mask )[0] )
+
+    for band in bands:
+        for csdi in csdis_rel:
+            ax = axs[axind];
+            axind += 1
+            for fii,fi in enumerate(freqis[band]):
+                chi1,chi2 = csdord_pri[rawi][:,csdi]
+                if fii == 0:
+                    # this is not guraranteed to be true {csdord_strs_pri[rawi][csdi]}
+                    lab = f'{subfeature_order_newsrcgrp_pri[rawi][chi1],subfeature_order_newsrcgrp_pri[rawi][chi2]} '
+                else:
+                    lab = ''
+                ax.plot(Xtimes, np.abs( csd_pri[rawi][csdi,fi] ), label=lab )
+            ax.set_title(f'{rawi} CSD  {chns} {band}')
+            ax.legend(loc='lower right')
+        a,b = ax.get_ylim(); rng = b-a
+        #ax.plot(times_pri[rawi], dat_pri[rawi][chi] / rng, alpha = 0.5 )
+        print(a,b)
+
+
+
+    chi = subfeature_order_pri[rawi].index(chn)
+    newchn = subfeature_order_newsrcgrp_pri[rawi][chi]
+
+    csdis_rel = np.unique ( np.where( (csdord_pri[rawi][0] == chi) | (csdord_pri[rawi][1] == chi) )[0] )
+
+#     bpow_abscsd = bpow_abscsd_pri[rawi]
+#     ncsds,nfreqs,ntimebins_ = bpow_abscsd.shape
+#     bpow_abscds_reshaped = bpow_abscsd.reshape( ncsds*nfreqs, ntimebins_ )
+
+    chn_str =  '|'.join( [subfeature_order_newsrcgrp_pri[rawi][chi] for chi in chis] )
+    #chn_str2=  '|'.join(chns[::-1])
+    for band in bands:
+        ax = axs[axind];
+        axind += 1
+
+        regex = f'{band}_({chn_str}),({chn_str})'
+        print(regex)
+        inds = selFeatsRegexInds( feat_dict['con']['names'], regex )
+        #ax = axs[axind]; axind += 1
+
+        #for csdi in csdis_rel:
+        #for feati in range(0,5):
+        #for feati in range(bpow_abscds_reshaped.shape[0]):
+        for feati in inds:
+            s = csdord_strs_pri[rawi][feati]
+    #             if s.find(newchn) < 0 or s.find('LFPR092') < 0:
+    #                 continue
+            ax.plot(Xtimes, np.abs( bpow_abscsd_pri[rawi][feati] ) , label=s)
+        a,b = ax.get_ylim(); rng = b-a
+        #ax.plot(times_pri[rawi], dat_pri[rawi][chi] / rng, alpha = 0.5 )
+        ax.set_title(f'{chn}: bpow_abscds_all_reshaped')
+        ax.legend(loc='lower right')
+        #ax.fill_betweenx([0,0.2],  (offset_start-windowsz)//skip,  offset_start//skip, color='red', alpha=0.15)
+
+
+    ############
+    for chn in chns:
+        chi = subfeature_order_pri[rawi].index(chn)
+        if chn.startswith('LFP'):
+            ax = axs[axind];
+            axind += 1
+            # tfrres_HFO_pri already contains only HFO
+            for fi in range(tfrres_HFO_pri[rawi].shape[1] ):
+                ax.plot(Xtimes, np.abs( tfrres_HFO_pri[rawi][chi,fi] ) )
+            a,b = ax.get_ylim(); rng = b-a
+            #ax.plot(times_pri[rawi], dat_pri[rawi][chi] / rng, alpha = 0.5 )
+            ax.set_title(f'{chn}: tfrres LFP HFO only')
+            #ax.fill_betweenx([0,0.1],  (offset_start-windowsz)//skip,  offset_start//skip, color='red', alpha=0.15)
+
+            a,b = ax.get_ylim(); rng = b-a;
+            d = dat_hires_pri[rawi][chi]; mn,mx = np.min(d),np.max(d); ts = times_hires_pri[rawi]
+            ax.plot(ts, (d -mn) / (mx-mn) * rng + a, alpha = 0.5 )
+
+    for ax in axs:
+        ax.set_xlim(times_pri[rawi][0],times_pri[rawi][-1])
+
+    plt.tight_layout()
+    return locals()
+
+
+#funloc = plotTFRlike(dat_pri,bpow_abscds_all_reshaped,0, 'beta', chns=['msrcR_0_3_c5', 'LFPR092'])
+#funloc = plotTFRlike(dat_pri,bpow_abscds_all_reshaped,0, 'beta', chns=['LFPR092'])
+
+#funloc['bpow_abscds_reshaped'].shape

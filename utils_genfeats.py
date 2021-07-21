@@ -174,13 +174,14 @@ def collectDataFromMultiRaws(rawnames, raws_permod_both_sides, sources_type,
                 CB_ipsihand_inds = mne.pick_channels_regexp(raw_srconly.ch_names, 'msrc{}_{}_{}_c[0-9]+'.
                                                         format(hand_side,src_grouping,CB_ipsihand_parcel_ind)  )
                 #print(chis, CB_contrahand_inds)
-                chis = np.setdiff1d(chis, CB_contrahand_inds)
-                #print(chis)
-                chis = np.hstack( [chis, CB_ipsihand_inds]).astype(int)  # for some reason hstack converts to float
+                chis_dif = set(chis) - set( CB_contrahand_inds)
+                print(f'use_ipsilat_CB: for hand side {hand_side} removing {chis_dif}, adding {CB_ipsihand_inds}')
+                chis = list( sorted( chis_dif | set(CB_ipsihand_inds) ) ) # for some reason hstack converts to float
                 #print(chis)
                 #TODO: remove Cerbellum sources, add Cerebellum sources from the other side
 
-            assert len(chis) > 0, f'no source channels found at least on {side} side, before CB manip was {nchis_before_CB_manip}'
+            if hand_side in main_body_side:
+                assert len(chis) > 0, f'no source channels found at least on {side} side, before CB manip was {nchis_before_CB_manip}'
             chnames_src = [raw_srconly.ch_names[chi] for chi in chis]
             raws_srconly_perside[side].pick_channels(   chnames_src  )
 
@@ -238,8 +239,10 @@ def collectDataFromMultiRaws(rawnames, raws_permod_both_sides, sources_type,
 
         if isinstance(main_body_side, str):
             test_side_let =  main_body_side[0].upper()
+            test_side_let = getOppositeSideStr(test_side_let)
         else:
             test_side_let =  main_body_side[0][0].upper()
+            test_side_let = getOppositeSideStr(test_side_let)
         print(test_side_let, raws_lfp_perside[test_side_let].ch_names)
 
         anns_pri += [anns]
@@ -429,9 +432,16 @@ def H_difactmob(dat,dt, windowsz = None, dif = None, skip=None, stride_ver = Tru
                 stride_view_dif = stride(dif, win=win, stepby=step )
                 vardif = np.var(stride_view_dif,axis=-1, ddof=1)
 
+                print(f'H_difactmob: activity shape is {activity.shape}, vardif {vardif.shape}')
+
                 if vardif.ndim == 1:
                     assert dat.shape[0] == 1
                     vardif = vardif[None,:]
+
+                # due to bag in stride()
+                if dat.shape[0] == 1:
+                    vardif = vardif.T
+                    activity = activity.T
             else:
                 activity = []
                 vardif = []
@@ -538,6 +548,8 @@ def Hjorth(dat, dt=1., windowsz = 1, skip=1,stride_ver=True, remove_invalid = Fa
     dif2, act2, mob2 = H_difactmob(dif,dt, windowsz=windowsz,
         dif=dif2, skip=skip, stride_ver=stride_ver)
 
+    assert activity.shape[0] == dat.shape[0], (activity.shape, dat.shape)
+
     #plt.figure(); plt.plot(dif.T, label='dif'); plt.legend()
     #plt.figure(); plt.plot(dif2.T, label='dif2'); plt.legend()
 
@@ -614,6 +626,7 @@ def Hjorth(dat, dt=1., windowsz = 1, skip=1,stride_ver=True, remove_invalid = Fa
     #    window_boundaries = np.vstack( [ window_boundaries_st, window_boundaries_end] )
 
     if window_boundaries.shape[-1] != activity.shape[-1]:
+        print(f'window_boundaries, activity shapes are {window_boundaries.shape}, {activity.shape}' )
         s = 'dat {}, padlen {} act {}, wbd {}'.format(dat.shape, padlen, activity.shape, window_boundaries.shape)
         raise ValueError(s)
 
@@ -962,6 +975,11 @@ def tfr2csd(dat, sfreq, returnOrder = False, skip_same = [], ind_pairs = None,
                 else:
                     csds += [rimabs  ]
 
+                plt.figure(figsize=(15,2) )
+                plt.plot(csds[-1][0].T )
+                plt.title(f'{pc}')
+                #plt.legend(loc='upper right')
+
                 if np.max(np.abs(csds[-1].imag)) > 1e-10:
                     print('nonzero imag for parcel pair ',pc)
 
@@ -1042,6 +1060,12 @@ def tfr2csd(dat, sfreq, returnOrder = False, skip_same = [], ind_pairs = None,
 
                 #print(r.shape)
                 csds += [r  ]
+
+                plt.figure(figsize=(15,2) )
+                plt.plot(csds[-1][0].T )
+                plt.title(f'{pc}')
+                #plt.legend(loc='upper right')
+
             for pc in LFP2LFP_couplings:
                 (chn1,chn2) = pc
                 ind_pairs = LFP2LFP_couplings[pc]
@@ -1090,6 +1114,11 @@ def tfr2csd(dat, sfreq, returnOrder = False, skip_same = [], ind_pairs = None,
 
                 #print(r.shape)
                 csds += [r  ]
+
+                plt.figure(figsize=(15,2) )
+                plt.plot(csds[-1][0].T )
+                plt.title(f'{pc}')
+                plt.legend(loc='upper right')
 
 
     order = np.hstack(order)
@@ -1310,10 +1339,13 @@ def computeCorr(raws, chnames_per_band, defnames, skip, windowsz, band_pairs,
                     resname = '{}_{},{}'.format(oper,newchn1,newchn2)
                     # we won't have final name before averaging
                     if means is not None:
-                        #m1 = means[bn_from][chn1]
-                        #m2 = means[bn_to][chn2]
-                        m1 = means[bn_from][effind_from]
-                        m2 = means[bn_to][effind_to]
+                        if isinstance(means,dict):
+                            #m1 = means[bn_from][chn1]
+                            #m2 = means[bn_to][chn2]
+                            m1 = means[bn_from][effind_from]
+                            m2 = means[bn_to][effind_to]
+                        elif isinstance(means,(int,float) ):
+                            m1,m2 = means,means
                     else:
                         m1,m2=None,None
                     arg = resname,bn_from,bn_to,pc,i,j,\
@@ -1348,10 +1380,13 @@ def computeCorr(raws, chnames_per_band, defnames, skip, windowsz, band_pairs,
                         resname = '{}_{},{}'.format(oper,newchn1,newchn2)
                         # we won't have final name before averaging
                         if means is not None:
-                            #m1 = means[bn_to][chn1]
-                            #m2 = means[bn_from][chn2]
-                            m1 = means[bn_to][effind_to]
-                            m2 = means[bn_from][effind_from]
+                            if isinstance(means,dict):
+                                #m1 = means[bn_to][chn1]
+                                #m2 = means[bn_from][chn2]
+                                m1 = means[bn_to][effind_to]
+                                m2 = means[bn_from][effind_from]
+                            elif isinstance(means,(int,float) ):
+                                m1,m2 = means,means
                         else:
                             m1,m2=None,None
                         arg = resname,bn_to,bn_from,pc,i,j,\
@@ -1428,10 +1463,13 @@ def computeCorr(raws, chnames_per_band, defnames, skip, windowsz, band_pairs,
                 #name = '{}_{},{}'.format(oper,nfrom,nto)
                 # we won't have final name before averaging
                 if means is not None:
-                    #m1 = means[bn_from][names_from[effind_from] ]
-                    #m2 = means[bn_to][names_to[effind_to]]
-                    m1 = means[bn_from][effind_from ]
-                    m2 = means[bn_to][effind_to]
+                    if isinstance(means,dict):
+                        #m1 = means[bn_from][names_from[effind_from] ]
+                        #m2 = means[bn_to][names_to[effind_to]]
+                        m1 = means[bn_from][effind_from ]
+                        m2 = means[bn_to][effind_to]
+                    elif isinstance(means,(int,float) ):
+                        m1,m2 = means,means
                 else:
                     m1,m2=None,None
                 arg = resname,bn_from,bn_to,pc,effind_from,effind_to,\
@@ -1471,10 +1509,13 @@ def computeCorr(raws, chnames_per_band, defnames, skip, windowsz, band_pairs,
                     #name = '{}_{},{}'.format(oper,nfrom,nto)
                     # we won't have final name before averaging
                     if means is not None:
-                        #m1 = means[bn_to][names_to[effind_from] ]
-                        #m2 = means[bn_from][names_from[effind_to]]
-                        m1 = means[bn_to][effind_to ]
-                        m2 = means[bn_from][effind_from]
+                        if isinstance(means,dict):
+                            #m1 = means[bn_to][names_to[effind_from] ]
+                            #m2 = means[bn_from][names_from[effind_to]]
+                            m1 = means[bn_to][effind_to ]
+                            m2 = means[bn_from][effind_from]
+                        elif isinstance(means,(int,float) ):
+                            m1,m2 = means,means
                     else:
                         m1,m2=None
                     arg = resname,bn_to,bn_from,pc,effind_from,effind_to,\
@@ -1519,10 +1560,13 @@ def computeCorr(raws, chnames_per_band, defnames, skip, windowsz, band_pairs,
                 #name = '{}_{},{}'.format(oper,nfrom,nto)
                 # we won't have final name before averaging
                 if means is not None:
-                    #m1 = means[names_from[effind_from] ]
-                    #m2 = means[names_to[effind_to]]
-                    m1 = means[bn_from][effind_from ]
-                    m2 = means[bn_to][effind_to]
+                    if isinstance(means,dict):
+                        #m1 = means[names_from[effind_from] ]
+                        #m2 = means[names_to[effind_to]]
+                        m1 = means[bn_from][effind_from ]
+                        m2 = means[bn_to][effind_to]
+                    elif isinstance(means,(int,float) ):
+                        m1,m2 = means,means
                 else:
                     m1,m2=None,None
                 arg = resname,bn_from,bn_to,pc,effind_from,effind_to,\
@@ -1541,10 +1585,13 @@ def computeCorr(raws, chnames_per_band, defnames, skip, windowsz, band_pairs,
                     assert d2.size > 1
 
                     if means is not None:
-                        #m1 = means[bn_to][names_to[effind_to] ]
-                        #m2 = means[bn_from][names_from[effind_to]]
-                        m1 = means[bn_to][effind_from ]
-                        m2 = means[bn_from][effind_to]
+                        if isinstance(means,dict):
+                            #m1 = means[bn_to][names_to[effind_to] ]
+                            #m2 = means[bn_from][names_from[effind_to]]
+                            m1 = means[bn_to][effind_from ]
+                            m2 = means[bn_from][effind_to]
+                        elif isinstance(means,(int,float) ):
+                            m1,m2 = means,means
                     else:
                         m1,m2=None
                     #name = '{}_{},{}'.format(oper,nfrom,nto)
@@ -1725,7 +1772,8 @@ def smoothData(data,Tp,data_estim=None,state_noise_std=None,ic_mean=None,
 
 def bandAverage(freqs,freqs_inc_HFO,csd_pri,csdord_pri,csdord_LFP_HFO_pri,
                csd_LFP_HFO_pri, fbands,fband_names, fband_names_inc_HFO,
-               newchnames, subfeature_order_lfp_highres, log_before_bandaver = True):
+               newchnames, subfeature_order_lfp_highres, log_before_bandaver = True,
+                concat_over_bands = False):
     '''
     csd -- num csds x num freqs x time dim OR  list of such things
     csdord -- 2 x num csds (  csdord[0,csdi] -- index of first channel in newchnames
@@ -1774,7 +1822,10 @@ def bandAverage(freqs,freqs_inc_HFO,csd_pri,csdord_pri,csdord_LFP_HFO_pri,
             #plt.legend()
 
             # put into resulting list
-            bpow_abscsd_curband += [bandpow[:,None,:]]
+            if concat_over_bands:
+                bpow_abscsd_curband += [bandpow[:,None,:]]
+            else:
+                bpow_abscsd_curband += [bandpow]
 
 
             #csdord_bandwise += [ np.concatenate( [csdord.T,  np.ones(csd.shape[0], \
@@ -1793,7 +1844,10 @@ def bandAverage(freqs,freqs_inc_HFO,csd_pri,csdord_pri,csdord_LFP_HFO_pri,
 
             #bandpow2 = np.concatenate(bpow_abscsd_curband, axis=-1  )  # over time
             #bpow_abscsd += [bandpow2]
-        bpow_abscsd = np.concatenate(bpow_abscsd_curband, axis=1)  # over bands
+        if concat_over_bands:
+            bpow_abscsd = np.concatenate(bpow_abscsd_curband, axis=1)  # over bands
+        else:
+            bpow_abscsd = np.vstack( bpow_abscsd_curband )
         csdord_strs_pri += [csdord_strs]
         bpow_abscsd_pri += [bpow_abscsd]
 
@@ -1842,7 +1896,10 @@ def bandAverage(freqs,freqs_inc_HFO,csd_pri,csdord_pri,csdord_LFP_HFO_pri,
                     vals_to_aver = np.log(vals_to_aver)
 
                 bandpow = np.mean( vals_to_aver  , axis=1 )
-                bpow_abscsd_curband += [bandpow[:,None,:]]
+                if concat_over_bands:
+                    bpow_abscsd_curband += [bandpow[:,None,:]]
+                else:
+                    bpow_abscsd_curband += [bandpow]
 
                 #bandpow2 = np.concatenate(bpow_abscsd_curband, axis=-1  )  # over time
                 #bpow_abscsd_LFP_HFO += [bandpow2]
@@ -1856,7 +1913,10 @@ def bandAverage(freqs,freqs_inc_HFO,csd_pri,csdord_pri,csdord_LFP_HFO_pri,
 
 
                 #bpow_abscsd_LFP_HFO += [bpow_abscsd_curband]
-            bpow_abscsd_LFP_HFO = np.concatenate(bpow_abscsd_curband, axis=1) # over bands
+            if concat_over_bands:
+                bpow_abscsd_LFP_HFO = np.concatenate(bpow_abscsd_curband, axis=1) # over bands
+            else:
+                bpow_abscsd_LFP_HFO = np.vstack(bpow_abscsd_curband)
 
             csdord_strs_HFO_pri += [csdord_strs_HFO]
             bpow_abscsd_LFP_HFO_pri += [ bpow_abscsd_LFP_HFO ]
@@ -2030,6 +2090,8 @@ def bandFilter(rawnames, times_pri, main_sides_pri, side_switched_pri,
                         ann_toghether = ann_toghether + temp_ann
                         #print(anns_MEGartif.__dict__)
                         #print('LLLLLLLLLLLLLLLLLLLLLLll ',len(chis_msrc), side, len(temp_ann) )
+                        if len(chis_msrc) == 0:
+                            continue
                         r.filter(l_freq=low,h_freq=high, n_jobs=n_jobs_maybe_cuda,
                                 skip_by_annotation=f'BAD_MEG{side}', pad='symmetric',
                                 phase=filter_phase, filter_length=filter_length, picks=chis_msrc )

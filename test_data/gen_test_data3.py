@@ -3,7 +3,7 @@
 main_side = 'left'
 rawnames = ['S95_off_move','S95_off_hold','S95_on_move']
 
-test_data_descr = '''Nontriv data, nontriv artifacs'''
+test_data_descr = '''Nontriv data, no artifacs'''
 
 ######################
 anndict_per_intcat_per_rawn = {}
@@ -11,30 +11,22 @@ for rawn in rawnames:
     anndict_per_intcat_per_rawn[rawn] = {'artif':{
         'MEG':mne.Annotations([],[],[]), 'LFP': mne.Annotations([],[],[])  },
         'beh_state':[]}
-ann1 = mne.Annotations([0.24,0.8],[0.5,0.6],['notrem_L','trem_L'])
+ann1 = mne.Annotations([2.64,3.6],[0.5,0.6],['notrem_L','trem_L'])
 ann2 = mne.Annotations([0.24,2.5,0.8],[0.5,0.9,0.6],['notrem_L','notrem_L','trem_L'])
 ann3 = mne.Annotations([1.24,0.0,3.0],[0.1,0.3,1.2],['notrem_L','trem_L','trem_L'])
 
 i__ = 0; rawn = rawnames[i__];
 ann_dict=anndict_per_intcat_per_rawn[rawn]
-ann_dict['artif']['MEG'] = mne.Annotations([0.2],[0.23],['BAD_MEGR'])
-ann_dict['artif']['LFP'] = mne.Annotations([1.2],[1.23],['BAD_LFPR'])
 ann_dict['beh_state']= ann1
 anndict_per_intcat_per_rawn[rawn] = ann_dict
 
 i__ += 1; rawn = rawnames[i__];
 ann_dict=anndict_per_intcat_per_rawn[rawn]
-ann_dict['artif']['MEG'] = mne.Annotations([0.3,2],[0.33,0.32],['BAD_MEGR','BAD_MEGL'])
-ann_dict['artif']['LFP'] = mne.Annotations([2,3.1],[1.33,0.4],['BAD_LFPR','BAD_LFPR02'])
-# anndict_per_intcat_per_rawn[rawnames[i__]]['artif']['LFP'] = mne.Annotations([1.3],[1.33],
-#                                                                              ['BAD_LFPR'])
 ann_dict['beh_state']= ann2
 anndict_per_intcat_per_rawn[rawn] = ann_dict
 
 i__ += 1; rawn = rawnames[i__];
 ann_dict=anndict_per_intcat_per_rawn[rawn]
-ann_dict['artif']['MEG'] = mne.Annotations([0.4],[0.43],['BAD_MEGR'])
-ann_dict['artif']['LFP'] = mne.Annotations([1.4,3.1],[1.43,0.4], ['BAD_LFPR','BAD_LFPR092'])
 ann_dict['beh_state']= ann3
 anndict_per_intcat_per_rawn[rawn] = ann_dict
 
@@ -68,12 +60,10 @@ for chn_descr,chn in special_chns.items():
 sfo_pri = [sfo]*len(rawnames)
 sfo_lfp_hires_pri = [sfo_LFP]*len(rawnames)
 
-datlen_s = 5
+datlen_s = 6
 nbins = sfreq * datlen_s
 nbins_hires = sfreq_hires * datlen_s
-noise_size = 3e-3
-#dat =  defdgen( (len(sfo), nbins )) * noise_size
-#dat_hires = defdgen ( (len(sfo_LFP), nbins_hires ) ) * noise_size
+noise_size = 0
 
 dat_pri = [0] * len(rawnames)
 dat_LFP_hires_pri = [0] * len(rawnames)
@@ -126,7 +116,7 @@ freq_HFO = 200
 sine_HFO_hires = np.sin(times_hires * 2 *np.pi * freq_HFO)
 step3_hires = noise_size + stepf(times_hires,ss3,se3)
 
-ss4,se4 = 1.6,3.4
+ss4,se4 = 2.6,4.6
 freq_tremor = 8
 sine_tremor = np.sin(times * 2 *np.pi * freq_tremor)
 step4       = noise_size + stepf(times,      ss4,se4)

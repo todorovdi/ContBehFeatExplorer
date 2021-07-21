@@ -1161,7 +1161,7 @@ def gatherFeatStats(rawnames, X_pri, featnames_pri, wbd_pri,
                 if int_type_cur in intervals_required:
                     raise ValueError(s)
                 else:
-                    print('Warninig ',s)
+                    print('gatherFeatStats:  Warninig ',s)
 
 
     means_per_indset = []
@@ -1264,9 +1264,11 @@ def gatherFeatStats(rawnames, X_pri, featnames_pri, wbd_pri,
                         std = np.std(dats_forstat, axis=0)
                         if gv.DEBUG_MODE:
                             print('normal ',dats_forstat.shape, me,std)
-                    assert abs(std) > 1e-20, \
-                        (f'Std is small for {rawnames[rawi]}'
-                         f' {featn} {int_type_cur}')
+                        if abs(std) <= 1e-14:
+                            print(f'gatherFeatStats: WARNING: Std is small for {rawnames[rawi]}'
+                            f' {featn} {int_type_cur}. std = {std}')
+                            if not gv.DEBUG_MODE:
+                                raise ValueError('too small std' )
                 else:
                     if printLog:
                         show_warn = False
@@ -1359,18 +1361,38 @@ def rescaleFeats(rawnames, X_pri, featnames_pri, wbd_pri,
         assert len(means) == len(stds)
         assert len(means) == len(indsets)
 
+    import copy
+    means_rescaled = copy.deepcopy(means)
+    stds_rescaled  = copy.deepcopy(stds)
     for rawindseti_cur,indset_cur in enumerate(indsets):
         # rescale everyone within indset according to the stats
         mn = means[rawindseti_cur][int_type]
         std = stds[rawindseti_cur][int_type]
+
+        means_rescaled [rawindseti_cur][int_type]  -= mn
+        bad_inds = np.where( std <= 1e-14 )[0]
+
+        if len(bad_inds) :
+            s = f'std is zero for some indices {bad_inds}'
+            if gv.DEBUG_MODE:
+                good_inds = np.setdiff1d(np.arange(X_pri[0].shape[1] ), bad_inds)
+                stds_rescaled  [rawindseti_cur][int_type][good_inds]  /= std[good_inds]
+            else:
+                raise ValueError(s)
+        else:
+            stds_rescaled  [rawindseti_cur][int_type]  /= std
+
         for rawi in indset_cur:
             #rn = rawnames[rawi]
             X_pri[rawi] -= mn[None,:]
-            X_pri[rawi] /= std[None,:]
+            if len(bad_inds) == 0:
+                X_pri[rawi] /= std[None,:]
+            else:
+                X_pri[rawi][:,good_inds] /= std[None,good_inds]
             if gv.DEBUG_MODE:
                 print(f'perform scaling, shift by {mn}, divide by {std}')
 
-    return X_pri, indsets, means, stds
+    return X_pri, indsets, means_rescaled, stds_rescaled
     #fname_stats = rwnstr + '_stats.npz'
     #np.savez(fname_stats, dat_forstat_perchan=dat_forstat_perchan,
     #         combine_within_medcond=combine_within_medcond,
@@ -2386,11 +2408,13 @@ def getIndsetMask(indsets, allow_repeating=False, allow_holes = False):
         print(warns)
         if not allow_repeating:
             raise ValueError(warns)
-    dai = np.diff(allinds)
-    if np.min(dai) < 0:
-        warns = 'Warning indsets contain indices with holes (some missign)!' + str(indsets)
-        if not allow_holes:
-            raise ValueError(warns)
+
+    if len(allinds) > 1:
+        dai = np.diff(allinds)
+        if np.min(dai) < 0:
+            warns = 'Warning indsets contain indices with holes (some missign)!' + str(indsets)
+            if not allow_holes:
+                raise ValueError(warns)
 
     mask = -1 * np.ones( len(allinds), dtype=int)
     for ind in allinds:

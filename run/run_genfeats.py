@@ -116,7 +116,7 @@ spec_uselog = False
 log_during_csd = True
 # no need to do across datasets because multiplicative constants should pop out
 # and I will normalize resulting features in the end anyway
-normalize_TFR = "separately"  # 'across_datasets', 'no' # needed to avoid too small numbers
+normalize_TFR = "across_datasets"  # 'across_datasets', 'no' # needed to avoid too small numbers
 recalc_stats_multi_band = True  # if false, I will try to load
 
 if normalize_TFR != "no":
@@ -144,6 +144,7 @@ newchn_grouping_ind = 9 # output group number
 scale_data_combine_type = 'medcond'
 baseline_int_type = 'notrem'
 rbcorr_use_local_means = False
+rbcorr_use_zero_mean = True  # filtered signals should have zero mean
 
 input_subdir = ""
 output_subdir = ""
@@ -494,11 +495,11 @@ n_jobs_tfr = n_jobs  # CUDA not allowed :(
 n_jobs_flt = n_jobs
 
 ###################################################
-anndict_per_intcat_per_rawn = {}
 
 if use_preloaded_data:
     print('DEBUG: USE PRELOADED DATA')
 else:
+    anndict_per_intcat_per_rawn = {}
     print('Start loading data')
     dat_pri                         = [0]*len(rawnames)
     dat_lfp_hires_pri               = [0]*len(rawnames)
@@ -889,7 +890,7 @@ if scale_data_combine_type != 'no_scaling':
     # computations can be below double precision
     if prescale_data:
         # rescaling
-        dat_T_scaled, indsets, means, stds = upre.rescaleFeats(rawnames, dat_T_pri, subfeature_order_pri, None,
+        dat_T_scaled, indsets, means_rescaled, stds_rescaled = upre.rescaleFeats(rawnames, dat_T_pri, subfeature_order_pri, None,
                         sfreq, times_pri, int_type = baseline_int,
                         main_side = None, side_rev_pri = side_switched_pri,
                         minlen_bins = 5 * sfreq, combine_within=combine_type,
@@ -928,13 +929,15 @@ if scale_data_combine_type != 'no_scaling':
             means = [ means[i] for i in indsetis_valid ]
             stds = [ stds[i] for i in indsetis_valid ]
 
-            dat_T_scaled, indsets, means_lfp_hires, stds_lfp_hires = upre.rescaleFeats(rawnames, dat_T_pri,
-                                        subfeature_order_lfp_hires_pri, None,
-                            sfreq_hires, times_hires_pri, int_type = baseline_int ,
-                            main_side = None, side_rev_pri = side_switched_pri,
-                            minlen_bins = 5 * sfreq_hires, combine_within=combine_type,
-                                    means=means, stds=stds, indsets= newindsets,
-                                    bindict_per_rawn=bindict_hires_per_rawn)
+            dat_T_scaled, indsets,  \
+            means_lfp_hires_rescaled, stds_lfp_hires_rescaled = \
+                upre.rescaleFeats(rawnames, dat_T_pri,
+                subfeature_order_lfp_hires_pri, None,
+                sfreq_hires, times_hires_pri, int_type = baseline_int ,
+                main_side = None, side_rev_pri = side_switched_pri,
+                minlen_bins = 5 * sfreq_hires, combine_within=combine_type,
+                means=means, stds=stds, indsets= newindsets,
+                bindict_per_rawn=bindict_hires_per_rawn)
             for dati in range(len(dat_lfp_hires_pri) ):
                 dat_lfp_hires_pri[dati] = dat_T_scaled[dati].T
 
@@ -1299,7 +1302,12 @@ else:
     # small values (because later when computing CSD I will mutiply them
     # and it falls below double precision)
     # here I don't really care about normalizing robustly (I will normalize
-    # again after features are constructed anyway)
+    # again after features are constructed anyway). I just want to multiply
+    # everything by the same number that's all. More accurate way would be to
+    # use my rescaling code with 'entire' and some data set grouping
+    # but it does not work for multidim arrays so far
+    # the way I do it below works only if datasets don't have data many oders
+    # of magnitude different between each other
     if normalize_TFR == 'across_datasets':
         print('Start computing TFR stats for normalization')
         s1,s2,s3 = tfrres_pri[0].shape
@@ -1812,6 +1820,7 @@ if ('rbcorr' in features_to_use and not load_rbcorr) or ('bpcorr' in features_to
         curstatinfo['stds' ]   = stds_perband_bp_pri_
         stats_multiband_bp = curstatinfo
     else:
+        assert not prescale_data, 'If we prescale data, loaded multi band stats is not valid!'
         prefix = stats_fn_prefix
         # first arg should be None so that I can specify explicitly the prefix
         # it is necessary because I run this scripts not with the same set of
@@ -1909,8 +1918,13 @@ if 'rbcorr' in features_to_use:  #raw band corr
             chnames_per_band =  chnames_perband_flt_pri[rawind]
             if rbcorr_use_local_means:
                 means_perband = None
+                assert not rbcorr_use_zero_mean
             else:
                 means_perband = means_perband_flt_pri[rawind]
+
+            if rbcorr_use_zero_mean:
+                assert not rbcorr_use_local_means
+                means_perband = 0.
 
             rbcorrs = []
             rbcor_names = []
@@ -2123,22 +2137,29 @@ for rawind in range(len(dat_pri) ):
         csdord_strs = csdord_strs_pri[rawind]
 
         #feat_dict['tfr']['data'] = f( bpows.reshape( bpows.size//ntimebins , ntimebins ) )
-        ncsds,nfreqs,ntimebins_ = bpow_abscsd.shape
-        bpow_abscds_reshaped = bpow_abscsd.reshape( ncsds*nfreqs, ntimebins_ )
-        assert bpow_abscds_reshaped.shape[0] == len(csdord_strs)
+        if bpow_abscsd.ndim == 3:
+            ncsds,nfreqs,ntimebins_ = bpow_abscsd.shape
+            bpow_abscsd_reshaped = bpow_abscsd.reshape( ncsds*nfreqs, ntimebins_ )
+            assert bpow_abscsd_reshaped.shape[0] == len(csdord_strs)
+        else:
+            bpow_abscsd_reshaped = bpow_abscsd
+
         feat_dict['con']['names'] = csdord_strs[:]
         if use_lfp_HFO:
-            bpow_abscds_LFP_HFO_reshaped = bpow_abscsd_LFP_HFO.reshape(
-                bpow_abscsd_LFP_HFO.size//ntimebins_ , ntimebins_ )
+            if bpow_abscsd_LFP_HFO.ndim == 3:
+                bpow_abscsd_LFP_HFO_reshaped = bpow_abscsd_LFP_HFO.reshape(
+                    bpow_abscsd_LFP_HFO.size//ntimebins_ , ntimebins_ )
+            else:
+                bpow_abscsd_LFP_HFO_reshaped = bpow_abscsd_LFP_HFO
             # add HFO to low freq
-            bpow_abscds_all_reshaped = np.vstack( [bpow_abscds_reshaped, bpow_abscds_LFP_HFO_reshaped])
+            bpow_abscsd_all_reshaped = np.vstack( [bpow_abscsd_reshaped, bpow_abscsd_LFP_HFO_reshaped])
             #TODO: note that csdord_strs by that moment already contains LFP HFO
             #names (see when csdord_strs i generated)
             feat_dict['con']['names'] += csdord_strs_HFO_pri[rawind]
         else:
-            bpow_abscds_all_reshaped = bpow_abscds_reshaped
+            bpow_abscsd_all_reshaped = bpow_abscsd_reshaped
 
-        assert len(bpow_abscds_all_reshaped) == len(feat_dict['con']['names'] )
+        assert len(bpow_abscsd_all_reshaped) == len(feat_dict['con']['names'] )
 
         if not use_LFP_to_LFP:
             templ_same_LFP = r'.*:\s(LFP.*),\1'
@@ -2151,18 +2172,18 @@ for rawind in range(len(dat_pri) ):
                 print('Removing cross LFP', inds_same_LFP)
                 inds_notsame_LFP = np.setdiff1d( inds_all_LFP, inds_same_LFP)
                 gi = np.setdiff1d( np.arange(len(csdord_strs) ) , inds_notsame_LFP)
-                bpow_abscds_all_reshaped = bpow_abscds_all_reshaped[gi]
+                bpow_abscsd_all_reshaped = bpow_abscsd_all_reshaped[gi]
 
                 feat_dict['con']['names'] = np.array(feat_dict['con']['names'])[gi]
 
-        feat_dict['con']['data'] = f( bpow_abscds_all_reshaped )
+        feat_dict['con']['data'] = f( bpow_abscsd_all_reshaped )
         #if use_imag_coh:
         #    feat_dict['con']['data'] = f( tmp )
 
         #tmp_ord
-        #csdord1 = csdord_bandwise.reshape( (bpow_abscds_reshaped.shape[0], 3) )
+        #csdord1 = csdord_bandwise.reshape( (bpow_abscsd_reshaped.shape[0], 3) )
         #if use_lfp_HFO:
-        #    csdord2 = csdord_bandwise_LFP_HFO.reshape( (bpow_abscds_LFP_HFO_reshaped.shape[0], 3) )
+        #    csdord2 = csdord_bandwise_LFP_HFO.reshape( (bpow_abscsd_LFP_HFO_reshaped.shape[0], 3) )
         #csdords = [csdord1, csdord2  ]
         #csdord = np.vstack(csdords  )
 
