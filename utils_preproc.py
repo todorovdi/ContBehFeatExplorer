@@ -249,7 +249,8 @@ def plotFeatStatsScatter(rawnames,X_pri, int_types_to_stat,
                          feature_names_pri,sfreq,
                          rawtimes_pri,side_switch_happened_pri, wbd_pri, save_fig=True,
                         figname_prefix='', separate_by = '', artif_handling='reject',
-                         combine_couple=('across_everything','no')  ):
+                         combine_couple=('across_everything','no'),
+                        bindict_per_rawn = None ):
 
     print('plotFeatStatsScatter: starting plotting preparation')
 
@@ -276,15 +277,18 @@ def plotFeatStatsScatter(rawnames,X_pri, int_types_to_stat,
         gatherFeatStats(rawnames, X_pri, feature_names_pri,
                              wbd_pri, sfreq, rawtimes_pri,int_types_to_stat
                 , side_rev_pri = side_switch_happened_pri,
-                combine_within = combine_couple[0],require_all_intervals_present=False,
-                        printLog=False, minlen_bins = 2, artif_handling = artif_handling)
+                combine_within = combine_couple[0],require_intervals_present=False,
+                        printLog=False, minlen_bins = 2,
+                        artif_handling = artif_handling,
+                        bindict_per_rawn=bindict_per_rawn)
 
     indsets, means_combine_no, stds_combine_no, stats_per_indset_combine_no = \
         gatherFeatStats(rawnames, X_pri, feature_names_pri,
                              wbd_pri, sfreq, rawtimes_pri,
                 int_types_to_stat, side_rev_pri = side_switch_happened_pri,
-                combine_within = combine_couple[1], require_all_intervals_present=False, printLog=False,
-                        minlen_bins = 2, artif_handling = artif_handling)
+                combine_within = combine_couple[1], require_intervals_present=False, printLog=False,
+                        minlen_bins = 2, artif_handling = artif_handling,
+                        bindict_per_rawn=bindict_per_rawn)
 
     #assert len(separate_by) <= 1
 
@@ -355,8 +359,14 @@ def plotFeatStatsScatter(rawnames,X_pri, int_types_to_stat,
             if int_type not in means_combine_no[rawi]:
                 continue
             stdgl = stds_curint_combine_all
-            means_curint = (means_combine_no[rawi][int_type] - means_curint_combine_all) / stdgl
-            stds_curint = stds_combine_no[rawi][int_type] / stdgl
+            if stdgl is None:
+
+                means_curint = np.nan * np.ones( X_pri[rawi].shape[1] )
+                stds_curint  = np.nan * np.ones( X_pri[rawi].shape[1] )
+
+            else:
+                means_curint = (means_combine_no[rawi][int_type] - means_curint_combine_all) / stdgl
+                stds_curint  = stds_combine_no[rawi][int_type] / stdgl
 
 
             # for debug only
@@ -424,9 +434,9 @@ def getArtifForFeat(featn,bindict,lendat):
     for chn in chns:
         if chn is None:
             continue
-        artif_cur = getArtifForChn(chn,bindict,lendat)
+        res_artif_cur, artif_cur = getArtifForChn(chn,bindict,lendat)
         mask = mask | artif_cur
-        res_artif.update(artif_cur)
+        res_artif.update(res_artif_cur)
     return res_artif,mask
 
 def getArtifForChn(chn,bindict,lendat):
@@ -520,9 +530,10 @@ def collectAllMarkedIntervals( rn,times, main_side, side_rev, sfreq=256,
 
     return anndict_per_intcat
 
-def markedIntervals2Bins(anndict_per_intcat,times,sfreq):
+def markedIntervals2Bins(anndict_per_intcat,times,sfreq,wbd=None):
     bindict_per_bintype = {'artif':{}, 'beh_state':{} }
-    wbd = np.vstack([times*sfreq,1 + times*sfreq] ).astype(int)
+    if wbd is None:
+        wbd = np.vstack([times*sfreq,1 + times*sfreq] ).astype(int)
 
 
     #anns_mvt, anns_artif_pri, times2, dataset_bounds = \
@@ -592,7 +603,7 @@ def collectAllMarkedIntervalBins(rn,times,main_side, side_rev,
             sfreq=256, ann_MEGartif_prefix_to_use = '_ann_MEGartif_flt',
                                  printLog=True,
                                  allow_missing_files=False,
-                                remove_nonmain_artif=True ):
+                                remove_nonmain_artif=True, wbd=None ):
 
     anndict_per_intcat = collectAllMarkedIntervals(rn,times,main_side,
         side_rev, sfreq=sfreq,
@@ -600,7 +611,7 @@ def collectAllMarkedIntervalBins(rn,times,main_side, side_rev,
         printLog=printLog, allow_missing_files=allow_missing_files,
         remove_nonmain_artif=remove_nonmain_artif)
 
-    return markedIntervals2Bins(anndict_per_intcat,times,sfreq)
+    return markedIntervals2Bins(anndict_per_intcat,times,sfreq,wbd=wbd)
 
     #bindict_per_bintype = {'artif':{}, 'beh_state':{} }
     #wbd = np.vstack([times*sfreq,1 + times*sfreq] ).astype(int)
@@ -1070,6 +1081,7 @@ def gatherFeatStats(rawnames, X_pri, featnames_pri, wbd_pri,
         bindict_set = False
     else:
         bindict_set = True
+
     for rawi,rn in enumerate(rawnames):
         #ib_MEG_perit = getCleanIntervalBins(rn,sfreq, times,['_ann_MEGartif'] )
         #ib_LFP_perit = getCleanIntervalBins(rn,sfreq, times,['_ann_LFPartif'] )
@@ -1080,9 +1092,9 @@ def gatherFeatStats(rawnames, X_pri, featnames_pri, wbd_pri,
 
 
         if not bindict_set :
-            bindict_per_bintype = collectAllMarkedIntervalBins(rn,times,main_side,
-                side_rev, sfreq,
-                ann_MEGartif_prefix_to_use = ann_MEGartif_prefix_to_use,
+            bindict_per_bintype = \
+            collectAllMarkedIntervalBins(rn,times,main_side, side_rev, sfreq,
+                wbd = wbd, ann_MEGartif_prefix_to_use = ann_MEGartif_prefix_to_use,
                 allow_missing_files=False)
 
             bindict_per_rawn[rn ] =bindict_per_bintype

@@ -103,11 +103,11 @@ ssbad,sebad = 2,2.5
 #int(ss*sfreq):int(se*sfreq)
 step =       noise_size + stepf(times,ss,se)       + stepf(times,ssbad,sebad)
 step_hires = noise_size + stepf(times_hires,ss,se) + stepf(times_hires,ssbad,sebad)
-freq, freq2 = 0.3, 0.13
-sine_slow       = np.sin(times * 2 *np.pi * freq)
-sine_slow_hires = np.sin(times_hires * 2 *np.pi * freq)
-
-sine_slow2      = np.sin(times * 2 *np.pi * freq2)
+# too slow, contaminate everything too much
+#freq, freq2 = 0.3, 0.13
+#sine_slow       = np.sin(times * 2 *np.pi * freq)
+#sine_slow_hires = np.sin(times_hires * 2 *np.pi * freq)
+#sine_slow2      = np.sin(times * 2 *np.pi * freq2)
 
 ss2,se2 = se-0.5, se+0.4
 step2       = noise_size + stepf(times,ss2,se2)
@@ -132,18 +132,20 @@ sine_tremor = np.sin(times * 2 *np.pi * freq_tremor)
 step4       = noise_size + stepf(times,      ss4,se4)
 step4_hires = noise_size + stepf(times_hires,ss4,se4)
 
+artif_size = 1e4
+
 # set_data
 LFPchi = special_chnis['LFP_coupled_to_src']
-dat_pri[dati][LFPchi,  :]         += sine_slow       + step * sine_beta + step2 * sine_gamma
+dat_pri[dati][LFPchi,  :]         +=  step * sine_beta + step2 * sine_gamma
 
-dat_LFP_hires_pri[dati][LFPchi,:] += sine_slow_hires + step_hires * sine_beta_hires +\
+dat_LFP_hires_pri[dati][LFPchi,:] +=  step_hires * sine_beta_hires +\
     step2_hires * sine_gamma_hires + step3_hires * sine_HFO_hires * 5e-2
-dat_pri[dati][special_chnis['src_coupled_to_LFP'], :]  += (sine_slow  + step * sine_beta + step2 * sine_gamma ) * 0.5
+dat_pri[dati][special_chnis['src_coupled_to_LFP'], :]  += ( step * sine_beta + step2 * sine_gamma ) * 0.5
 
 # 2 and 3 are coupled between each other, but only after filtering (bandpower as well)
-dat_pri[dati][special_chnis['src_coupled_to_src1'], :] += (sine_slow       + step4 * sine_tremor ) * 1e-2 #* 1e-5
-dat_pri[dati][special_chnis['src_coupled_to_src2'], :] += (sine_slow   + sine_slow2  + step4 * sine_tremor ) * 5e-2
-dat_pri[dati][special_chnis['src_coupled_to_src3'], :] += (sine_slow2      + step4 * sine_tremor ) * 1e2
+dat_pri[dati][special_chnis['src_coupled_to_src1'], :] += (   step4 * sine_tremor ) * 1e-2 #* 1e-5
+dat_pri[dati][special_chnis['src_coupled_to_src2'], :] += (   step4 * sine_tremor ) * 5e-2
+dat_pri[dati][special_chnis['src_coupled_to_src3'], :] += (   step4 * sine_tremor ) * 1e2
 # yes, I want to use 4 and 3 here (not equal numbers) because I want to have HFO sine
 dat_LFP_hires_pri[dati][special_chnis['LFP_coupled_to_src_HFO_cross_freq'], :] += \
     step4_hires * sine_HFO_hires

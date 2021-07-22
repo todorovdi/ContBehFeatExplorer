@@ -890,12 +890,14 @@ if scale_data_combine_type != 'no_scaling':
     # computations can be below double precision
     if prescale_data:
         # rescaling
-        dat_T_scaled, indsets, means_rescaled, stds_rescaled = upre.rescaleFeats(rawnames, dat_T_pri, subfeature_order_pri, None,
-                        sfreq, times_pri, int_type = baseline_int,
-                        main_side = None, side_rev_pri = side_switched_pri,
-                        minlen_bins = 5 * sfreq, combine_within=combine_type,
-                        artif_handling=feat_stats_artif_handling, means=means, stds=stds, indsets= newindsets,
-                        bindict_per_rawn=bindict_per_rawn)
+        dat_T_scaled, indsets, means_rescaled, stds_rescaled = \
+            upre.rescaleFeats(rawnames, dat_T_pri, subfeature_order_pri,
+                None, sfreq, times_pri, int_type = baseline_int,
+                main_side = None, side_rev_pri = side_switched_pri,
+                minlen_bins = 5 * sfreq, combine_within=combine_type,
+                artif_handling=feat_stats_artif_handling,
+                means=means, stds=stds, indsets= newindsets,
+                bindict_per_rawn=bindict_per_rawn)
         for dati in range(len(dat_pri) ):
             dat_pri[dati] = dat_T_scaled[dati].T
 
@@ -2461,7 +2463,9 @@ if save_feat:
                 feature_names_all = feature_names_all, sfreq=sfreq,
                 windowsz=windowsz, nedgeBins=nedgeBins, n_channels=n_channels_pri[rawind],
                 rawtimes = times_pri[rawind], freqs=freqs, chnames_LFP=chnames_LFP,
-                 chnames_src=chnames_src, feat_info = info, cmd=(opts,args), pars=pars )
+                 chnames_src=chnames_src, feat_info = info,
+                 cmd=(opts,args), pars=pars,
+                 anndict_per_intcat=anndict_per_intcat_per_rawn[rawname_])
         #ip = feat_inds_cur[0],feat_inds_cur[-1]
         print('{} Features shape {} saved to\n  {}'.format(rawind,X_cur.shape,fname_feat_full) )
 

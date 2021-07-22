@@ -360,11 +360,16 @@ def plotTFRlike(dat_pri, dat_hires_pri,  tfrres_pri, tfrres_HFO_pri, csd_pri,
         freqis[band] = freqis_cur
 
 
+    numLFPchs = len( selFeatsRegexInds(chns, '^LFP.*') )
+
+    from scipy.special import  binom
+    nplots_main = int( binom(len(chns), 2) ) + int( binom(len(chns), 1) )
+
     #nlowfreq = np.where( (n_cycles / freqs) < 2  )[0][0]
     #lowfreqbd = freqs[nlowfreq]
     N = dat_pri[0].shape[-1]
     print(tfrres_pri[0].shape)
-    nc = 5 * len(chns) * len(bands)
+    nc = len(chns) + nplots_main * len(bands) * 2 + numLFPchs
 
     fig,axs = plt.subplots(nc,1,figsize=(12,2*nc)) #, sharex='col')
     axind = 0
@@ -502,7 +507,7 @@ def plotTFRlike(dat_pri, dat_hires_pri,  tfrres_pri, tfrres_HFO_pri, csd_pri,
             ax.plot(Xtimes, np.abs( bpow_abscsd_pri[rawi][feati] ) , label=s)
         a,b = ax.get_ylim(); rng = b-a
         #ax.plot(times_pri[rawi], dat_pri[rawi][chi] / rng, alpha = 0.5 )
-        ax.set_title(f'{chn}: bpow_abscds_all_reshaped')
+        ax.set_title(f'{chn}: bpow_abscds')
         ax.legend(loc='lower right')
         #ax.fill_betweenx([0,0.2],  (offset_start-windowsz)//skip,  offset_start//skip, color='red', alpha=0.15)
 
@@ -527,6 +532,8 @@ def plotTFRlike(dat_pri, dat_hires_pri,  tfrres_pri, tfrres_HFO_pri, csd_pri,
 
     for ax in axs:
         ax.set_xlim(times_pri[rawi][0],times_pri[rawi][-1])
+
+    print(axind)
 
     plt.tight_layout()
     return locals()

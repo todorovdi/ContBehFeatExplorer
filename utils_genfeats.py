@@ -975,9 +975,10 @@ def tfr2csd(dat, sfreq, returnOrder = False, skip_same = [], ind_pairs = None,
                 else:
                     csds += [rimabs  ]
 
-                plt.figure(figsize=(15,2) )
-                plt.plot(csds[-1][0].T )
-                plt.title(f'{pc}')
+                if gv.DEBUG_PLOT_TFR2CSD:
+                    plt.figure(figsize=(15,2) )
+                    plt.plot(csds[-1][0].T )
+                    plt.title(f'{pc}')
                 #plt.legend(loc='upper right')
 
                 if np.max(np.abs(csds[-1].imag)) > 1e-10:
@@ -1061,9 +1062,10 @@ def tfr2csd(dat, sfreq, returnOrder = False, skip_same = [], ind_pairs = None,
                 #print(r.shape)
                 csds += [r  ]
 
-                plt.figure(figsize=(15,2) )
-                plt.plot(csds[-1][0].T )
-                plt.title(f'{pc}')
+                if gv.DEBUG_PLOT_TFR2CSD:
+                    plt.figure(figsize=(15,2) )
+                    plt.plot(csds[-1][0].T )
+                    plt.title(f'{pc}')
                 #plt.legend(loc='upper right')
 
             for pc in LFP2LFP_couplings:
@@ -1115,10 +1117,12 @@ def tfr2csd(dat, sfreq, returnOrder = False, skip_same = [], ind_pairs = None,
                 #print(r.shape)
                 csds += [r  ]
 
-                plt.figure(figsize=(15,2) )
-                plt.plot(csds[-1][0].T )
-                plt.title(f'{pc}')
-                plt.legend(loc='upper right')
+
+                if gv.DEBUG_PLOT_TFR2CSD:
+                    plt.figure(figsize=(15,2) )
+                    plt.plot(csds[-1][0].T )
+                    plt.title(f'{pc}')
+                    plt.legend(loc='upper right')
 
 
     order = np.hstack(order)

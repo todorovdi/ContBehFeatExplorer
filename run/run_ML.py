@@ -11,11 +11,11 @@ import gc;
 import scipy.signal as sig
 
 import numpy as np
-from sklearn.preprocessing import RobustScaler
 from sklearn.decomposition import PCA
 from sklearn.discriminant_analysis import LinearDiscriminantAnalysis
 from sklearn.impute import SimpleImputer
 from sklearn.feature_selection import mutual_info_classif
+from sklearn import preprocessing
 
 import globvars as gv
 import utils
@@ -36,6 +36,9 @@ from resource import getrusage
 import psutil,resource
 import utils_postprocess as pp
 
+from featlist import collectFeatTypeInfo
+from featlist import filterFeats
+
 def getMemUsed():
     #return getrusage(resource.RUSAGE_SELF).ru_maxrss;
     return psutil.virtual_memory().used
@@ -55,15 +58,16 @@ nfeats_per_comp_LDA_strongred = 5
 
 show_plots = 0
 
-discard = 1e-2
+discard_outliers_q = 1e-2
 qshift = 1e-2
 force_single_core = False
 ##########################
 
 # all possible
-feat_types_all = [ 'con',  'H_act', 'H_mob', 'H_compl', 'bpcorr', 'rbcorr']
+feat_types_all = [ 'con',  'H_act', 'H_mob', 'H_compl', 'bpcorr', 'rbcorr', 'Hjorth']
 data_modalities_all = ['LFP', 'msrc']
 
+# can be changed later
 features_to_use = [ 'con',  'H_act', 'H_mob', 'H_compl', 'bpcorr', 'rbcorr']
 data_modalities = [ 'msrc', 'LFP']  # order is important!
 msrc_inds = np.arange(8,dtype=int)  #indices appearing in channel (sources) names, not channnel indices
@@ -82,8 +86,9 @@ fbands_per_mod_set = 0
 prefix = ''
 
 #do_impute_artifacts = 1
-#artif_handling_before_fit = 'impute' #or 'discard' or 'do_nothing'
-artif_handling_before_fit = 'discard'
+#artif_handling_before_fit = 'impute' #or 'reject' or 'do_nothing'
+artif_handling_before_fit = 'reject'
+feat_stats_artif_handling  = 'reject'
 do_outliers_discard = 1
 
 def_sources_type = 'HirschPt2011'
@@ -115,7 +120,8 @@ LFP_related_only = 0
 parcel_group_names = []
 
 subskip_fit = 1   # > 1 means that I fit to subsampled dataset
-feat_variance_q_thr = [0.6, 0.75, 0.9]  # I will select only features that have high variance according to PCA (high contributions to highest components)
+#feat_variance_q_thr = [0.6, 0.75, 0.9]  # I will select only features that have high variance according to PCA (high contributions to highest components)
+feat_variance_q_thr = [0.87, 0.92, 0.99]  # I will select only features that have high variance according to PCA (high contributions to highest components)
 use_low_var_feats_for_heavy_fits = True # whether I fit XGB and min feat sel only to highly varing features (according to feat_variance_q_thr)
 search_best_LFP = 1
 
@@ -164,14 +170,14 @@ prep_for_clf_only = 0
 
 perf_inds_to_print = [0,1,2,10,-1]
 
-strong_correl_level = 0.85
+strong_correl_level = 0.9
 
 
 helpstr = 'Usage example\nrun_ML.py --rawnames <rawname_naked1,rawnames_naked2> '
 opts, args = getopt.getopt(effargv,"hr:n:s:w:p:",
         ["rawnames=", "n_channels=",  "windowsz=", "pcexpl=",
-         "show_plots=","discard=", 'feat_types=', 'use_HFO=', 'mods=',
-         'prefix=', 'load_only=', 'prep_for_clf_only=',
+         "show_plots=","discard_outliers_q=", 'feat_types=', 'use_HFO=', 'mods=',
+         'prefix=', 'load_only=', 'prep_for_clf_only=', 'exit_after=',
          'fbands=',   'fbands_mod1=','fbands_mod2=',
          'n_feats=', 'single_core=',
          'sources_type=', 'bands_type=', 'crop=', 'parcel_types=',
@@ -272,7 +278,7 @@ for opt,arg in pars.items():
     elif opt == "parcel_group_names":
         parcel_group_names = arg.split(',')
     elif opt == "artif_handling":
-        assert arg in ['impute' , 'discard']
+        assert arg in ['impute' , 'reject']
         artif_handling_before_fit = arg
     elif opt == "crop":
         cr =  arg.split(',')
@@ -310,6 +316,8 @@ for opt,arg in pars.items():
         force_single_core = int(arg)
     elif opt == 'load_only':
         load_only = int(arg)
+    elif opt == 'exit_after':
+        exit_after = arg
     elif opt == 'show_plots':
         show_plots = int(arg)
     elif opt == 'subskip_fit':
@@ -318,17 +326,22 @@ for opt,arg in pars.items():
         windowsz = int(arg)
     elif opt == "LFP_related_only":
         LFP_related_only = int(arg)
-    elif opt == "discard":
-        discard = float(arg)
+    elif opt == "discard_outliers_q":
+        discard_outliers_q = float(arg)
     elif opt == "prefix":
         prefix = arg + '_'
     elif opt == "msrc_inds":
         msrc_inds = [ int(indstr) for indstr in arg.split(',') ]
         msrc_inds = np.array(msrc_inds, dtype=int)
     elif opt == "feat_types":
-        features_to_use = arg.split(',')
-        for ftu in features_to_use:
+        features_to_use_pre = arg.split(',')
+        features_to_use = []
+        for ftu in features_to_use_pre:
             assert ftu in feat_types_all, ftu
+            if ftu == 'Hjorth':
+                features_to_use += ['H_mob', 'H_act', 'H_compl' ]
+            else:
+                features_to_use += [ftu]
     elif opt == "mods":
         data_modalities = arg.split(',')   #lfp of msrc
         #if len(data_modalities) == len(data_modalities_all):
@@ -439,9 +452,13 @@ fname_feat_full_pri = []
 chnames_src_pri = []
 chnames_LFP_pri = []
 
+bindict_per_rawn = {}
+bindict_hires_per_rawn = {}
+anndict_per_intcat_per_rawn    = {}
+
 # Load everything
-for rawname_ in rawnames:
-    subj,medcond,task  = utils.getParamsFromRawname(rawname_)
+for rawn in rawnames:
+    subj,medcond,task  = utils.getParamsFromRawname(rawn)
     subjs_pri += [subj]
     #8,9 -- more LFP chanenls
     #if subj in ['S08', 'S09' ] and not n_feats_set_explicitly:
@@ -457,17 +474,17 @@ for rawname_ in rawnames:
     inp_sub = pjoin(gv.data_dir, input_subdir)
     if sources_type == def_sources_type:
         a = '{}_feats_{}chs_nfeats{}_skip{}_wsz{}_grp{}-{}{}.npz'.\
-            format(rawname_,n_channels, n_feats, skip, windowsz,
+            format(rawn,n_channels, n_feats, skip, windowsz,
                    src_file_grouping_ind, src_grouping, crp_str)
         feat_fnames += [a]
         fname_feat_full = pjoin( inp_sub,a)
     else:
         regex = '{}_feats_{}_{}chs_nfeats{}_skip{}_wsz{}_grp{}-{}{}.npz'.\
-            format(rawname_,sources_type,'[0-9]+', '[0-9]+', skip, windowsz,
+            format(rawn,sources_type,'[0-9]+', '[0-9]+', skip, windowsz,
                     src_file_grouping_ind, src_grouping, crp_str)
-            #format(rawname_, prefix, regex_nrPCA, regex_nfeats, regex_pcadim)
+            #format(rawn, prefix, regex_nrPCA, regex_nfeats, regex_pcadim)
 
-        fnfound = utsne.findByPrefix(inp_sub, rawname_, prefix, regex=regex)
+        fnfound = utsne.findByPrefix(inp_sub, rawn, prefix, regex=regex)
         if len(fnfound) > 1:
             fnt = [0] * len(fnfound)
             for fni in range(len(fnt) ):
@@ -477,7 +494,7 @@ for rawname_ in rawnames:
             fnfound = [ fnfound[fni_max] ]
 
 
-        assert len(fnfound) == 1, 'For {} found not single fnames {}'.format(rawname_,fnfound)
+        assert len(fnfound) == 1, 'For {} found not single fnames {}'.format(rawn,fnfound)
         fname_feat_full = pjoin( inp_sub, fnfound[0] )
 
     fname_feat_full_pri += [fname_feat_full]
@@ -503,10 +520,9 @@ for rawname_ in rawnames:
     chnames_src = f['chnames_src']
     chnames_LFP = f['chnames_LFP']
 
-    from featlist import collectFeatTypeInfo
     feature_names_list_info = collectFeatTypeInfo(feature_names_all, ext_info = 0 )
     missing_ftypes = set(features_to_use)  - set(feature_names_list_info['ftypes'])
-    assert missing_ftypes == set([]), f'Feat file is missing modalities {missing_ftypes}'
+    assert missing_ftypes == set([]), f'Feat file is missing feature types {missing_ftypes}'
 
     chnames_src_pri += [chnames_src]
     chnames_LFP_pri += [chnames_LFP]
@@ -535,6 +551,11 @@ for rawname_ in rawnames:
         print('Warning! wbd is not int the feature file! Using Xtimes + wsz')
         wbd = np.vstack([Xtimes,Xtimes]) * sfreq # we need orig bins
         wbd[1] += windowsz
+
+    anndict_per_intcat = f['anndict_per_intcat'][()]
+    anndict_per_intcat_per_rawn[rawn] = anndict_per_intcat
+    bindict_per_rawn[rawn] = upre.markedIntervals2Bins(anndict_per_intcat,
+                                                       rawtimes,sfreq,wbd=wbd)
 
     if X_allfeats.shape[0] < wbd.shape[1]: # this can arise from saveing wbd_H instead of the right thing
         print('Warning, differnt X_allfeats and wbd shapes {},{}, cropping wbd'.
@@ -567,7 +588,7 @@ for rawname_ in rawnames:
     ##################
 
     src_rec_info_fn = '{}_{}_grp{}_src_rec_info'.\
-        format(rawname_,sources_type, src_file_grouping_ind)
+        format(rawn,sources_type, src_file_grouping_ind)
     src_rec_info_fn_full = pjoin(gv.data_dir, input_subdir, src_rec_info_fn + '.npz')
     rec_info = np.load(src_rec_info_fn_full, allow_pickle=True)
     src_rec_info_pri += [rec_info]
@@ -576,7 +597,6 @@ for rawname_ in rawnames:
 
     ###########
 
-    from featlist import filterFeats
     selected_feat_inds =  filterFeats(feature_names_all, chnames_LFP,
                                       LFP_related_only, parcel_types,
                                       remove_crossLFP, cross_couplings_only,
@@ -650,9 +670,14 @@ if show_plots:
         format(int(use_main_LFP_chan), int(use_lfp_HFO), str_mods, str_feats)
     pdf= PdfPages(pjoin(subdir_fig, out_name_plot + '.pdf' ))
 
+if load_only or exit_after == 'load':
+    print('Got load_only or exit_after, exiting!')
+    #if show_plots:
+    #    pdf.close()
+    sys.exit(0)
+
 if rescale_feats:
     print('Rescaling features')
-
 
     if show_plots and 'feat_stats' in plot_types:
         int_types_to_stat = [it + '_{}'.format(new_main_side_let) for it in gp.int_types_basic]
@@ -673,13 +698,16 @@ if rescale_feats:
     # rescaling happens in-place
     # we don't need stat file because here we load everything in memory in any
     # case
-    X_pri_rescaled, indsets, means, stds = upre.rescaleFeats(rawnames, X_pri,
-                    feature_names_pri, wbd_pri,
-                    sfreq, rawtimes_pri, int_type = baseline_int_type,
-                    main_side = None,
-                    side_rev_pri = side_switch_happened_pri,
-                    minlen_bins = 5 * sfreq // skip,
-                    combine_within=scale_feat_combine_type)
+    X_pri_rescaled, indsets, means, stds = \
+        upre.rescaleFeats(rawnames, X_pri,
+            feature_names_pri, wbd_pri,
+            sfreq, rawtimes_pri, int_type = baseline_int_type,
+            main_side = None,
+            side_rev_pri = side_switch_happened_pri,
+            artif_handling=feat_stats_artif_handling,
+            minlen_bins = 5 * sfreq // skip,
+            combine_within=scale_feat_combine_type,
+            bindict_per_rawn=bindict_per_rawn  )
     #X_pri = X_pri_rescaled
 
     if show_plots and 'feat_stats' in plot_types:
@@ -695,13 +723,22 @@ if rescale_feats:
         if len(plot_types) == 1:
             pdf.close()
 
+    Xconcat = np.concatenate(X_pri_rescaled,axis=0)
+else:
+    Xconcat = np.concatenate(X_pri,axis=0)
+
 
 if len(set(new_main_side_pri)  ) > 1:
     ws = 'STOP!  we have datasets with different main tremor sides here! Remapping is needed!'
     print(ws, set(new_main_side_pri) )
     #raise ValueError(ws)
 
-Xconcat = np.concatenate(X_pri,axis=0)
+
+if exit_after == 'rescale':
+    print(f'Got exit_after={exit_after}, exiting!')
+    #if show_plots:
+    #    pdf.close()
+    sys.exit(0)
 
 
 nbins_total =  sum( [ len(times) for times in rawtimes_pri ] )
@@ -738,7 +775,7 @@ ivalis_tb_indarrays_merged = \
 bininds_concat_good = np.arange(Xconcat.shape[0])    #everything
 if do_outliers_discard:
     artif_naive_bininds, qvmult, discard_ratio = \
-        utsne.findOutlierLimitDiscard(Xconcat,discard=discard,qshift=1e-2)
+        utsne.findOutlierLimitDiscard(Xconcat,discard=discard_outliers_q,qshift=1e-2)
     bininds_concat_good = np.setdiff1d( bininds_concat_good, artif_naive_bininds)
 
     print('Outliers selection result: qvmult={:.3f}, len(artif_naive_bininds)={} of {} = {:.3f}s, discard_ratio={:.3f} %'.
@@ -759,7 +796,8 @@ anns_artif, anns_artif_pri, times_, dataset_bounds_ = \
                  allow_short_intervals=True, side_rev_pri =
                  side_switch_happened_pri, wbd_pri = wbd_pri, sfreq=sfreq)
 wrong_brain_side_let = new_main_side[0].upper()  # ipsilater is wrong
-anns_artif = utils.removeAnnsByDescr(anns_artif, 'BAD_LFP{}'.format(wrong_brain_side_let)  )
+anns_artif = utils.removeAnnsByDescr(anns_artif,
+        'BAD_LFP{}'.format(wrong_brain_side_let)  )
 ivalis_artif = utils.ann2ivalDict(anns_artif)
 ivalis_artif_tb_indarrays_merged = \
     utils.getWindowIndicesFromIntervals(wbd_merged,ivalis_artif,
@@ -769,6 +807,8 @@ ivalis_artif_tb_indarrays_merged = \
 #ivalis_artif_tb, ivalis_artif_tb_indarrays = utsne.getAnnBins(ivalis_artif, Xtimes,
 #                                                            nedgeBins, sfreq, skip, windowsz, dataset_bounds)
 #ivalis_artif_tb_indarrays_merged = utsne.mergeAnnBinArrays(ivalis_artif_tb_indarrays)
+
+
 Xconcat_artif_nan  = utils.setArtifNaN(Xconcat, ivalis_artif_tb_indarrays_merged, featnames,
                                        ignore_shape_warning=test_mode)
 isnan = np.isnan( Xconcat_artif_nan)
@@ -790,7 +830,7 @@ if artif_handling_before_fit == 'impute':
 
     #we DO NOT change bininds_concat_good here
     Xconcat_to_fit = Xconcat_imputed
-elif artif_handling_before_fit == 'discard':
+elif artif_handling_before_fit == 'reject':
     bininds_concat_good = np.setdiff1d(bininds_concat_good, artif_bininds)
     Xconcat_to_fit = Xconcat
 
@@ -806,6 +846,7 @@ else:
 lst =  [inds for inds in ivalis_tb_indarrays_merged.values()]
 all_interval_inds = np.hstack(lst  )
 unset_inds = np.setdiff1d(np.arange(len(Xconcat)), all_interval_inds)
+print( f'Num of indices not assigned to any interval = {len(unset_inds) } ')
 
 # this is the most bruteforce way when I join all artifacts
 #lst2 =  [inds for inds in ivalis_artif_tb_indarrays_merged.values()]
@@ -829,8 +870,8 @@ featnames_nice = utils.nicenFeatNames(featnames,
                                     roi_labels,srcgrouping_names_sorted)
 assert len(featnames_nice) == len(featnames)
 
-if load_only:
-    print('Got load_only, exiting!')
+if exit_after == 'artif_processed':
+    print(f'Got exit_after={exit_after}, exiting!')
     #if show_plots:
     #    pdf.close()
     sys.exit(0)
@@ -860,7 +901,7 @@ lens_pri = [ Xcur.shape[0] for Xcur in X_pri ]
 indst = 0
 indend = lens_pri[0]
 dataset_bounds_Xbins = [] #skipped bin indices
-for rawind,rawname_ in enumerate(rawnames):
+for rawind,rawn in enumerate(rawnames):
     sl = slice(indst,indend)
     dataset_bounds_Xbins += [ (indst,indend) ]
 
@@ -1026,9 +1067,12 @@ if do_Classif:
 
             counts = utsne.countClassLabels(class_labels_good, class_ids_grouped=None, revdict=revdict)
             print('bincounts are ',counts)
-            if counts[class_to_check] < 10:
+            bctrh = 10
+            if test_mode:
+                bcthr = 1
+            if counts[class_to_check] <= bcthr:
                 cid = class_ids_grouped[class_to_check]
-                s = '!!! WARNING: grouping_key,int_types_key: class {} (cid={}) is not present at all! skipping'.format(class_to_check,cid)
+                s = '!!! WARNING: grouping_key,int_types_key: class {} (cid={}) has too few instances all! skipping'.format(class_to_check,cid)
                 print(s)
                 continue
 
@@ -1112,31 +1156,35 @@ if do_Classif:
 
             results_cur = {}
 
-            C = np.corrcoef(Xsubset_to_fit,rowvar=False)
-            absC = np.abs(C)
+            try:
+                C = np.corrcoef(Xsubset_to_fit,rowvar=False)
+                absC = np.abs(C)
 
-            C_nocenter = absC - np.diag(np.diag(absC))
+                C_nocenter = absC - np.diag(np.diag(absC))
 
-            C_flat = C_nocenter.flatten()
-            sinds = np.argsort(C_flat)
-            hist, bin_edges = np.histogram(C_nocenter.flatten(), bins=20, density=False)
+                C_flat = C_nocenter.flatten()
+                sinds = np.argsort(C_flat)
+                hist, bin_edges = np.histogram(C_nocenter.flatten(), bins=20, density=False)
 
-            strong_correl_level = 0.7
-            strong_correl_inds = np.where( C_flat > strong_correl_level )[0]
-            print('Num: strongly (>{:.2f}) correl feats (div by 2)={}, of total {} it is {:.4f}'.format(strong_correl_level, len(strong_correl_inds) //2 , len(C_flat)//2, len(strong_correl_inds) / len(C_flat) ) )
+                strong_correl_inds = np.where( C_flat > strong_correl_level )[0]
+                print('Num: strongly (>{:.2f}) correl feats (div by 2)={}, of total {} it is {:.4f}'.format(strong_correl_level, len(strong_correl_inds) //2 , len(C_flat)//2, len(strong_correl_inds) / len(C_flat) ) )
+                nonsyn_feat_inds = pp.getNotSyn(C,strong_correl_level)
+                print(f'Without synonyms for corr. level = {strong_correl_level:.3f}: {len(nonsyn_feat_inds)} of {C.shape[0]}' )
+            except ValueError as e:
+                print(f'Error during correl matrix comp {e}')
+                C = None
+                hist,bin_edges = None,None
+                nonsyn_feat_inds = None
 
             results_cur['corr_matrix'] = C
             results_cur['corr_matrix_hist'] = hist, bin_edges
-
+            results_cur['nonsyn_feat_inds'] = nonsyn_feat_inds
 
             #indlist = fip_fs
             #indlist = np.arange(C.shape[0])
             #C_subset = C[indlist,:][:,indlist]
-            nonsyn_feat_inds = pp.getNotSyn(C,strong_correl_level)
             #orig_inds = indlist[nonsyn_feat_inds]
-            results_cur['nonsyn_feat_inds'] = nonsyn_feat_inds
 
-            print(f'Without synonyms for corr. level = {strong_correl_level:.3f}: {len(nonsyn_feat_inds)} of {C.shape[0]}' )
 
 
             if calc_MI:
@@ -1151,6 +1199,24 @@ if do_Classif:
             else:
                 print('  skipping computation of MI')
                 MI_per_feati = None
+
+            calc_VF     = 1
+            calc_Boruta = 1
+
+            if calc_VF:
+                vf_thr = 10
+                colinds_bad_VFsel,colinds_good_VFsel,VFs_list = utsne.findBadColumnsVF(Xconcat_good_cur,vf_thr=vf_thr,n_jobs=n_jobs)
+                print(f'VF truncation found {len(colinds_bad_VFsel)} \
+                      bad indices of total {Xconcat_good_cur.shape[1]}')
+                gc.collect()
+
+                results_cur['VF_truncation'] = {}
+                results_cur['VF_truncation'][ 'colinds_bad_VFsel'] = colinds_bad_VFsel
+                results_cur['VF_truncation'][ 'colinds_good_VFsel'] = colinds_good_VFsel
+                results_cur['VF_truncation'][ 'VFs_list'] = VFs_list
+            else:
+                colinds_bad_VFsel,colinds_good_VFsel,vfs_list = None,None,None
+
 
             ########################
             usage = getMemUsed(); print( f'^^^^^^^ mem usage (GB) =  {usage / GB}')
@@ -1218,6 +1284,16 @@ if do_Classif:
             lda_analysis_versions[lda_version_name] = res_cur
             gc.collect()
 
+
+            lda_version_name =  'after_VF_threshold'
+            res_cur = utsne.calcLDAVersions(Xconcat_good_cur[:,colinds_good_VFsel],
+                                  Xconcat_imputed[:,colinds_good_VFsel],
+                                  class_labels_good,
+                                  n_components_LDA, class_ind_to_check,
+                                  revdict, calcName=lda_version_name,n_splits=n_splits)
+            lda_analysis_versions[lda_version_name] = res_cur
+            gc.collect()
+
             usage = getMemUsed(); print( f'^^^^^^^ mem usage (GB) =  {usage / GB}')
 
 
@@ -1232,7 +1308,7 @@ if do_Classif:
                 stop_cond = ['sens','spec' ],
                 n_splits=n_splits, verbose=2, check_CV_perf=True, nfeats_step=1,
                 nsteps_report=2, stop_if_boring=False,
-                featnames=featnames_nice, max_nfeats=X_for_heavy.shape[1] )
+                featnames=np.array(featnames_nice)[feat_inds_for_heavy], max_nfeats=X_for_heavy.shape[1] )
             #_, best_inds_LDA , _, _ =   perfs_LDA_featsearch[-1]
             best_inds_LDA =   perfs_LDA_featsearch[-1]['featinds_present']
             best_inds_LDA = feat_inds_for_heavy[best_inds_LDA]
@@ -1250,7 +1326,6 @@ if do_Classif:
 
             usage = getMemUsed(); print( f'^^^^^^^ mem usage (GB) =  {usage / GB}')
             ##################
-            from sklearn import preprocessing
             lab_enc = preprocessing.LabelEncoder()
             # just skipped class_labels_good
             lab_enc.fit(class_labels_for_heavy)
@@ -1259,8 +1334,6 @@ if do_Classif:
             do_XGB_cur =  do_XGB and not (int_types_key in gp.int_type_datset_rel and skip_XGB_aux_intervals  )
             if do_XGB_cur:
                 results_cur['XGB_analysis_versions'] = {}
-
-
                 # TODO: XGboost in future release wants set(class labels) to be
                 # continousely increasing from zero, they don't want to use
                 # sklearn version.. but I will anyway
@@ -1286,7 +1359,7 @@ if do_Classif:
 
                 # fit the clf_XGB to get feature importances
                 print('Starting XGB on X.shape ', X_cur.shape)
-                add_fitopts = { 'eval_metric':'logloss'}
+                add_fitopts = { 'eval_metric':'mlogloss'}
 
                 clf_XGB.fit(X_cur, y_cur, **add_fitopts)
                 featnames_nice_heavy = list( np.array(featnames_nice)[feat_inds_for_heavy] )
@@ -1360,20 +1433,44 @@ if do_Classif:
                         format( len(best_inds_XGB), pca_XGBfeats.n_components_) )
 
                 XGB_version_name = 'all_present_features'
-                results_cur['XGB_analysis_versions'][XGB_version_name] = perfs_XGB[0]
+                rc = {'perf_dict':perfs_XGB[0] ,
+                      'importances':perfs_XGB[0]['clf_objs'][0].feature_importances_}
+                results_cur['XGB_analysis_versions'][XGB_version_name] = rc
 
                 #if last_perfobj_XGB['stop_now']:
                 XGB_version_name = 'strongest_features_XGB_opinion'
-                results_cur['XGB_analysis_versions'][XGB_version_name] = last_perfobj_XGB
+                rc = {'perf_dict':perfs_XGB[-1] ,
+                      'importances':perfs_XGB[-1]['clf_objs'][0].feature_importances_}
+                results_cur['XGB_analysis_versions'][XGB_version_name] = rc
+
+                #################
+
+                if calc_Boruta:
+                    if calc_VF:
+                        fiboruta = colinds_good_VFsel
+                    else:
+                        fiboruta = np.arange(Xconcat_good_cur.shape[1])
+                    X_boruta = Xconcat_good_cur[:,fiboruta]
+
+                    featinds_good_boruta,featinds_ranking_boruta = \
+                        utsne.selFeatsBoruta(X_boruta,
+                            class_labels_good_for_classif,
+                            verbose = 2,add_clf_creopts=None, n_jobs =
+                            n_jobs, random_state=0)
+                    print(f'boruta selected {len(featinds_good_boruta)} \
+                          good indices of total {X_boruta.shape[1]}')
+                    gc.collect()
+                    results_cur['boruta'] = {}
+                    results_cur['boruta']['featinds_good_boruta' ] = \
+                        fiboruta[featinds_good_boruta]
+                    results_cur['boruta']['featinds_ranking_boruta' ] = featinds_ranking_boruta
+                else:
+                    featinds_good_boruta,featinds_ranking_boruta = None,None
 
                 ##############3
 
-                XGB_version_name = 'strongest_features_XGB_opinion_nosyn'
-                indlist = best_inds_XGB
-                C_subset = C[indlist,:][:,indlist]
-                nonsyn_feat_inds = pp.getNotSyn(C_subset,strong_correl_level)
-
-                X_cur = X_for_heavy[ :, nonsyn_feat_inds ]
+                XGB_version_name = 'after_VF_threshold'
+                X_cur = Xconcat_good_cur[ :, colinds_bad_VFsel ]
                 y_cur = class_labels_good_for_classif
 
                 clf_XGB_ = XGBClassifier(**add_clf_creopts)
@@ -1390,9 +1487,36 @@ if do_Classif:
                 rc = {'perf_dict':r0, 'importances':clf_XGB_.feature_importances_}
                 results_cur['XGB_analysis_versions'][XGB_version_name] = rc
 
+
+                ####################
+
+                if nonsyn_feat_inds is not None:
+                    XGB_version_name = 'strongest_features_XGB_opinion_nosyn'
+                    indlist = best_inds_XGB
+                    C_subset = C[indlist,:][:,indlist]
+                    nonsyn_feat_inds = pp.getNotSyn(C_subset,strong_correl_level)
+
+                    X_cur = X_for_heavy[ :, nonsyn_feat_inds ]
+                    y_cur = class_labels_good_for_classif
+
+                    clf_XGB_ = XGBClassifier(**add_clf_creopts)
+                    clf_XGB_.fit(X_cur, y_cur, **add_fitopts)
+                #res_cur = utsne.calcLDAVersions(Xconcat_good_cur[:,pca_derived_featinds],
+                #                                    Xconcat_imputed[:,pca_derived_featinds],
+
+                    r0 = utsne.getPredPowersCV(clf_XGB_,X_cur,y_cur,
+                        class_ind_to_check_lenc, printLog = 0,
+                        n_splits=n_splits, add_fitopts=add_fitopts,
+                        add_clf_creopts=add_clf_creopts,
+                        ret_clf_obj=False, seed=0)
+
+                    rc = {'perf_dict':r0, 'importances':clf_XGB_.feature_importances_}
+                    results_cur['XGB_analysis_versions'][XGB_version_name] = rc
+
                 # look at different feature subsets based on q threshold from PCA
                 for thri in range(len( feat_variance_q_thr )):
-                    XGB_version_name = 'best_PCA-derived_features_{}'.format( feat_variance_q_thr[thri] )
+                    XGB_version_name = 'best_PCA-derived_features_{}'.\
+                        format( feat_variance_q_thr[thri] )
                     pca_derived_featinds = pca_derived_featinds_perthr[thri]
                     if len(pca_derived_featinds) == 0:
                         continue
@@ -1414,6 +1538,7 @@ if do_Classif:
                     results_cur['XGB_analysis_versions'][XGB_version_name] = rc
 
                 gc.collect()
+
 
             else:
                 clf_XGB = None
@@ -1442,6 +1567,18 @@ if do_Classif:
                                     revdict, calcName=lda_version_name,n_splits=n_splits)
                 lda_analysis_versions[lda_version_name] = res_cur
                 gc.collect()
+
+
+                if calc_Boruta:
+                    lda_version_name =  'boruta_selected'
+                    res_cur = utsne.calcLDAVersions(
+                        Xconcat_good_cur[:,featinds_good_boruta],
+                        Xconcat_imputed[:,featinds_good_boruta],
+                        class_labels_good, n_components_LDA,
+                        class_ind_to_check, revdict,
+                        calcName=lda_version_name,n_splits=n_splits)
+                    lda_analysis_versions[lda_version_name] = res_cur
+                    gc.collect()
 
             #---------- again, not much reduction
             #ldapts_red2 = Xconcat_good_cur[:,best_inds_XGB]
@@ -1708,7 +1845,7 @@ if do_Classif:
                     # this one uses all features, not just for heavy, because
                     # this is how I run XGB_Shapley
                     clf_XGB_fs = XGBClassifier(**add_clf_creopts)
-                    add_fitopts = { 'eval_metric':'logloss'}
+                    add_fitopts = { 'eval_metric':'mlogloss'}
                     clf_XGB_fs.fit(X_cur, y_cur, **add_fitopts)
                     clf_XGB_fs.get_booster().feature_names = list( np.array(featnames_nice) )
 
@@ -1716,17 +1853,16 @@ if do_Classif:
                     max_nfeats = max(X_cur.shape[1] // 2, 100)
                     step_MFS_XGB = min(max_XGB_step_nfeats, max(5, X_cur.shape[1] // 20)  )
                     perfs_XGB_fs = utsne.selMinFeatSet(clf_XGB_fs, X_cur ,
-                                                    y_cur,
-                                                    class_ind_to_check_lenc, sortinds_fs,
-                                                    n_splits=n_splits,
-                                                    drop_perf_pct = selMinFeatSet_drop_perf_pct,
-                                                    conv_perf_pct = selMinFeatSet_conv_perf_pct,
-                                                    stop_cond = ['sens','spec' ],
-                                                    add_fitopts=add_fitopts, add_clf_creopts=add_clf_creopts,
-                                                    check_CV_perf=True, nfeats_step= step_MFS_XGB,
-                                                    verbose=2, max_nfeats = max_nfeats,
-                                                    ret_clf_obj=True,
-                                                       featnames=featnames_nice)
+                        y_cur, class_ind_to_check_lenc, sortinds_fs,
+                        n_splits=n_splits,
+                        drop_perf_pct = selMinFeatSet_drop_perf_pct,
+                        conv_perf_pct = selMinFeatSet_conv_perf_pct,
+                        stop_cond = ['sens','spec' ],
+                        add_fitopts=add_fitopts, add_clf_creopts=add_clf_creopts,
+                        check_CV_perf=True, nfeats_step= step_MFS_XGB,
+                        verbose=2, max_nfeats = max_nfeats,
+                        ret_clf_obj=True,
+                            featnames=featnames_nice)
                     gc.collect()
                     usage = getMemUsed(); print( f'^^^^^^^ mem usage (GB) =  {usage / GB}')
                     results_cur['perfs_XGB_fs'] = perfs_XGB_fs
@@ -1734,7 +1870,10 @@ if do_Classif:
 
 
                     XGB_version_name = 'strongest_features_XGB_fs_opinion'
-                    results_cur['XGB_analysis_versions'][XGB_version_name] = perfs_XGB_fs[-1]
+
+                    rc = {'perf_dict':perfs_XGB_fs[-1],
+                          'importances':perfs_XGB_fs[-1]['clf_objs'][0].feature_importances_}
+                    results_cur['XGB_analysis_versions'][XGB_version_name] = rc
 
 
                     for perf_ind in perf_inds_to_print:
@@ -1766,39 +1905,38 @@ if do_Classif:
 
                     ##################
 
-                    XGB_version_name = 'strongest_features_XGB_fs_opinion_nosyn'
-                    indlist = best_inds_XGB_fs
-                    C_subset = C[indlist,:][:,indlist]
-                    nonsyn_feat_inds = pp.getNotSyn(C_subset,strong_correl_level)
+                    if C is not None:
+                        XGB_version_name = 'strongest_features_XGB_fs_opinion_nosyn'
+                        indlist = best_inds_XGB_fs
+                        C_subset = C[indlist,:][:,indlist]
+                        nonsyn_feat_inds = pp.getNotSyn(C_subset,strong_correl_level)
 
-                    X_cur = Xconcat_good_cur[ ::subskip_fit, nonsyn_feat_inds ]
-                    y_cur = class_labels_good_for_classif
+                        X_cur = Xconcat_good_cur[ ::subskip_fit, nonsyn_feat_inds ]
+                        y_cur = class_labels_good_for_classif
 
-                    clf_XGB_ = XGBClassifier(**add_clf_creopts)
-                    clf_XGB_.fit(X_cur, y_cur, **add_fitopts)
-                #res_cur = utsne.calcLDAVersions(Xconcat_good_cur[:,pca_derived_featinds],
-                #                                    Xconcat_imputed[:,pca_derived_featinds],
+                        clf_XGB_ = XGBClassifier(**add_clf_creopts)
+                        clf_XGB_.fit(X_cur, y_cur, **add_fitopts)
+                    #res_cur = utsne.calcLDAVersions(Xconcat_good_cur[:,pca_derived_featinds],
+                    #                                    Xconcat_imputed[:,pca_derived_featinds],
 
-                    r0 = utsne.getPredPowersCV(clf_XGB_,X_cur,y_cur,
-                        class_ind_to_check_lenc, printLog = 0,
-                        n_splits=n_splits, add_fitopts=add_fitopts,
-                        add_clf_creopts=add_clf_creopts,
-                        ret_clf_obj=False, seed=0)
+                        r0 = utsne.getPredPowersCV(clf_XGB_,X_cur,y_cur,
+                            class_ind_to_check_lenc, printLog = 0,
+                            n_splits=n_splits, add_fitopts=add_fitopts,
+                            add_clf_creopts=add_clf_creopts,
+                            ret_clf_obj=False, seed=0)
 
-                    rc = {'perf_dict':r0, 'importances':clf_XGB_.feature_importances_}
-                    results_cur['XGB_analysis_versions'][XGB_version_name] = rc
+                        rc = {'perf_dict':r0, 'importances':clf_XGB_.feature_importances_}
+                        results_cur['XGB_analysis_versions'][XGB_version_name] = rc
+                        gc.collect()
 
 
-                    ######################
-
-                    ####
-                    if do_XGB_SHAP_twice:
-                        # redo SHAP on selected best features
-
-                        X = Xconcat_good_cur[::subskip_fit,best_inds_XGB_fs]
+                    #############################
+                    if calc_Boruta:
+                        X = Xconcat_good_cur[::subskip_fit,featinds_good_boruta]
                         #X = X_for_heavy
                         y = class_labels_good_for_classif
-                        dmat = xgb.DMatrix(X, y, feature_names = np.array(featnames_nice)[best_inds_XGB_fs] )
+                        dmat = xgb.DMatrix(X, y,
+                            feature_names = np.array(featnames_nice)[featinds_good_boruta] )
 
                         # TODO: perhaps I should select best hyperparameters above
                         # before doing this
@@ -1819,8 +1957,74 @@ if do_Classif:
                         featsel_info['explainer'] = clf_XGB3
                         featsel_info['scores'] = shap_values
 
+                        results_cur['featsel_per_method']['XGB_Shapley_VF_boruta'] = \
+                            featsel_info
+                        gc.collect()
+
+
+                        #############################  run sel min feat on result
+                        X_cur = Xconcat_good_cur[::subskip_fit]
+                        y_cur = class_labels_good_for_classif
+
+                        scores = featsel_per_method[selMinFeatSet_after_featsel]['scores']
+
+                        if scores.ndim == 2:
+                            assert len( set(class_labels_good_for_classif) ) == 2
+
+                        scores_per_class = utsne.getScoresPerClass(class_labels_good_for_classif, scores)
+                        importance_fs = scores_per_class[class_ind_to_check_lenc]
+                        sortinds_fs = np.argsort( importance_fs )
+
+
+                        max_nfeats = max(X_cur.shape[1] // 2, 100)
+                        step_MFS_XGB = min(max_XGB_step_nfeats, max(5, X_cur.shape[1] // 20)  )
+                        perfs_XGB_fs = utsne.selMinFeatSet(clf_XGB_fs, X_cur ,
+                            y_cur, class_ind_to_check_lenc, sortinds_fs,
+                            n_splits=n_splits,
+                            drop_perf_pct = selMinFeatSet_drop_perf_pct,
+                            conv_perf_pct = selMinFeatSet_conv_perf_pct,
+                            stop_cond = ['sens','spec' ],
+                            add_fitopts=add_fitopts, add_clf_creopts=add_clf_creopts,
+                            check_CV_perf=True, nfeats_step= step_MFS_XGB,
+                            verbose=2, max_nfeats = max_nfeats,
+                            ret_clf_obj=True,
+                                featnames=featnames_nice)
+                        gc.collect()
+                        usage = getMemUsed(); print( f'^^^^^^^ mem usage (GB) =  {usage / GB}')
+                        results_cur['perfs_XGB_fs'] = perfs_XGB_fs
+                        results_cur['clf_XGB_fs'] = clf_XGB_fs
+
+                    ############################
+                    if do_XGB_SHAP_twice:
+                        # redo SHAP on selected best features
+
+                        X = Xconcat_good_cur[::subskip_fit,best_inds_XGB_fs]
+                        #X = X_for_heavy
+                        y = class_labels_good_for_classif
+                        dmat = xgb.DMatrix(X, y, feature_names = np.array(featnames_nice)[best_inds_XGB_fs] )
+
+                        # TODO: perhaps I should select best hyperparameters above
+                        # before doing this
+                        clf_XGB4 = XGBClassifier(**add_clf_creopts)
+                        clf_XGB4.fit(X, y, **add_fitopts)
+
+                        bst = clf_XGB4.get_booster()
+
+                        if (XGB_tree_method in ['hist', 'gpu_hist']) \
+                                and allow_CUDA \
+                                and len(gv.GPUs_list):
+                            bst.set_param({"predictor": "gpu_predictor"})
+                        #TODO: perhaps I should try to predict not the entire training
+                        shap_values = bst.predict(dmat, pred_contribs=True)
+                        #shap_values.shape
+
+                        featsel_info = {}
+                        featsel_info['explainer'] = clf_XGB4
+                        featsel_info['scores'] = shap_values
+
                         results_cur['featsel_per_method']['XGB_Shapley2'] = \
                             featsel_info
+                        gc.collect()
 
                     #####
 
@@ -1871,7 +2075,7 @@ else:
 
 if not single_fit_type_mode:
     # save PCA output separately
-    for rawind,rawname_ in enumerate(rawnames):
+    for rawind,rawn in enumerate(rawnames):
         # note that we use number of features that we actually used, not that we
         # read
 
@@ -1890,7 +2094,7 @@ if not single_fit_type_mode:
                 pcapts.shape[1], skip, windowsz)
         if use_main_LFP_chan:
             out_name += '_mainLFP'
-        fname_PCA_full = pjoin( gv.data_dir, output_subdir, '{}{}.npz'.format(rawname_,out_name))
+        fname_PCA_full = pjoin( gv.data_dir, output_subdir, '{}{}.npz'.format(rawn,out_name))
 
 
 

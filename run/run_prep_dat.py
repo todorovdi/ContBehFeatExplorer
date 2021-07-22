@@ -182,7 +182,8 @@ for opt,arg in pars.items():
     else:
         raise ValueError('Unknown option:arg {}:{}'.format(opt,arg) )
 
-if allow_CUDA and allow_CUDA_MNE:
+if allow_CUDA and allow_CUDA_MNE and gv.CUDA_state == 'ok':
+    mne.cuda.init_cuda()
     n_jobs = 'cuda'
     print('Using CUDA')
 #sys.exit(0)

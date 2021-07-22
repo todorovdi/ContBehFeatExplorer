@@ -2228,7 +2228,7 @@ def selMinFeatSet(clf, X, class_labels, class_ind, sortinds, drop_perf_pct = 4,
 
     #rr = [-1, sortinds.tolist(), perf_nocv_, res_aver_]
     if ret_clf_obj:
-        rrcur['clf_obj'] = r0['clf_objs']
+        rrcur['clf_objs'] = r0['clf_objs']
     #    models_cur = r0[-1]
     #    rr += [models_cur]
     perfs += [ rrcur    ]
@@ -2326,7 +2326,7 @@ def selMinFeatSet(clf, X, class_labels, class_ind, sortinds, drop_perf_pct = 4,
                 sens,spec,F1 = rstop['perf_aver']
 
                 #rr = [i,inds, perf_nocv,res_aver]
-                rrcur['perf_nocv'] = rstop['clf_objs']
+                rrcur['perf_nocv'] = rstop['perf_nocv']
                 rrcur['perf_aver'] = rstop['perf_aver']
                 rrcur['confmat'] = rstop['confmat_aver']
                 rrcur['fold_type_shuffled' ] = rstop['fold_type_shuffled']
@@ -2565,3 +2565,102 @@ def getScoresPerClass(class_ids,scores, ret_bias=False):
     if ret_bias:
         rr = r,biases
     return rr
+
+def sklearn_vif(X, exogs,n_jobs):
+    from sklearn.linear_model import LinearRegression
+    # data is nbins, nchans x
+    # exogs -- indeices of chans
+
+    if isinstance(exogs , int):
+        exogs = [exogs]
+
+    # initialize dictionaries
+    vif_dict, tolerance_dict = {}, {}
+
+    # form input data for each exogenous variable
+    for exog in exogs:
+        not_exog = [i for i in exogs if i != exog]
+        #print(not_exog,exog)
+        Xcur, ycur = X[:,not_exog], X[:,exog]
+        #print(Xcur.shape,ycur.shape)
+
+        # extract r-squared from the fit
+        r_squared = LinearRegression(n_jobs=n_jobs).fit(Xcur, ycur).score(Xcur, ycur)
+
+        # can happen on test data
+        if 1 - r_squared < 1e-10:
+            vif = 1e10
+        else:
+            # calculate VIF
+            vif = 1/(1 - r_squared)
+
+        vif_dict[exog] = vif
+
+        # calculate tolerance
+        tolerance = 1 - r_squared
+        tolerance_dict[exog] = tolerance
+    #    The cutoff to detect multicollinearity: VIF > 10 or Tolerance < 0.1
+    return vif_dict,tolerance_dict
+
+def findBadColumnsVF(X,vf_thr=10,n_jobs=-1):
+    # finds iteratively what to get rid of
+    #for coi,col_ind in enumerate(col_ordering):
+    import gc;
+    colinds_all = np.arange(X.shape[1])
+    colinds_bad = []
+    vfs_list = []
+    for iter_num in colinds_all:
+        colinds_good = np.setdiff1d(np.arange(X.shape[1]),colinds_bad)
+        Xcur = X[:,colinds_good]
+        vfs,_ = sklearn_vif(Xcur, np.arange(Xcur.shape[1]),n_jobs=n_jobs)
+        gc.collect()
+        vfs_list += [vfs]
+        keys,values = zip(*vfs.items())
+        mi = np.argmax(values)
+        vf_worst = values[mi]
+        print(f'findBadColumnsVF: iter_num={iter_num} '
+              f'len(colinds_bad)={len(colinds_bad)}/{len(colinds_all)} '
+              f'worst VF is {vf_worst}')
+        if vf_worst >= vf_thr:
+            colind_bad = colinds_good [keys[mi] ]
+            colinds_bad += [colind_bad]
+        else:
+            break
+
+    if len(colinds_bad) == 0:
+        cols_good = colinds_all
+    else:
+        cols_good = np.setdiff1d(colinds_all,colinds_bad)
+    return colinds_bad,cols_good, vfs_list
+
+def selFeatsBoruta(X,y,verbose = 2,add_clf_creopts=None, n_jobs = -1, random_state=0):
+    from boruta import BorutaPy
+    from xgboost import XGBClassifier
+
+    ######
+
+    if add_clf_creopts is None:
+        add_clf_creopts={ 'n_jobs':n_jobs, 'use_label_encoder':False,
+                        'importance_type': 'total_gain' }
+        tree_method = 'exact'
+        method_params = {'tree_method': tree_method}
+
+        add_clf_creopts.update(method_params)
+    clf_XGB = XGBClassifier(**add_clf_creopts)
+
+    ##########
+
+    # define Boruta feature selection method
+    feat_selector = BorutaPy(clf_XGB, n_estimators='auto', verbose=verbose, random_state=random_state)
+
+    # find all relevant features - 5 features should be selected
+    feat_selector.fit(X, y)
+
+    # check selected features - first 5 features are selected
+    #feat_selector.support_
+
+    # call transform() on X to filter it down to selected features
+    #X_filtered = feat_selector.transform(X)
+
+    # check ranking of features
+    return np.where(feat_selector.support_)[0], feat_selector.ranking_
