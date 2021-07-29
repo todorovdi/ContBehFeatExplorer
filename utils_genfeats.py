@@ -1969,6 +1969,9 @@ def bandFilter(rawnames, times_pri, main_sides_pri, side_switched_pri,
                artif_handling = 'reject', anns_MEGartif=None, artif_LFPartif=None,
               filter_phase='minimum',  anndict_per_intcat_per_rawn = None,
                artif_before_bandpow = 'impute_const', return_imputed_flt = True ):
+    '''
+    if anndict_per_intcat_per_rawn is not None, then side switched has no effect
+    '''
     import utils_tSNE as utsne
     sfreq = sfreqs[0]
     raw_perband_flt_pri      = [0] * len(rawnames)
@@ -2045,6 +2048,7 @@ def bandFilter(rawnames, times_pri, main_sides_pri, side_switched_pri,
             means_perchan_bp = {}
             for si,dat_pri_cur_sfreq in enumerate(dat_pri_persfreq):
                 sfreq_cur = sfreqs[si]
+                print(f'bandFilter: {rn} for sfreq {sfreq_cur}: starting filtering in band {bandname}' )
 
                 print(sfreq_cur,sfreq)
                 # for hires we will only process HFO bands

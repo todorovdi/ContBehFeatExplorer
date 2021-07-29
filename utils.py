@@ -2207,12 +2207,22 @@ def renameAnnDescr(anns,n2n):
 
 def ann2ivalDict(anns):
     ivalis = {}
-    for i,an in enumerate(anns ):
-        descr = an['description']
-        if descr not in ivalis:
-            ivalis[descr] = []
-        tpl = an['onset'], an['onset']+ an['duration'], descr
-        ivalis[descr] += [ tpl  ]#bandnames = ['tremor', 'beta', 'gamma', 'allf']
+    try:
+        for i,an in enumerate(anns ):
+            descr = an['description']
+            if descr not in ivalis:
+                ivalis[descr] = []
+            tpl = an['onset'], an['onset']+ an['duration'], descr
+            ivalis[descr] += [ tpl  ]#bandnames = ['tremor', 'beta', 'gamma', 'allf']
+    # can happen due to use of different MNE versions
+    except AttributeError as e:
+        nanns = len(anns.onset)
+        for i in range(nanns ):
+            descr = anns.description[i]
+            if descr not in ivalis:
+                ivalis[descr] = []
+            tpl = anns.onset[i], anns.onset[i] + anns.duration[i], descr
+            ivalis[descr] += [ tpl  ]#bandnames = ['tremor', 'beta', 'gamma', 'allf']
 
     return ivalis
 
@@ -3437,29 +3447,49 @@ def setArtifNaN(X, ivalis_artif_tb_indarrays_merged, feat_names, ignore_shape_wa
 
     return Xout
 
-def getArtifForFiltering(chn,ann_aritf):
+def getArtifForFiltering(chn,ann_artif):
     # creates a new annotation tailored specifically for this channel using different levels
     onsets = []
     durations = []
     descrs = []
-    for a in ann_aritf:
-        descr = a['description']
-        r = re.match('^BAD_(LFP|MEG)(.?)(.*)',descr)
-        mod,side,chn_sub_id = r.groups()
-        if mod == 'MEG':
-            mod_chn = 'msrc'
-        else:
-            mod_chn = mod
-        t = mod_chn +side+ chn_sub_id
-        #print(r.groups(),descr, t)
-        if chn.find( t) >= 0:
-            onsets += [a['onset']]
-            durations += [a['duration']]
-            if mod == 'LFP':
-                descrs += [f'BAD_{chn}']
+    try:
+        for a in ann_artif:
+            descr = a['description']
+            r = re.match('^BAD_(LFP|MEG)(.?)(.*)',descr)
+            mod,side,chn_sub_id = r.groups()
+            if mod == 'MEG':
+                mod_chn = 'msrc'
             else:
-                descrs += [f'BAD_{mod}{side}']
-            #print('badom')
+                mod_chn = mod
+            t = mod_chn +side+ chn_sub_id
+            #print(r.groups(),descr, t)
+            if chn.find( t) >= 0:
+                onsets += [a['onset']]
+                durations += [a['duration']]
+                if mod == 'LFP':
+                    descrs += [f'BAD_{chn}']
+                else:
+                    descrs += [f'BAD_{mod}{side}']
+    except AttributeError as e:
+        nanns = len(ann_artif.onset)
+        for i in range(nanns ):
+            descr = ann_artif.description[i]
+            r = re.match('^BAD_(LFP|MEG)(.?)(.*)',descr)
+            mod,side,chn_sub_id = r.groups()
+            if mod == 'MEG':
+                mod_chn = 'msrc'
+            else:
+                mod_chn = mod
+            t = mod_chn +side+ chn_sub_id
+            #print(r.groups(),descr, t)
+            if chn.find( t) >= 0:
+                onsets += [ann_artif.onset[i] ]
+                durations += [ann_artif.duration[i] ]
+                if mod == 'LFP':
+                    descrs += [f'BAD_{chn}']
+                else:
+                    descrs += [f'BAD_{mod}{side}']
+                #print('badom')
     return mne.Annotations(onsets,durations,descrs)
 
 def parseIntervalName(interval_name):

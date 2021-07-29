@@ -4,6 +4,8 @@ main_side = 'left'
 rawnames = ['S95_off_move','S95_off_hold','S95_on_move']
 
 test_data_descr = '''Nontriv data, nontriv artifacs'''
+#defdgen = lambda x : np.random.uniform(low=-1,high=1, size=x )
+defdgen = lambda x,y : np.random.uniform(low=-1,high=1, size=(x,y) )
 
 ######################
 anndict_per_intcat_per_rawn = {}
@@ -72,6 +74,7 @@ datlen_s = 5
 nbins = sfreq * datlen_s
 nbins_hires = sfreq_hires * datlen_s
 noise_size = 3e-3
+
 #dat =  defdgen( (len(sfo), nbins )) * noise_size
 #dat_hires = defdgen ( (len(sfo_LFP), nbins_hires ) ) * noise_size
 
@@ -133,6 +136,11 @@ step4       = noise_size + stepf(times,      ss4,se4)
 step4_hires = noise_size + stepf(times_hires,ss4,se4)
 
 artif_size = 1e4
+a = anndict_per_intcat_per_rawn[rawn]['MEG'][0]
+artif_s = a['onset']
+artif_e = artif_s + a['duration']
+step_artif = stepf(times,      artif_s,artif_e)
+artif_d = step_artif * defdgen(len(sfo), nbins )  * artif_size
 
 # set_data
 LFPchi = special_chnis['LFP_coupled_to_src']
@@ -143,9 +151,9 @@ dat_LFP_hires_pri[dati][LFPchi,:] +=  step_hires * sine_beta_hires +\
 dat_pri[dati][special_chnis['src_coupled_to_LFP'], :]  += ( step * sine_beta + step2 * sine_gamma ) * 0.5
 
 # 2 and 3 are coupled between each other, but only after filtering (bandpower as well)
-dat_pri[dati][special_chnis['src_coupled_to_src1'], :] += (   step4 * sine_tremor ) * 1e-2 #* 1e-5
-dat_pri[dati][special_chnis['src_coupled_to_src2'], :] += (   step4 * sine_tremor ) * 5e-2
-dat_pri[dati][special_chnis['src_coupled_to_src3'], :] += (   step4 * sine_tremor ) * 1e2
+dat_pri[dati][special_chnis['src_coupled_to_src1'], :] += (   step4 * sine_tremor ) * 1e-2 +  artif_d
+dat_pri[dati][special_chnis['src_coupled_to_src2'], :] += (   step4 * sine_tremor ) * 5e-2 +  artif_d
+dat_pri[dati][special_chnis['src_coupled_to_src3'], :] += (   step4 * sine_tremor ) * 1e2  +  artif_d
 # yes, I want to use 4 and 3 here (not equal numbers) because I want to have HFO sine
 dat_LFP_hires_pri[dati][special_chnis['LFP_coupled_to_src_HFO_cross_freq'], :] += \
     step4_hires * sine_HFO_hires

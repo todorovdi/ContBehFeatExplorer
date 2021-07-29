@@ -12,6 +12,9 @@ if [[ $1 == "dry" ]]; then
   DRY_RUN_FLAG="n"
 elif [[ $1 == "normal" ]]; then
   echo " ----------  NORMAL RUN  ------------"
+else
+  echo " ----------  WRONG CMD OPTION  ------------"
+  exit 1
 fi
 
 ZBOOK_DIR="/home/demitau/osccode/data_proc"
@@ -54,8 +57,11 @@ echo "  rsync json"
 rsync $FLAGS $SSH_FLAG --exclude="*HPC" $ZBOOK_DIR/*.json  $JUSUF/
 $SLEEP
 subdir=run
-echo "  rsync run files"
-rsync $FLAGS $SSH_FLAG --exclude="*HPC.sh" --exclude="sbatch*" --exclude=srun_pipeline.sh --exclude=srun_exec_runstr.sh $ZBOOK_DIR/$subdir/*.{py,sh}  $JUSUF/$subdir/
+echo "  rsync run files (excluding sh, only py)"
+#rsync $FLAGS $SSH_FLAG --exclude="*HPC.sh" --exclude="sbatch*" --exclude=srun_pipeline.sh --exclude=srun_exec_runstr.sh $ZBOOK_DIR/$subdir/*.{py,sh}  $JUSUF/$subdir/
+rsync $FLAGS $SSH_FLAG $ZBOOK_DIR/$subdir/*.py  $JUSUF/$subdir/
 $SLEEP
 echo "  rsync params"
 rsync $FLAGS $SSH_FLAG $ZBOOK_DIR/params/*.ini $JUSUF/params/
+echo "  rsync test data"
+rsync $FLAGS $SSH_FLAG $ZBOOK_DIR/test_data/*.py $JUSUF/test_data/

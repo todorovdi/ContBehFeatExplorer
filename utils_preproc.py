@@ -997,6 +997,7 @@ def gatherFeatStats(rawnames, X_pri, featnames_pri, wbd_pri,
     usually notrem_<sidelet>
 
     bindict_per_rawn[rawn ]['beh_state'] and bindict_per_rawn[rawn ]['artif']['MEG' | 'LFP']
+    when bindict_per_rawn is set, side_rev_pri has no effect
 
     returns indsets,means,stds each is a list of dicts (key = interval type)
     '''
@@ -1088,10 +1089,10 @@ def gatherFeatStats(rawnames, X_pri, featnames_pri, wbd_pri,
 
         wbd = wbd_pri[rawi]
         times = times_pri[rawi]
-        side_rev = side_rev_pri[rawi]
 
 
         if not bindict_set :
+            side_rev = side_rev_pri[rawi]
             bindict_per_bintype = \
             collectAllMarkedIntervalBins(rn,times,main_side, side_rev, sfreq,
                 wbd = wbd, ann_MEGartif_prefix_to_use = ann_MEGartif_prefix_to_use,

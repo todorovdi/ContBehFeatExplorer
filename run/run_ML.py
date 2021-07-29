@@ -754,6 +754,8 @@ nbins_total =  sum( [ len(times) for times in rawtimes_pri ] )
 #wbd_merged = np.hstack(wbds)
 # collect movement annotations first
 
+# here I need to use side_switched because I need to concatenate anns (I were
+# not doing it in the previous processing stages)
 anns, anns_pri, times_concat, dataset_bounds, wbd_merged = utsne.concatAnns(rawnames,
                                                           rawtimes_pri, crop=(crop_start,crop_end),
                                                           side_rev_pri = side_switch_happened_pri,

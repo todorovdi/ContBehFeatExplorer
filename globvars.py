@@ -51,6 +51,9 @@ subjs_analyzed                      = None
 srcs                                = None
 artifact_intervals                  = None
 
+import mne
+assert mne.__version__ == '0.23.0'
+
 gparams                              = {}
 code_dir = os.path.expandvars('$OSCBAGDIS_DATAPROC_CODE')
 gparams['intTypes'] = ['pre', 'post', 'initseg', 'endseg', 'middle_full', 'no_tremor', 'unk_activity_full' ]

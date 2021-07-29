@@ -58,7 +58,7 @@ opts, args = getopt.getopt(effargv,"hr:",
          "src_grouping=", "src_grouping_fn=",
          "input_subdir=", "save_dat=", "save_stats=", "param_file=",
          "bands_precision=", "calc_stats_multi_band=", "exit_after=",
-         "use_preloaded_raws=", "allow_CUDA=" ])
+         "use_preloaded_raws=", "allow_CUDA=", "n_jobs=" ])
 print('opts is ',opts)
 print('args is ',args)
 
@@ -98,6 +98,8 @@ for opt,arg in pars.items():
         save_stats = int(arg)
     elif opt == "save_dat":
         save_dat = int(arg)
+    elif opt == "n_jobs":
+        n_jobs = int(arg)
     elif opt == "exit_after":
         exit_after = arg
     elif opt == "src_grouping":
@@ -414,7 +416,7 @@ if calc_stats_multi_band:
     dat_pri_persfreq = [dat_pri, dat_lfp_hires_pri]
 
     ann_MEGartif_prefix_to_use = '_ann_MEGartif_flt'
-    n_jobs_flt = max(1, mpr.cpu_count()-gp.n_free_cores )
+    n_jobs_flt = n_jobs
 
     # note that we can have different channel names for different raws
     #raw_perband_flt_pri_persfreq = []
