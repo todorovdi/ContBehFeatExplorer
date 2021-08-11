@@ -73,3 +73,5 @@ echo "  rev rsync params"
 rsync $FLAGS $SSH_FLAG $JUSUF/params/*HPC*.ini $ZBOOK_DIR/params/ 
 echo "  rsync test data"
 rsync $FLAGS $SSH_FLAG $ZBOOK_DIR/test_data/*.py $JUSUF/test_data/
+echo "  rev rsync helper_scripts"
+rsync $FLAGS $SSH_FLAG $JUSUF/helper_scripts/*.sh $ZBOOK_DIR/helper_scripts/ 

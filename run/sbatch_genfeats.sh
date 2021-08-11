@@ -9,13 +9,9 @@
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=128
 
-##SBATCH --time=23:00:00
-##SBATCH --partition=batch
-##SBATCH --mem=80G
-
+#SBATCH --time=23:00:00
 #SBATCH --partition=batch
-#SBATCH --time=4:00:00
-#SBATCH --mem=80G
+#SBATCH --mem=60G
 
 ## max array size = 256  (as shown by scontrol show config)
 ## 22 decent dataset 
@@ -32,7 +28,7 @@
 #SBATCH --mail-type=ALL
 #SBATCH --mail-user=todorovdi@gmail.com
 
-#SBATCH --array=0,3
+#SBATCH --array=0-54
 
 # *** start of job script ***
 ##source set_oscabagdis_env_vars.sh
@@ -76,5 +72,5 @@ echo "DATA_DUSS=$DATA_DUSS"
 source $CODE/__workstart.sh
 pwd
 
-RUNSTRINGS_FN="$CODE/run/_runstrings_ML.txt"
+RUNSTRINGS_FN="$CODE/run/_runstrings_genfeats.txt"
 $OSCBAGDIS_DATAPROC_CODE/run/srun_exec_runstr.sh $RUNSTRINGS_FN $SLURM_ARRAY_JOB_ID $EFF_ID
