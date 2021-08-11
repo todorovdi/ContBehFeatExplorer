@@ -688,24 +688,26 @@ def removeLargeItems(res_cur, keep_featsel=['XGB_Shapley','XGB_Shapley2'], remov
 
     except KeyError as e:
         print('already removed ',e)
-    for pt in ['perfs_XGB','perfs_XGB_fs' ]:
-        for i in range(len(res_cur[pt]) ):
-            sub = res_cur[pt][i]
-            if 'args' in sub:
-                if 'X' in sub['args']:
-                    del sub['args']['X']
-                if 'class_labels' in sub['args']:
-                    del sub['args']['class_labels']
-                if 'clf' in sub['args']:
-                    del sub['args']['clf']
-            if 'clf_obj' in sub:
-                if verbose:
-                    print('delted clf_obj')
-                del sub['clf_obj']
-            if 'clf_objs' in sub:
-                if verbose:
-                    print('delted clf_obj')
-                del sub['clf_objs']
+    for pt in ['perfs_XGB','perfs_XGB_fs', 'perfs_XGB_fs_boruta' ]:
+        vv = res_cur.get(pt,None)
+        if vv is not None:
+            for i in range(len(vv) ):
+                sub = vv[i]
+                if 'args' in sub:
+                    if 'X' in sub['args']:
+                        del sub['args']['X']
+                    if 'class_labels' in sub['args']:
+                        del sub['args']['class_labels']
+                    if 'clf' in sub['args']:
+                        del sub['args']['clf']
+                if 'clf_obj' in sub:
+                    if verbose:
+                        print('delted clf_obj')
+                    del sub['clf_obj']
+                if 'clf_objs' in sub:
+                    if verbose:
+                        print('delted clf_obj')
+                    del sub['clf_objs']
 
         XGB_anvers = res_cur.get('XGB_analysis_versions',{} )
         for aname,sub in XGB_anvers.items():
@@ -807,7 +809,7 @@ def getSynonymList(tuples, ret_dict = False):
 def getNotSyn(C_subset,strong_correl_level):
 
     pairs = getStrongCorrelPairs(C_subset,strong_correl_level)
-    print('Num correl pairs ',len(pairs), len(pairs)/C_subset.size)
+    print(f'getNotSyn: Num correl pairs {len(pairs)}, it makes {100 * len(pairs)/C_subset.size} % of total pair num')
 
     synlist = getSynonymList(pairs)
 
@@ -878,3 +880,75 @@ def printSynInfo(synlist,indlist,featnames,ftypes_print = ['bpcorr'],minlen_prin
 
         if len_cur >= minlen_print_feanames and ftype_print_allowed:
             print(featnames_syns_cur)
+
+
+def multiLevelDict2TupleList(d,min_depth=0,max_depth=99999, cur_depth = 0):
+    '''
+    max_depth  -- depth after which I return dict instead of leafs
+    min_dpeht  -- depth before which I don't save leaves
+    '''
+    #if max_depth < 0:
+    #    return []
+    r = []
+    for k,subd in d.items():
+        #print(type(subd),k, f'min_depth={min_depth}, max_depth={max_depth}, cur_depth={cur_depth} ')
+        if isinstance(subd,dict):
+            if cur_depth < max_depth:
+                dl = multiLevelDict2TupleList(subd, min_depth, max_depth, cur_depth + 1 )
+                for u in dl:
+                    r += [(k, *u) ]
+                #print('fd0')
+            else:
+                r += [(k, subd) ]
+                #print('fd1')
+        else:
+            # putting leafs
+            if cur_depth >= min_depth:# and cur_depth <= max_depth + 1:
+                r += [(k,subd)]
+                #print('leaf')
+            continue
+    return r
+
+def groupOutputs(output_per_raw, prefixes = None, label_groupings=None, int_types_sets=None, filter_by_spec=None):
+    '''
+    convert multilevel dict with specific possible keys to a list of tuples
+    with dictionaries at the end of each tuple
+    note that the keys in the returned dict have type = tuple
+    '''
+    output_sepc_order = ['subjname','prefix','label_grouping','int_types_set']
+
+
+    output_per_raw_tpll = multiLevelDict2TupleList(output_per_raw,4,3)
+
+    outputs_grouped = {}
+    if filter_by_spec is None:
+        filter_by_spec = {}
+        filter_by_spec['prefix'] = prefixes
+        filter_by_spec['label_grouping'] = label_groupings
+        filter_by_spec['int_types_set'] = int_types_sets
+    else:
+        assert prefixes is None
+        assert label_groupings is None
+        assert int_types_sets is None
+    keys = list(sorted( set(output_sepc_order) - set(filter_by_spec.keys()) ))
+    for oo in output_per_raw_tpll:
+        bad = False
+        spec_cur = []
+        for spec_name,vals in filter_by_spec.items():
+            if vals is None:
+                continue
+            spec_ind = output_sepc_order.index(spec_name)
+            if oo[spec_ind] not in vals:
+                bad = True
+                continue
+            spec_cur += [oo[spec_ind]]
+        if not bad:
+            kvs = []
+            for k in keys:
+                spec_ind = output_sepc_order.index(k)
+                kvs += [oo[spec_ind]]
+            #key = ','.join(kvs)
+            key = tuple(kvs)
+            print(oo[:-1], 'turns into ',key,spec_cur)
+            outputs_grouped[key] = tuple(spec_cur), oo[-1]
+    return outputs_grouped

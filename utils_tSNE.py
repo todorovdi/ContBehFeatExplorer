@@ -542,8 +542,11 @@ def getIntervalSurround(start,end, extend, raw=None, times=None, verbose = False
 #    return inds
 
 
-def selFeatsRegex(data, names, regexs, unique=1):
-    '''data can be None if I only want to select feat names'''
+def selFeatsRegex(data, names, regexs, unique=1, copy=False):
+    '''
+    data can be None if I only want to select feat names
+    data can be either numpy array or list of numpy arrays
+    '''
     import re
     if isinstance(regexs,str):
         regexs = [regexs]
@@ -576,10 +579,15 @@ def selFeatsRegex(data, names, regexs, unique=1):
     else:
         if isinstance( data, np.ndarray):
             datsel = data[inds]
+            if copy:
+                datsel = datsel.copy()
         elif isinstance( data, list):
             datsel = []
             for subdat in data:
-                datsel += [subdat[inds] ]
+                if copy:
+                    datsel += [subdat[inds].copy() ]
+                else:
+                    datsel += [subdat[inds] ]
 
     return datsel, namesel
 
@@ -1776,14 +1784,18 @@ def getMIs(X,class_labels,class_ind,n_jobs = None):
 def confmatNormalize(confmat, norm_type='true'):
     res = None
     if norm_type == 'true':
-        ## shoud be equiv to normalize = 'true' in sklearn.confusion_matrix
-        ## sum across columns to get total number of true i-th entries
-        totnums = np.sum(confmat, axis = 1)
-        ## confmat_ratio[i,j] = ratio of true i-th predicted as j-th among total
-        ## true i-th. I want diag elements to be close to 1 and off-diag to be close
-        ## to 0
-        confmat_ratio = confmat / totnums[:,None]
-        res = confmat_ratio
+        ### shoud be equiv to normalize = 'true' in sklearn.confusion_matrix
+        ### sum across columns to get total number of true i-th entries
+        #totnums = np.sum(confmat, axis = 1)
+        ### confmat_ratio[i,j] = ratio of true i-th predicted as j-th among total
+        ### true i-th. I want diag elements to be close to 1 and off-diag to be close
+        ### to 0
+        #confmat_ratio = confmat / totnums[:,None]
+        #res = confmat_ratio
+
+        # divide by nums of true (for this we need to sum over all possible
+        # predictions which is axis 1)
+        res = confmat / confmat.sum(axis=1, keepdims=True)
 
     elif norm_type == 'all':
         totnums = np.sum(confmat)
@@ -1817,7 +1829,9 @@ def getClfPredPower(clf,X,class_labels,class_ind, label_ids_order = None,
 
 
     ind_to_check = class_ind
+    # mask of really positive
     mask = (np.array(class_labels,dtype=int) == np.array(ind_to_check,dtype=int ) )
+    # mask of really negative
     mask_inv = np.logical_not(mask)
 
     if np.sum(mask) == 0 or np.sum(mask_inv) == 0:
@@ -1830,24 +1844,38 @@ def getClfPredPower(clf,X,class_labels,class_ind, label_ids_order = None,
     else:
         ntot = len(class_labels)
 
-        X_P = X[mask]
-        Pos = clf.predict(X_P)
-        TP = sum(Pos == ind_to_check)
-        sens = TP / len(Pos)
+        #X_P = X[mask]
+        #Pos = clf.predict(X_P)
+        #Pos = preds[mask]
+        #TP = sum(Pos == ind_to_check)
+        #sens = TP / len(Pos)
 
-        X_N = X[mask_inv]
-        Neg = clf.predict(X_N)
-        TN = sum(Neg != ind_to_check)
-        spec = TN / len(Neg)
+        predicted_pos = (preds == ind_to_check)
+        TP = sum(predicted_pos & mask)
+        sens = TP / sum(mask)
+
+        #X_N = X[mask_inv]
+        #Neg = clf.predict(X_N)
+        #Neg = preds[mask_inv]
+        #TN = sum(Neg != ind_to_check)
+        #spec = TN / len(Neg)
         #spec = specificity_score(y_true,y_pred)
 
-        FP = len(Pos) - TP
-        FN = len(Neg) - TN
+        predicted_neg = (preds != ind_to_check)
+        TN = sum(predicted_neg & mask_inv)
+        spec = TN / sum(mask_inv)
+
+        #FP = len(Pos) - TP
+        #FN = len(Neg) - TN
+        #F1 =  TP / (TP + 0.5 * ( FP + FN ) )
+
+        FP = sum(mask) - TP
+        FN = sum(mask_inv) - TN
         F1 =  TP / (TP + 0.5 * ( FP + FN ) )
 
-        if printLog:
-            print('getClfPredPower: True pos {} ({:.3f}), all pos {} ({:.3f})'.format(TP, TP/ntot, len(Pos), len(Pos)/ntot ) )
-            print('getClfPredPower: True neg {} ({:.3f}), all neg {} ({:.3f})'.format(TN, TN/ntot, len(Neg), len(Neg)/ntot ) )
+        #if printLog:
+        #    print('getClfPredPower: True pos {} ({:.3f}), all pos {} ({:.3f})'.format(TP, TP/ntot, len(Pos), len(Pos)/ntot ) )
+        #    print('getClfPredPower: True neg {} ({:.3f}), all neg {} ({:.3f})'.format(TN, TN/ntot, len(Neg), len(Neg)/ntot ) )
 
     #if n_KFold_splits is not None:
     #    from sklearn.model_selection import KFold
@@ -2664,3 +2692,181 @@ def selFeatsBoruta(X,y,verbose = 2,add_clf_creopts=None, n_jobs = -1, random_sta
 
     # check ranking of features
     return np.where(feat_selector.support_)[0], feat_selector.ranking_
+
+#def getFeatIndsRelToChn(featnames, chnpart='LFP'):
+#    from featlist import  parseFeatNames
+#    r = parseFeatNames(featnames)
+#    chnames = [chn for chn in r['ch1'] if chn.find(chnpart) >= 0] + [chn for chn in r['ch2'] if (chn is not None and chn.find(chnpart) >= 0) ]
+#    chnames = list(sorted(set(chnames)))
+#    return chnames
+
+
+def selBestLFP(output_cur, clf_type = 'XGB', chnames_LFP = None, s= '' ):
+    #output_cur = output_per_int_types[int_type]
+    #s = '{}:{}:{}:{}'.format(k,prefix,grouping,int_type)
+    #s = '{}:{}:{}:{}'.format(ki,prefix,grouping,int_type)
+
+    featnames = output_cur['feature_names_filtered']
+    if chnames_LFP is None:
+        from featlist import getChnamesFromFeatlist
+        chnames_LFP = featlist.getChnamesFromFeatlist(featnames, mod='LFP')
+
+    anvers = output_cur['{}_analysis_versions'.format(clf_type)]
+    anver_full = anvers['all_present_features']
+    if 'CV_aver' in anver_full:
+        perfs_full = anver_full['CV_aver']['perfs'][:3]   # exclude conf matrix
+    else:
+        perfs_full = anver_full['perf_dict']['perf_aver'][:3]   # exclude conf matrix
+
+    perfs_full = np.array(perfs_full)
+    perfs_str_full = sprintfPerfs(perfs_full)
+    print('selBestLFP {}:: Full avCV perfs {}'.format(s,perfs_str_full))
+    pdrop = {}
+    for chn in chnames_LFP:
+        key = 'all_present_features_but_{}'.format(chn)
+        anver = anvers.get(key,None)
+        if anver is None:
+            print(f'selBestLFP: {chn} anver is None')
+            break
+        #perfs = [p[:3] for p in anver['CV']['CV_perfs'] ]
+        #perfs = [p[:3] for p in anver['CV']['CV_perfs'] ]
+        if 'CV_aver' in anver:
+            perfs = anver['CV_aver']['perfs'][:3]
+        else:
+            perfs = anver['perf_dict']['perf_aver'][:3]
+        perfs = np.array(perfs)
+
+        #print(perfs_full, perfs)
+        perfs_str = sprintfPerfs(perfs)
+
+        print('selBestLFP {}:: No {} avCV perfs {}'.format(s,chn,perfs_str))
+        perf_drop = perfs_full - perfs
+
+        pdrop[chn] = perf_drop
+        print('selBestLFP:  Perf drop: ', sprintfPerfs(perf_drop) )
+    if len(pdrop) == 0:
+        pdrop = None
+        winning_chan = None
+    else:
+        winning_chan = chooseBestLFPchan(pdrop, chnames_LFP)
+
+    return pdrop, winning_chan
+
+# not used
+
+def chooseBestLFPchan(pdrop, chnames_LFP):
+    #winnder_chans = {}
+    pds = []
+    # I want ordered access across
+    for chn in chnames_LFP:
+        pds += [pdrop[chn]]
+    pds = np.vstack(pds)
+    # axis 0 -- index of channel
+    maxdrop_perchan = np.max(pds,axis=1)
+    maxdrop_perchan = np.maximum(maxdrop_perchan,0)
+
+    mindrop_perchan = np.min(pds,axis=1)
+    mindrop_perchan = np.minimum(mindrop_perchan,0)
+    # dropping channel should maximum worsen and minimum improve (mindrop is neg)
+    inds = np.argsort(maxdrop_perchan + mindrop_perchan)
+    win_ind = inds[-1]
+    return chnames_LFP[win_ind]
+    #winnder_chans[s] = chnames_LFP[win_ind]
+    #print(pds*100)
+    #print('{:50} {} {}'.format( s, chnames_LFP[ win_ind ], sprintfPerfs( pds[win_ind] ) ) )
+
+#def chooseBestLFPchan(perf_drops, chnames_LFP):
+#    winnder_chans = {}
+#    for s,pdcurd in perf_drops.items():
+#        pds = []
+#        # I want ordered access across
+#        for chn in chnames_LFP:
+#            pds += [pdcurd[chn]]
+#        pds = np.vstack(pds)
+#        # axis 0 -- index of channel
+#        maxdrop_perchan = np.max(pds,axis=1)
+#        maxdrop_perchan = np.maximum(maxdrop_perchan,0)
+#
+#        mindrop_perchan = np.min(pds,axis=1)
+#        mindrop_perchan = np.minimum(mindrop_perchan,0)
+#        # dropping channel should maximum worsen and minimum improve (mindrop is neg)
+#        inds = np.argsort(maxdrop_perchan + mindrop_perchan)
+#        win_ind = inds[-1]
+#        winnder_chans[s] = chnames_LFP[win_ind]
+#        #print(pds*100)
+#        print('{:50} {} {}'.format( s, chnames_LFP[ win_ind ], sprintfPerfs( pds[win_ind] ) ) )
+
+
+def selLFP_calcPerfDrops_multi(output_per_raw, rawnames_to_use = None, groupings_to_use = None,
+                         prefixes_to_use = None, clf_type = 'XGB' ):
+    perf_drops = {}
+    # if all raws were processed together, they'll have same performances saved, no need to repeat
+    if rawnames_to_use is None:
+        rawnames_to_use = output_per_raw.keys()
+
+    perf_drops_res = {}
+
+    #for k in output_per_raw:
+    for ki,k in enumerate(rawnames_to_use):
+        output_per_prefix = output_per_raw[k]
+        #for prefix in output_per_prefix:
+        prefixes_to_use_cur = prefixes_to_use
+        if prefixes_to_use_cur is None:
+            prefixes_to_use_cur = output_per_prefix.keys()
+        for prefix in prefixes_to_use_cur:
+            output_per_grouping = output_per_prefix.get(prefix,None)
+            if output_per_grouping is None:
+                continue
+            #for grouping in output_per_grouping:
+            groupings_to_use_cur = groupings_to_use
+            if groupings_to_use_cur is None:
+                groupings_to_use_cur = output_per_grouping.keys()
+            for grouping in groupings_to_use_cur:
+                output_per_int_types = output_per_grouping[grouping]
+                for int_type in output_per_int_types:
+                    output_cur = output_per_int_types[int_type]
+                    #s = '{}:{}:{}:{}'.format(k,prefix,grouping,int_type)
+                    s = '{}:{}:{}:{}'.format(ki,prefix,grouping,int_type)
+                    if output_cur is None:
+                        #print(k,prefix,grouping,int_type,'=None')
+                        continue
+
+                    featnames = output_cur['feature_names_filtered']
+                    chnames_LFP = getChnamesFromFeatlist(featnames, mod='LFP')
+
+                    lda_anver = output_cur['{}_analysis_versions'.format(clf_type)]
+                    anver_full = lda_anver['all_present_features']
+                    perfs_full = anver_full['CV_aver']['perfs']
+                    perfs_full = np.array(perfs_full)
+                    perfs_str_full = sprintfPerfs(perfs_full)
+                    print('{}:: Full avCV perfs {}'.format(s,perfs_str_full))
+                    perf_drops[s] = {}
+                    for chn in chnames_LFP:
+                        key = 'all_present_features_but_{}'.format(chn)
+                        anver = lda_anver.get(key,None)
+                        if anver is None:
+                            #print(s,' fail')
+                            break
+                        perfs = np.mean(anver['CV']['CV_perfs'], axis=0)
+                        perfs = np.array(perfs)
+
+                        #print(perfs_full, perfs)
+                        perfs_str = sprintfPerfs(perfs)
+
+                        print('{}:: No {} avCV perfs {}'.format(s,chn,perfs_str))
+                        perf_drop = perfs_full - perfs
+
+                        perf_drops[s][chn] = perf_drop
+                        print('  Perf drop: ', sprintfPerfs(perf_drop) )
+                    if len(perf_drops[s]) == 0:
+                        del perf_drops[s]
+                        winning_chan = None
+                    else:
+                        winning_chan = chooseBestLFPchan(perf_drops[s], chnames_LFP)
+
+                best_chans[rawn][prefix][grouping][int_type] = winning_chan
+
+
+                    #print(lda_anver.keys())
+
+    return perf_drops, best_chans

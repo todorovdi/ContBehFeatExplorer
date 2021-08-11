@@ -52,7 +52,8 @@ srcs                                = None
 artifact_intervals                  = None
 
 import mne
-assert mne.__version__ == '0.23.0'
+#print(f'mne version is {mne.__version__}')
+#assert mne.__version__ == '0.23.0', f'mne version is {mne.__version__}'
 
 gparams                              = {}
 code_dir = os.path.expandvars('$OSCBAGDIS_DATAPROC_CODE')
@@ -126,6 +127,7 @@ wband_feat_types = ['rbcorr', 'bpcorr', 'con' ]
 bichan_feat_types = ['rbcorr', 'bpcorr', 'con' ]
 bichan_bifreq_feat_types = ['rbcorr', 'bpcorr' ]
 bichan_bifreq_cross_feat_types = [ 'bpcorr' ]
+noband_feat_types = [ 'H_act', 'H_mob', 'H_compl']
 feat_types_all = [ 'con',  'Hjorth', 'H_act', 'H_mob', 'H_compl', 'bpcorr', 'rbcorr']
 
 EMG_per_hand = {'right':['EMG061_old', 'EMG062_old'], 'left':['EMG063_old', 'EMG064_old' ] }
@@ -205,8 +207,10 @@ class globparams:
 
 
         self.int_types_basic = ['trem', 'notrem', 'hold', 'move']
+        #self.int_types_trem_and_mov = ['trem', 'hold', 'move']
+        #self.int_types_trem_and_rest = ['trem', 'notrem']
         self.int_types_aux = ['undef', 'holdtrem', 'movetrem']
-        self.subj_strs_all = [ 'S{:02d}'.format(i) for i in range(1,11) ] + ['S98', 'S99']
+        self.subj_strs_all = [ 'S{:02d}'.format(i) for i in range(1,11) ] + ['S97', 'S98', 'S99']
 
         medconds = ['on', 'off']
         self.subj_medcond_strs_all = []
@@ -246,6 +250,7 @@ class globparams:
                                 'basic+ext': self.int_types_ext,
                                 'trem_vs_quiet':['trem','notrem'],
                                 'trem_vs_quiet&undef':['trem','notrem','undef'],
+                                'trem_vs_hold&move':['trem','hold','move'],
                                 'hold_vs_quiet':['hold','notrem'],
                                 'move_vs_quiet':['move','notrem'],
                                  'subj_medcond_task':self.subj_medcond_task_strs_all,
@@ -257,12 +262,12 @@ class globparams:
         self.group_vs_int_type_allowed = {'basic':['merge_movements', 'merge_all_not_trem', 'merge_nothing'],
                                 'trem_vs_quiet':['merge_all_not_trem', 'merge_nothing'],
                                 'trem_vs_quiet&undef':['merge_movements', 'merge_all_not_trem', 'merge_nothing'],
+                                'trem_vs_hold&move':['merge_movements', 'merge_nothing'],
                                 'hold_vs_quiet': ['merge_nothing'],
                                 'move_vs_quiet': ['merge_nothing'],
                                           'subj_medcond_task': ['merge_within_task'],
                                           'subj_medcond': ['merge_within_medcond'],
-                                          'subj': ['merge_within_subj'],
-                                          }
+                                          'subj': ['merge_within_subj'] }
 
         #motor-related
         self.areas_list_aal_my_guess = ["Precentral", "Rolandic_Oper",
@@ -285,7 +290,7 @@ class globparams:
         # ['Temporal_Inf','Fusiform'],['Occipital_Sup','Cuneus'],['Occipital_Mid'],
         # ['Occipital_Inf','Calcarine','Lingual'],['Angular'],['Supra_Marginal'],['Cerebellum']];
         #new_labels_MATLAB = [['Senorimotor'], ['FrontalSup'],['FrontalMed'], ['FrontalInf'],['ParietalSup'], ['ParietalInf'],['TemporalSup'], ['TemporalMid'] ,['TemporalInf'], ['OccipitalSup'], ['OccipitalMid'],['OccipitalInf'], ['Angular'],['SupraMarginal'],['Cerebellum']];
-        new_labels = ['Senorimotor', 'FrontalSup', 'FrontalMed', 'FrontalInf', 'ParietalSup',
+        new_labels = ['Sensorimotor', 'FrontalSup', 'FrontalMed', 'FrontalInf', 'ParietalSup',
                       'ParietalInf', 'TemporalSup', 'TemporalMid', 'TemporalInf', 'OccipitalSup', 'OccipitalMid',
                       'OccipitalInf', 'Angular', 'SupraMarginal', 'Cerebellum']
 

@@ -1,7 +1,7 @@
 #!/bin/bash
-RUNSTRINGS_FN="$CODE/run/_runstrings.txt"
-JOBID=$1
-RUNSTRING_IND=$2
+RUNSTRINGS_FN=$1
+JOBID=$2
+RUNSTRING_IND=$3
 mapfile -t RUNSTRINGS < $RUNSTRINGS_FN
 RUNSTRING_CUR=${RUNSTRINGS[$RUNSTRING_IND]} 
 R=$(eval echo $RUNSTRING_CUR)
@@ -13,4 +13,4 @@ echo $R
 py=python
 export PYTHONPATH=$OSCBAGDIS_DATAPROC_CODE:$PYTHONPATH
 $py -c "import os; print('cwd for $py=',os.getcwd() );"
-$py $CODE/run/$R --SLURM_job_id "$JOBID"_"$RUNSTRING_IND"
+$py $CODE/run/$R --SLURM_job_id "$JOBID"_"$RUNSTRING_IND" --calc_MI 0

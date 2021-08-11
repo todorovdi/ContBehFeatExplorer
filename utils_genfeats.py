@@ -2075,6 +2075,7 @@ def bandFilter(rawnames, times_pri, main_sides_pri, side_switched_pri,
                 # channels names
                 if bandname.find('HFO') < 0:
                     chnames_cur = chnames
+                    assert len(chnames_cur) == len(r.ch_names)
                     #r.set_annotations(anns_MEGartif)
                     #r.set_annotations(anns_LFPartif)
 
@@ -2084,6 +2085,10 @@ def bandFilter(rawnames, times_pri, main_sides_pri, side_switched_pri,
                     ann_toghether = mne.Annotations([],[],[])
                     for chni in chis_LFP:
                         temp_ann = utils.getArtifForFiltering(chnames_cur[chni], anns_LFPartif )
+
+                        print(f'bandFilter: LFO LFP for {chnames_cur[chis_LFP[chni]]} chis current anns are ',
+                            temp_ann,temp_ann.onset,temp_ann.duration,temp_ann.description)
+
                         r.set_annotations(temp_ann)
                         ann_toghether = ann_toghether + temp_ann
                         r.filter(l_freq=low,h_freq=high, n_jobs=n_jobs_maybe_cuda,
@@ -2094,11 +2099,16 @@ def bandFilter(rawnames, times_pri, main_sides_pri, side_switched_pri,
                     for side in ['L','R']:
                         chis_msrc = mne.pick_channels_regexp(chnames_cur,f'msrc{side}.*')
                         temp_ann = utils.getArtifForFiltering(f'msrc{side}', anns_MEGartif )
+
+                        print(f'bandFilter: mscr for {len(chis_msrc)} chis current anns are ',
+                            temp_ann,temp_ann.onset,temp_ann.duration,temp_ann.description)
+
                         r.set_annotations(temp_ann)
                         ann_toghether = ann_toghether + temp_ann
                         #print(anns_MEGartif.__dict__)
                         #print('LLLLLLLLLLLLLLLLLLLLLLll ',len(chis_msrc), side, len(temp_ann) )
                         if len(chis_msrc) == 0:
+                            print(f'bandFilter: zero chis_msrc for brain side {side}')
                             continue
                         r.filter(l_freq=low,h_freq=high, n_jobs=n_jobs_maybe_cuda,
                                 skip_by_annotation=f'BAD_MEG{side}', pad='symmetric',
@@ -2106,9 +2116,14 @@ def bandFilter(rawnames, times_pri, main_sides_pri, side_switched_pri,
                     r.set_annotations(ann_toghether)
                 else: # we have only LFP channels then
                     chnames_cur = chnames_hires
+                    assert len(chnames_cur) == len(r.ch_names)
                     ann_toghether = mne.Annotations([],[],[])
                     for chni,chn in enumerate(chnames_cur):
                         temp_ann = utils.getArtifForFiltering(chnames_cur[chni], anns_LFPartif )
+
+                        print(f'bandFilter: HFO LFP for {chn} current anns are ',
+                            temp_ann,temp_ann.onset,temp_ann.duration,temp_ann.description)
+
                         ann_toghether = ann_toghether + temp_ann
                         r.set_annotations(temp_ann)
                         r.filter(l_freq=low,h_freq=high, n_jobs=n_jobs_maybe_cuda,
@@ -2173,6 +2188,9 @@ def bandFilter(rawnames, times_pri, main_sides_pri, side_switched_pri,
 
                 assert bandname not in raw_perband_bp
                 raw_perband_bp [bandname] =  rbp
+
+
+                print(f'bandFilter: {rn} for sfreq {sfreq_cur}: finished filtering in band {bandname}' )
 
                 #q_to_include_mean_comp = 0.05
                 # rejects bad.*

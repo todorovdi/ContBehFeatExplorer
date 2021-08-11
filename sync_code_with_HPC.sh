@@ -34,7 +34,7 @@ else
   numfiles=`ls $mountpath | wc -l`
   if [ $numfiles -eq 0 ]; then
     echo "not mounted! trying to remount"
-    sudo umount -l $mountpath
+    sudo umount -l $mountpath # would not work if I run on cron
     sshfs judac:/p/project/icei-hbp-2020-0012/OSCBAGDIS $mountpath
     #exit 1
   fi
@@ -52,6 +52,9 @@ $SLEEP
 #rsync $FLAGS --progress $SSH_FLAG $FNS jusuf:data_proc_code/
 echo "  rsync souce code"
 rsync $FLAGS $SSH_FLAG --exclude="*HPC.py" --exclude="sync*HPC.sh"  $ZBOOK_DIR/*.{py,sh,m}  $JUSUF/
+
+echo "  rev rsync souce code"
+rsync $FLAGS $SSH_FLAG --exclude="sync*HPC.sh" $JUSUF/ $ZBOOK_DIR/*HPC.py
 $SLEEP
 echo "  rsync json"
 rsync $FLAGS $SSH_FLAG --exclude="*HPC" $ZBOOK_DIR/*.json  $JUSUF/
@@ -61,7 +64,12 @@ echo "  rsync run files (excluding sh, only py)"
 #rsync $FLAGS $SSH_FLAG --exclude="*HPC.sh" --exclude="sbatch*" --exclude=srun_pipeline.sh --exclude=srun_exec_runstr.sh $ZBOOK_DIR/$subdir/*.{py,sh}  $JUSUF/$subdir/
 rsync $FLAGS $SSH_FLAG $ZBOOK_DIR/$subdir/*.py  $JUSUF/$subdir/
 $SLEEP
+echo "  rev rsync run files (excluding sh, only py)"
+rsync $FLAGS $SSH_FLAG  $JUSUF/$subdir/*.sh  $ZBOOK_DIR/$subdir/
+$SLEEP
 echo "  rsync params"
-rsync $FLAGS $SSH_FLAG $ZBOOK_DIR/params/*.ini $JUSUF/params/
+rsync $FLAGS $SSH_FLAG --exclude="*HPC*.ini" $ZBOOK_DIR/params/*.ini $JUSUF/params/
+echo "  rev rsync params"
+rsync $FLAGS $SSH_FLAG $JUSUF/params/*HPC*.ini $ZBOOK_DIR/params/ 
 echo "  rsync test data"
 rsync $FLAGS $SSH_FLAG $ZBOOK_DIR/test_data/*.py $JUSUF/test_data/

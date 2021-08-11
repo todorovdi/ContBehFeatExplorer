@@ -695,20 +695,25 @@ def filterFeats(feature_names_all, chnames_LFP, LFP_related_only, parcel_types,
         # is LFP with other <side><number>
         # similar with msrc_inds
 
+        #getFeatIndsRelToLFPchan(feature_names_all, chnpart=mainLFPchan,
+        #                        printLog=False,
+
         chnames_bad_LFP = set(chnames_LFP) - set([mainLFPchan] )
 
         regexs = [ '.*{}.*'.format(chname) for chname in  chnames_bad_LFP]
         inds_bad_LFP = selFeatsRegexInds(feature_names_all, regexs, unique=1)
 
-        regexs = [ '.*{}.*'.format(mainLFPchan) ]
-        inds_mainLFPchan_rel = selFeatsRegexInds(feature_names_all, regexs, unique=1)
-        # TODO: if I reverse side forcefully, it should be done differently
-        mainLFPchan_sidelet = mainLFPchan[3]
-        assert mainLFPchan_sidelet in ['R', 'L']
-        for ind in inds_mainLFPchan_rel:
-            s = feature_names_all[ind].replace(mainLFPchan,
-                mainLFPchan_new_name_templ.format(mainLFPchan_sidelet) )
-            feature_names_all[ind] = s
+        if mainLFPchan_new_name_templ is not None:
+            # replacing feature names in_place
+            regexs = [ '.*{}.*'.format(mainLFPchan) ]
+            inds_mainLFPchan_rel = selFeatsRegexInds(feature_names_all, regexs, unique=1)
+            # TODO: if I reverse side forcefully, it should be done differently
+            mainLFPchan_sidelet = mainLFPchan[3]
+            assert mainLFPchan_sidelet in ['R', 'L']
+            for ind in inds_mainLFPchan_rel:
+                s = feature_names_all[ind].replace(mainLFPchan,
+                    mainLFPchan_new_name_templ.format(mainLFPchan_sidelet) )
+                feature_names_all[ind] = s
 
         print('Removing non-main LFPs ',chnames_bad_LFP)
 
@@ -775,6 +780,37 @@ def filterFeats(feature_names_all, chnames_LFP, LFP_related_only, parcel_types,
 def genFeatnamesGroupCodes():
     return
 
+def getFeatIndsRelToOnlyOneLFPchan(featnames, chnpart='LFP',
+                            new_channel_name_templ = None, chnames_LFP=None,
+                                  mainLFPchan = None ):
+    if chnames_LFP is None:
+        chnames_LFP = getChnamesFromFeatlist(featnames, mod='LFP')
+    chnames_bad_LFP = set(chnames_LFP) - set([chnpart] )
+
+    #select features where appear other LFPs
+    regexs = [ '.*{}.*'.format(chname) for chname in  chnames_bad_LFP]
+    inds_bad_LFP = selFeatsRegexInds(featnames, regexs, unique=1)
+
+    # TODO: if I reverse side forcefully, it should be done differently
+    if new_channel_name_templ is not None:
+        regexs = [ '.*{}.*'.format(mainLFPchan) ]
+        inds_mainLFPchan_rel = selFeatsRegexInds(featnames, regexs, unique=1)
+        mainLFPchan_sidelet = mainLFPchan[3]
+        assert mainLFPchan_sidelet in ['R', 'L']
+        for ind in inds_mainLFPchan_rel:
+            s = featnames[ind].replace(mainLFPchan,
+                new_channel_name_templ.format(mainLFPchan_sidelet) )
+            featnames[ind] = s
+
+    #print('Removing non-main LFPs ',chnames_bad_LFP)
+
+
+    remaining = set( range(len(featnames) ) ) - set(inds_bad_LFP)
+    remaining = list(sorted(remaining) )
+
+    #assert len(remaining) < len(featnames)
+    return remaining, inds_bad_LFP
+
 
 def replaceMEGsrcChnamesParams(chns,old_group=None,new_group=None,old_comp=None,new_comp=None):
     import re
@@ -796,7 +832,7 @@ def replaceMEGsrcChnamesParams(chns,old_group=None,new_group=None,old_comp=None,
         newchns += [newchn]
     return newchns
 
-# select feature names realated to current sanity check
+# select feature names related to current sanity check
 def selectFeatNames(fts,relevant_freqs,desired_chns, feature_names_all,
                     fband_names = None, bands_acc = 'crude'):
     featnames_parse_res = parseFeatNames(feature_names_all)
@@ -869,3 +905,10 @@ def selectFeatNames(fts,relevant_freqs,desired_chns, feature_names_all,
         #print(feature_names_all[fi],fbs_cur,chns_cur, fts,relevant_freqs,cond_ft,cond_bands,cond_chns)
         #print(feature_names_all[fi],desired_fbands,fbs_cur,cond_bands)
     return [feature_names_all[fi] for fi in fis]
+
+def getChnamesFromFeatlist(featnames, mod='LFP'):
+    from featlist import  parseFeatNames
+    r = parseFeatNames(featnames)
+    chnames = [chn for chn in r['ch1'] if chn.find(mod) >= 0] + [chn for chn in r['ch2'] if (chn is not None and chn.find(mod) >= 0) ]
+    chnames = list(sorted(set(chnames)))
+    return chnames

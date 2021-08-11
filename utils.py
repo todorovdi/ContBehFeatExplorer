@@ -2130,7 +2130,7 @@ def getFullCSDMat(csd, freq_index, time_index, n_channels, updiag=0):
 
 #########################
 
-def removeAnnsByDescr(anns, anns_descr_to_remove, printLog=True):
+def removeAnnsByDescr(anns, anns_descr_to_remove, printLog=False):
     '''
     anns_descr_to_remove -- list of SUBstrings annotation names (NOT regexs)
     decide by using find (so can be both sides of just one)
@@ -2157,7 +2157,7 @@ def removeAnnsByDescr(anns, anns_descr_to_remove, printLog=True):
                 wasbad = 1
         if wasbad:
             if printLog:
-                print('Removing ',cd)
+                print('removeAnnsByDescr: Removing ',cd)
             anns_upd.delete(ind)
             Nbads += 1
             remtype += [cd]
@@ -3944,9 +3944,11 @@ def addSideToParcels(parcel_labels_no_side,body_side):
             rp = p + '_' + body_side[0].upper()
         else:
             opside = getOppositeSideStr(body_side)
-            rp = p+ '_' + opside[0].upper()
+            rp = p + '_' + opside[0].upper()
 
         res += [rp]
+
+    return res
 
 
 def vizGroup(sind_str,positions,labels,srcgroups, show=True, labels_to_skip = ['unlabeled'],

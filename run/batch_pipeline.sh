@@ -125,7 +125,14 @@ raws_str=${raws_str:0:len_sub}  # get rid of last comma (otherwise I get rawname
 echo raws_str=$raws_str
 
 RUNSTRING_P_STR=""
+
 RUNSTRINGS_FN="_runstrings.txt"
+if [ do_PCA -ne 0 && do_tSNE -eq 0 && do_genfeats -eq 0 ]; then
+  RUNSTRINGS_FN="_runstrings_ML.txt"
+elif [ do_PCA -eq 0 && do_tSNE -eq 0 && do_genfeats -ne 0 ]; then
+  RUNSTRINGS_FN="_runstrings_genfeats.txt"
+fi
+
 if [ $SAVE_RUNSTR_MODE -ne 0 ]; then
   echo "SAVE_RUNSTR_MODE=$SAVE_RUNSTR_MODE"
   # empty file (or create new empty)

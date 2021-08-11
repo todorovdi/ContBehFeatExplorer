@@ -359,14 +359,13 @@ def plotFeatStatsScatter(rawnames,X_pri, int_types_to_stat,
             if int_type not in means_combine_no[rawi]:
                 continue
             stdgl = stds_curint_combine_all
-            if stdgl is None:
-
-                means_curint = np.nan * np.ones( X_pri[rawi].shape[1] )
-                stds_curint  = np.nan * np.ones( X_pri[rawi].shape[1] )
-
-            else:
-                means_curint = (means_combine_no[rawi][int_type] - means_curint_combine_all) / stdgl
-                stds_curint  = stds_combine_no[rawi][int_type] / stdgl
+            means_curint = np.nan * np.ones( X_pri[rawi].shape[1] )
+            stds_curint  = np.nan * np.ones( X_pri[rawi].shape[1] )
+            if stdgl is not None:
+                cur_mean = means_combine_no[rawi][int_type]
+                if cur_mean is not None:
+                    means_curint = (cur_mean - means_curint_combine_all) / stdgl
+                    stds_curint  = stds_combine_no[rawi][int_type] / stdgl
 
 
             # for debug only

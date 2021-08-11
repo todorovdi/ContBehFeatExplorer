@@ -675,6 +675,17 @@ int_names = ['{}_{}'.format(task,ms_letter), 'trem_{}'.format(ms_letter), 'notre
 ###########################################################
 
 fbands = gv.fbands
+
+if bands_only == 'fine':
+    fband_names = gv.fband_names_fine
+else:
+    fband_names = gv.fband_names_crude
+
+if bands_only == 'fine':
+    fband_names_inc_HFO = gv.fband_names_fine_inc_HFO
+else:
+    fband_names_inc_HFO = gv.fband_names_crude_inc_HFO
+    fband_names_HFO = fband_names_inc_HFO[len(fband_names):]  # that HFO names go after
 #{'tremor': [3,10], 'low_beta':[11,22], 'high_beta':[22,30],
 #           'low_gamma':[30,60], 'high_gamma':[60,90],
 #          'HFO1':[91,200], 'HFO2':[200,300], 'HFO3':[300,400],
@@ -1171,6 +1182,11 @@ if not (use_existing_TFR and have_TFR):
             assert ( skip - (skip // skip_div_TFR)  * skip_div_TFR ) < 1e-10
 
 
+            rawn = rawnames[rawind]
+            dat_for_tfr = utils.imputeInterpArtif(dat_for_tfr.T,  anndict_per_intcat_per_rawn[rawn], \
+                                    chnames_tfr, sfreq=sfreq, in_place=False)
+
+
             tfrres_,wbd = utils.tfr(dat_for_tfr, sfreq, freqs, n_cycles,
                                     windowsz, decim = skip // skip_div_TFR,
                                     n_jobs=n_jobs_tfr)
@@ -1185,6 +1201,9 @@ if not (use_existing_TFR and have_TFR):
                 #dat_for_tfr = dat_lfp_hires_scaled
                 #dat_for_tfr = dat_lfp_hires
                 dat_for_tfr = dat_lfp_hires_pri[rawind]
+
+                dat_for_tfr = utils.imputeInterpArtif(dat_for_tfr.T,  anndict_per_intcat_per_rawn[rawn], \
+                                        subfeature_order_lfp_hires, sfreq=sfreq_hires, in_place=False)
 
                 print('Starting TFR for LFP HFO data #{} with shape {}'.format(rawind,dat_for_tfr.shape) )
                 tfrres_LFP_,wbd_HFO = utils.tfr(dat_for_tfr, sfreq_hires, freqs_inc_HFO, n_cycles_inc_HFO,
@@ -1514,16 +1533,6 @@ if exit_after == 'TFR_and_CSD':
 
 n_channels_new = len(newchns)
 
-if bands_only == 'fine':
-    fband_names = gv.fband_names_fine
-else:
-    fband_names = gv.fband_names_crude
-
-if bands_only == 'fine':
-    fband_names_inc_HFO = gv.fband_names_fine_inc_HFO
-else:
-    fband_names_inc_HFO = gv.fband_names_crude_inc_HFO
-    fband_names_HFO = fband_names_inc_HFO[len(fband_names):]  # that HFO names go after
 
 
 if gv.DEBUG_MODE:
@@ -1751,11 +1760,6 @@ if exit_after == 'Hjorth':
 
 if ('rbcorr' in features_to_use and not load_rbcorr) or ('bpcorr' in features_to_use and not load_bpcorr):
     # we have done it before as well
-    if bands_only == 'fine':
-        fband_names = gv.fband_names_fine
-    else:
-        fband_names = gv.fband_names_crude
-
     print('Filtering and Hilbert')
 
     sfreqs = [sfreq, sfreq_hires]

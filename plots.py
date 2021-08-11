@@ -539,6 +539,38 @@ def plotTFRlike(dat_pri, dat_hires_pri,  tfrres_pri, tfrres_HFO_pri, csd_pri,
     return locals()
 
 
+def plotErrorBarStrings(ax,xs,ys,xerr, add_args={}):
+    from collections.abc import Iterable
+
+    labs = [a.get_text() for a in ax.get_yticklabels() ]
+    lens = [len(s) for s in labs]
+    maxlen = 0
+    if len(lens):
+        maxlen = max(lens )
+    if maxlen > 0:
+        assert set(labs) == set(xs)
+        inds = [labs.index(x) for x in xs]
+    else:
+        inds = np.arange(len(xs))
+
+    #ax.set_yticklabels(xs)
+    if xerr is not None:
+        xerr = np.array(xerr)[inds]
+    color = add_args.get('color',None)
+    if color is not None and isinstance(color,Iterable):
+        del add_args['color']
+        if xerr is None:
+            xerr = [0] * len(ys)
+        for y,x,xe,c in zip( np.array(ys)[inds],np.array(xs)[inds],xerr, color ):
+            assert len(c) < 5
+            ax.errorbar([y],[x],xerr=[xe],color=c,**add_args)
+    else:
+        ax.errorbar(np.array(ys)[inds],np.array(xs)[inds],xerr=xerr,**add_args)
+    if maxlen == 0:
+        ax.set_yticks(inds)
+        ax.set_yticklabels(xs)
+
+
 #funloc = plotTFRlike(dat_pri,bpow_abscds_all_reshaped,0, 'beta', chns=['msrcR_0_3_c5', 'LFPR092'])
 #funloc = plotTFRlike(dat_pri,bpow_abscds_all_reshaped,0, 'beta', chns=['LFPR092'])
 
