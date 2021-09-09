@@ -780,12 +780,21 @@ def filterFeats(feature_names_all, chnames_LFP, LFP_related_only, parcel_types,
 def genFeatnamesGroupCodes():
     return
 
-def getFeatIndsRelToOnlyOneLFPchan(featnames, chnpart='LFP',
+def getFeatIndsRelToOnlyOneLFPchan(featnames, chn,
                             new_channel_name_templ = None, chnames_LFP=None,
                                   mainLFPchan = None ):
+    '''
+    replaces in-place
+    keeps non-LFP-related channels as remaining (does not remove them)
+    '''
     if chnames_LFP is None:
         chnames_LFP = getChnamesFromFeatlist(featnames, mod='LFP')
-    chnames_bad_LFP = set(chnames_LFP) - set([chnpart] )
+    chnames_bad_LFP = set(chnames_LFP) - set([chn] )
+
+    #select features where appear some LFPs
+    regexs = [ '.*{}.*'.format('LFP') for chname in  chnames_bad_LFP]
+    inds_any_LFP = selFeatsRegexInds(featnames, regexs, unique=1)
+    inds_no_LFP = set( range(len(featnames) ) ) - set(inds_any_LFP)
 
     #select features where appear other LFPs
     regexs = [ '.*{}.*'.format(chname) for chname in  chnames_bad_LFP]
@@ -807,6 +816,9 @@ def getFeatIndsRelToOnlyOneLFPchan(featnames, chnpart='LFP',
 
     remaining = set( range(len(featnames) ) ) - set(inds_bad_LFP)
     remaining = list(sorted(remaining) )
+
+    inds_bad_LFP = set(inds_bad_LFP) | set(inds_no_LFP)
+    inds_bad_LFP = list(sorted(inds_bad_LFP ) )
 
     #assert len(remaining) < len(featnames)
     return remaining, inds_bad_LFP

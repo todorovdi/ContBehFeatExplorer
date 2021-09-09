@@ -111,12 +111,15 @@ def getRawnameListStructure(rawnames, change_rest_to_hold=False, ret_glob=False)
     subjs_analyzed_glob['per_medcond'] = {}
     subjs_analyzed_glob['per_task'] = {}
 
+    subj_list = []
     # I use that medcond, tasks don't intersect with keys I use
     for ki,k in enumerate(rawnames):
         #f = raws[k]
         sind_str,medcond,task = utils.getParamsFromRawname(k)
         if change_rest_to_hold and task == 'rest':
             task = 'hold'
+
+        subj_list += [sind_str]
 
         cursubj = {}
         if sind_str in subjs_analyzed:
@@ -147,14 +150,18 @@ def getRawnameListStructure(rawnames, change_rest_to_hold=False, ret_glob=False)
                 m[task] = k
                 if 'datasets' not in cursubj[medcond]:
                     cursubj[medcond]['datasets'] = [k]
+                    cursubj[medcond]['tasks']   =  [task]
                 else:
                     cursubj[medcond]['datasets'] += [k]
+                    cursubj[medcond]['tasks']    += [task]
         else:
             cursubj[medcond] = { task: k}
             if 'datasets' not in cursubj[medcond]:
                 cursubj[medcond]['datasets'] = [k]
+                cursubj[medcond]['tasks']   =  [task]
             else:
                 cursubj[medcond]['datasets'] += [k]
+                cursubj[medcond]['tasks']    += [task]
 
         # per task within subj
         if task in cursubj:
@@ -185,7 +192,9 @@ def getRawnameListStructure(rawnames, change_rest_to_hold=False, ret_glob=False)
         subjs_analyzed_glob['per_task'][task]['datasets'] += [k]
 
         subjs_analyzed[sind_str] =  cursubj
-        r = subjs_analyzed
+
+    r = subjs_analyzed
+    subjs_analyzed_glob['subject_list'] = list(sorted(set(subj_list )))
     if ret_glob:
         r = (subjs_analyzed, subjs_analyzed_glob)
     return r
@@ -196,7 +205,8 @@ def genCombineIndsets(rawnames, combine_within):
     if combine_within == 'no':   # dont combine at all, do separately
         indsets = [ [i] for i in range(len(rawnames) ) ]
     else:
-        subjs_analyzed, subjs_analyzed_glob = getRawnameListStructure(rawnames, ret_glob=True)
+        subjs_analyzed, subjs_analyzed_glob = \
+            getRawnameListStructure(rawnames, ret_glob=True)
         if combine_within == 'subj':
             indsets = []
             for subj in subjs_analyzed:

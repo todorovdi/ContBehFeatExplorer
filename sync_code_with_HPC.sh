@@ -54,7 +54,7 @@ echo "  rsync souce code"
 rsync $FLAGS $SSH_FLAG --exclude="*HPC.py" --exclude="sync*HPC.sh"  $ZBOOK_DIR/*.{py,sh,m}  $JUSUF/
 
 echo "  rev rsync souce code"
-rsync $FLAGS $SSH_FLAG --exclude="sync*HPC.sh" $JUSUF/ $ZBOOK_DIR/*HPC.py
+rsync $FLAGS $SSH_FLAG --exclude="sync*HPC.sh" $JUSUF/*HPC.py $ZBOOK_DIR/
 $SLEEP
 echo "  rsync json"
 rsync $FLAGS $SSH_FLAG --exclude="*HPC" $ZBOOK_DIR/*.json  $JUSUF/

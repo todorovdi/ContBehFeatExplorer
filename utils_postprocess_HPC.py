@@ -9,13 +9,16 @@ from time import time
 import pandas as pd
 import matplotlib.pyplot as plt
 
-def collectPerformanceInfo2(rawnames, prefixes, ndays_before = None,
+# compared to 2 it adds warid to tuple keys
+def collectPerformanceInfo3(rawnames, prefixes, ndays_before = None,
                            n_feats_PCA=None,dim_PCA=None, nraws_used=None,
                            sources_type = None, printFilenames = False,
                            group_fn = 10, group_ind=0, subdir = '', old_file_format=False,
-                           load_X=False, use_main_LFP_chan=False,
+                           use_main_LFP_chan=False,
                            remove_large_items=1, list_only = False,
-                           allow_multi_fn_same_prefix = False, use_light_files=True):
+                           allow_multi_fn_same_prefix = False, use_light_files=True,
+                            rawname_regex_full =False,
+                           start_time=None,end_time=None ):
     '''
     rawnames can actually be just subject ids (S01  etc)
     red means smallest possible feat set as found by XGB
@@ -23,7 +26,7 @@ def collectPerformanceInfo2(rawnames, prefixes, ndays_before = None,
     label tuples is a list of tuples ( <newname>,<grouping name>,<int group name> )
     '''
 
-    set_explicit_nraws_used_PCA = nraws_used is not None and isinstance(nraws_used,int)
+    set_explicit_nraws_used_PCA = nraws_used is not None and isinstance(nraws_used,(int,str))
     set_explicit_n_feats_PCA = n_feats_PCA is not None
     set_explicit_dim_PCA = dim_PCA is not None
 
@@ -47,21 +50,320 @@ def collectPerformanceInfo2(rawnames, prefixes, ndays_before = None,
     Ximputed_per_raw = {}
     good_bininds_per_raw = {}
 
+    n_old = 0
+
     res = {}
     res_strongfeat = {}
     res_red = {}
     time_earliest, time_latest =  np.inf, 0
     output_per_raw = {}
-    for rawname_ in rawnames:
+    #TODO remove iteration alltogether
+    #if rawname_regex_full:
+    #    rawnames__ = ['xx']
+    #else:
+    #    rawnames__ = rawnames
+    #subres = {}
+    #subres_red = {}
+    #subres_strongfeat = {}
+    if rawname_regex_full:
+        rawname_regexs = [ '([a-zS,_0-9]+)' ]
+    else:
+        raise ValueError('in the version of the function it is not allowed')
+
+    #S99_on_move_parcel_aal_grp10-0_test_PCA_nr4_7chs_nfeats1128_pcadim29_skip32_wsz256.npz
+
+    Ximputed_per_prefix = {}
+    good_bininds_per_prefix = {}
+
+    ################
+    #for prefix_expr in prefixes:
+    ################
+    # TODO: collect all prefixes somehow. Maybe just init with 100 and
+    # remember which ones I have found..
+    # or do completely differetn cycle
+    # or better first get all by prefixed remove old and then of those
+    # extract all found prefixes, select oldest within prefix and
+    # if I want specific prefixes, only keep them
+
+    prefix_implicit = True
+    #prefix_expr = '(\w+)_'
+    prefix_expr = '([a-zA-Z0-9_,:]+)_'
+    #regex = ('_{}_{}grp{}-{}_{}_PCA_nr({})_[0-9]+chs_nfeats({})_' +\
+    #    'pcadim({}).*wsz[0-9]+__\(.+,.+\)\.npz').\
+    #    format(rawgroup_idstr[:3], sources_type_, group_fn, group_ind, prefix,
+    #    regex_nrPCA, regex_nfeats, regex_pcadim)
+
+
+    #def genMLresFn(rawnames, sources_type, src_file_grouping_ind, src_grouping,
+    #            prefix, n_channels, nfeats_used,
+    #                pcadim, skip, windowsz,use_main_LFP_chan,
+    #               grouping_key,int_types_key, nr=None, regex_mode=False,
+    #               smart_rawn_grouping = False, rawname_format= 'subj',
+    #               custom_rawname_str=None):
+
+    # we look for files for given rawname
+    regex =  utils.genMLresFn(rawnames=rawname_regexs,
+            sources_type=sources_type, src_file_grouping_ind=group_fn,
+            src_grouping=group_ind, prefix=prefix_expr, n_channels='[0-9]+',
+            nfeats_used = regex_nfeats, pcadim='[0-9]+',
+            skip='[0-9]+', windowsz='[0-9]+', use_main_LFP_chan=use_main_LFP_chan,
+                                grouping_key=r'([a-zA-Z0-9_&]+)',
+                              int_types_key=r'([a-zA-Z0-9_&]+)',
+                                nr=nraws_used, regex_mode=1)
+
+    if use_light_files:
+        regex = '_!' + regex
+
+    print('REGEX = ',regex)
+
+    # just take latest
+    dir_to_use = os.path.join(gv.data_dir, subdir)
+    # here only regex param is improtant
+    #fnfound, match_infos = utsne.findByPrefix(dir_to_use, rawgroup_idstr, prefix_expr, regex=regex, ret_aux=1)
+    fnfound, match_infos = utsne.findByPrefix(dir_to_use,
+        None, None, regex=regex, ret_aux=1)
+    if len(fnfound) == 0:
+        print('Nothing found :(((( for REGEX')
+        return None
+    else:
+        print(f'In {dir_to_use} found {len(fnfound)} files matching regex')
+
+    strs = []
+    inds = []
+    # dict of (prefix,int_grouping,intset) -> filename,mod_time
+    fn_per_fntype = {}
+    n_old = 0
+    for fni,fnf in enumerate(fnfound) :
+        fname_full = os.path.join(dir_to_use,fnf)
+
+        mod_time = os.stat( fname_full ).st_mtime
+        dt = datetime.fromtimestamp(mod_time)
+
+        date_ok = True
+        if start_time is not None:
+            date_ok &= dt >= start_time
+        if end_time is not None:
+            date_ok &= dt <= end_time
+
+        if not date_ok:
+            n_old += 1
+            print('skipping due to being old ',dt)
+            continue
+        else:
+            if ndays_before is not None:
+                nh = getFileAge(fname_full)
+                nd = nh / 24
+                if nd > ndays_before:
+                    #print('  !!! too old ({} days before), skipping {}'.format(nd,fnf) )
+                    n_old += 1
+                    continue
+        # if we had'nt skiiped due to age
+        match_info = match_infos[fni]
+        mg = match_info.groups()
+        #import pdb;pdb.set_trace()
+        rawstrid = mg[0]
+        rawels = rawstrid.split(',')
+        subjs = list( set( [rawel[:3] for rawel in rawels] ) )
+        #subjs_analyzed, subjs_analyzed_glob = \
+        #    getRawnameListStructure(rawels, ret_glob=True)
+
+        intset = mg[-1]
+        int_grouping = mg[-2]
+        prefix = mg[-3]
+
+        mod_time = os.stat( fname_full ).st_mtime
+        if printFilenames:
+            print( dt.strftime(" Time: %d %b %Y %H:%M" ), ': ', fnf )
+        time_earliest = min(time_earliest, mod_time)
+        time_latest   = max(time_latest, mod_time)
+
+        #s = '{}:{}:{}'.format(prefix,int_grouping,intset)
+        s = (rawstrid,prefix,int_grouping,intset)
+        # filter not-selected prefixed
+        if prefixes is not None and prefix not in prefixes:
+            print('skipping {} due to bad prefix'.format(fnf) )
+            continue
+
+        if rawnames is not None and rawstrid not in rawnames:
+            print('skipping {} due to bad rawname'.format(fnf) )
+            continue
+
+        # here we only take the latest
+        if s in fn_per_fntype:
+            cur_tpl = (fnf,mod_time)
+            if allow_multi_fn_same_prefix:
+                fn_per_fntype[s] += [ cur_tpl ]
+            else:
+                fnf_other,mod_time_other = fn_per_fntype[s][0]
+                if mod_time > mod_time_other:  # if younger than keep it
+                    fn_per_fntype[s] = [ cur_tpl ]
+        else:
+            fn_per_fntype[s] = [ ( fnf,mod_time ) ]
+
+    if printFilenames:
+        print( 'fn_per_fntype keys are', fn_per_fntype.keys() )
+
+    #################3
+    for s in fn_per_fntype:
+        tuples = fn_per_fntype[s]
+        print(f'   {s}: {len( tuples ) } tuples')
+    ####################
+
+    if not list_only:
+        for s in fn_per_fntype:
+            print(f'!!!!!!!!!!   Start loading files for {s}')
+            tuples = fn_per_fntype[s]
+            #print(f'   {s}: {len( tuples ) } tuples')
+            for tpli,tpl in enumerate(tuples ):
+                rawstrid,prefix,int_grouping,intset = s
+                prefix_eff = prefix[:]
+
+                if allow_multi_fn_same_prefix:
+                    prefix_eff += f'#{tpli}'
+                #if prefix_eff not in output_per_prefix:
+                #    output_per_prefix[prefix_eff] = {}
+                #
+                #if int_grouping not in output_per_prefix[prefix_eff]:
+                #    output_per_prefix[prefix_eff][int_grouping] = {}
+                #
+                #if intset in output_per_prefix[prefix_eff][int_grouping]:
+                #    raise ValueError('Already there!!!')
+
+                #fnf,mod_time = fn_per_fntype[s]
+                fnf,mod_time = tpl
+                fname_full = os.path.join(dir_to_use,fnf )
+
+                t0 = time()
+                f = np.load(fname_full, allow_pickle=1)
+
+                if use_light_files:
+                    res_cur = f['results_light'][()]
+                else:
+                    res_cur = f['results_cur'][()]
+                res_cur['filename_full'] = fname_full
+
+                if 'featsel_shap_res' in f and 'featsel_shap_res' not in res_cur:
+                    print('Moving Shapley values')
+                    res_cur['featsel_shap_res'] = f['featsel_shap_res'][()]
+
+                from utils_postprocess import removeLargeItems
+                if not use_light_files:
+                    res_cur = removeLargeItems(res_cur)
+
+                ######################
+
+                del f
+                t1 = time()
+                import gc; gc.collect()
+
+                tnow=time()
+                print(f'------- Loading and processing {fnf} took {tnow-t0:.2f}s, of it gc={tnow-t1:.2f}')
+
+                if rawstrid not in output_per_raw:
+                    output_per_raw[rawstrid] = {}
+                if prefix_eff not in output_per_raw[rawstrid] :
+                    output_per_raw[rawstrid][prefix_eff] = {}
+                if int_grouping not in output_per_raw[rawstrid][prefix_eff] :
+                    output_per_raw[rawstrid][prefix_eff][int_grouping] = {}
+                if intset in output_per_raw[rawstrid][prefix_eff][int_grouping]:
+                    raise ValueError('Already there!!!')
+                #    output_per_raw[rawstrid][prefix_eff][int_grouping][intset] = {}
+
+                output_per_raw[rawstrid][prefix_eff][int_grouping][intset] \
+                    = res_cur
+                output_per_raw[rawstrid][prefix_eff]['feature_names_filtered'] = res_cur['feature_names_filtered']
+
+                #if fnf.find('S07') >= 0:
+                #    import pdb;pdb.set_trace()
+    else:
+        output_per_prefix = None
+        Ximputed_per_prefix = None
+        good_bininds_per_prefix = None
+
+    if not np.isinf(time_earliest):
+        print('Earliest file {}, latest file {}'.format(
+            datetime.fromtimestamp(time_earliest).strftime("%d %b %Y %H:%M:%S" ),
+            datetime.fromtimestamp( time_latest).strftime("%d %b %Y %H:%M:%S" ) ) )
+    else:
+        print('Found nothing 2 :( ')
+
+    print(f'In total found {n_old} old files')
+
+    #feat_counts = {'full':res, 'red':res_red}
+    #if output_per_raw_ is not None:
+    #    output_per_raw = output_per_raw_
+    #return feat_counts, output_per_raw
+
+    return output_per_raw,Ximputed_per_raw, good_bininds_per_raw
+
+
+def collectPerformanceInfo2(rawnames, prefixes, ndays_before = None,
+                           n_feats_PCA=None,dim_PCA=None, nraws_used=None,
+                           sources_type = None, printFilenames = False,
+                           group_fn = 10, group_ind=0, subdir = '', old_file_format=False,
+                           load_X=False, use_main_LFP_chan=False,
+                           remove_large_items=1, list_only = False,
+                           allow_multi_fn_same_prefix = False, use_light_files=True,
+                            rawname_regex_full =False,
+                           start_time=None,end_time=None ):
+    '''
+    rawnames can actually be just subject ids (S01  etc)
+    red means smallest possible feat set as found by XGB
+
+    label tuples is a list of tuples ( <newname>,<grouping name>,<int group name> )
+    '''
+
+    set_explicit_nraws_used_PCA = nraws_used is not None and isinstance(nraws_used,(int,str))
+    set_explicit_n_feats_PCA = n_feats_PCA is not None
+    set_explicit_dim_PCA = dim_PCA is not None
+
+    #assert perf_to_use in [ 'perf', 'perfs_XGB']
+
+
+    if set_explicit_nraws_used_PCA:
+        regex_nrPCA = str(nraws_used)
+    else:
+        regex_nrPCA = '[0-9]+'
+    if set_explicit_n_feats_PCA:
+        regex_nfeats = str(n_feats_PCA)
+    else:
+        regex_nfeats = '[0-9]+'
+    if set_explicit_dim_PCA:
+        regex_pcadim = str(dim_PCA)
+    else:
+        regex_pcadim = '[0-9]+'
+
+    from globvars import gp
+    Ximputed_per_raw = {}
+    good_bininds_per_raw = {}
+
+    n_old = 0
+
+    res = {}
+    res_strongfeat = {}
+    res_red = {}
+    time_earliest, time_latest =  np.inf, 0
+    output_per_raw = {}
+    #TODO remove iteration alltogether
+    if rawname_regex_full:
+        rawnames__ = ['xx']
+    else:
+        rawnames__ = rawnames
+    for rawgroup_idstr in rawnames__:
         #subres = {}
         #subres_red = {}
         #subres_strongfeat = {}
-        if len(rawname_) > 4:
-            subj,medcond,task  = utils.getParamsFromRawname(rawname_)
+        if len(rawgroup_idstr) > 4:
+            #subj,medcond,task  = utils.getParamsFromRawname(rawgroup_idstr)
+            rawname_regexs = [f'({rawgroup_idstr})']
         else:
-            subj = rawname_
-            assert len(subj) == 3
-            assert subj[0] == 'S'
+            #subj = rawgroup_idstr
+            #assert len(subj) == 3
+            #assert subj[0] == 'S'
+            if rawname_regex_full:
+                rawname_regexs = [ '([a-zS,_0-9]+)' ]
+            else:
+                rawname_regexs = [ f'({rawgroup_idstr})']
 
         #S99_on_move_parcel_aal_grp10-0_test_PCA_nr4_7chs_nfeats1128_pcadim29_skip32_wsz256.npz
 
@@ -85,15 +387,24 @@ def collectPerformanceInfo2(rawnames, prefixes, ndays_before = None,
         prefix_expr = '([a-zA-Z0-9_,:]+)_'
         #regex = ('_{}_{}grp{}-{}_{}_PCA_nr({})_[0-9]+chs_nfeats({})_' +\
         #    'pcadim({}).*wsz[0-9]+__\(.+,.+\)\.npz').\
-        #    format(rawname_[:3], sources_type_, group_fn, group_ind, prefix,
+        #    format(rawgroup_idstr[:3], sources_type_, group_fn, group_ind, prefix,
         #    regex_nrPCA, regex_nfeats, regex_pcadim)
 
+
+#def genMLresFn(rawnames, sources_type, src_file_grouping_ind, src_grouping,
+#            prefix, n_channels, nfeats_used,
+#                pcadim, skip, windowsz,use_main_LFP_chan,
+#               grouping_key,int_types_key, nr=None, regex_mode=False,
+#               smart_rawn_grouping = False, rawname_format= 'subj',
+#               custom_rawname_str=None):
+
         # we look for files for given rawname
-        regex =  utils.genMLresFn([ rawname_ ],
-                                    sources_type, group_fn, group_ind,
-                prefix_expr, '[0-9]+', regex_nfeats,
-                '[0-9]+', '[0-9]+', '[0-9]+', use_main_LFP_chan,
-                                    '(\w+)','(\w+)',
+        regex =  utils.genMLresFn(rawnames=rawname_regexs,
+                sources_type=sources_type, src_file_grouping_ind=group_fn,
+                src_grouping=group_ind, prefix=prefix_expr, n_channels='[0-9]+',
+                nfeats_used = regex_nfeats, pcadim='[0-9]+',
+                skip='[0-9]+', windowsz='[0-9]+', use_main_LFP_chan=use_main_LFP_chan,
+                                    grouping_key='(\w+)',int_types_key='(\w+)',
                                     nr=nraws_used, regex_mode=1)
 
         if use_light_files:
@@ -104,8 +415,9 @@ def collectPerformanceInfo2(rawnames, prefixes, ndays_before = None,
         # just take latest
         dir_to_use = os.path.join(gv.data_dir, subdir)
         # here only regex param is improtant
-        #fnfound, match_infos = utsne.findByPrefix(dir_to_use, rawname_, prefix_expr, regex=regex, ret_aux=1)
-        fnfound, match_infos = utsne.findByPrefix(dir_to_use, None, None, regex=regex, ret_aux=1)
+        #fnfound, match_infos = utsne.findByPrefix(dir_to_use, rawgroup_idstr, prefix_expr, regex=regex, ret_aux=1)
+        fnfound, match_infos = utsne.findByPrefix(dir_to_use,
+            None, None, regex=regex, ret_aux=1)
         if len(fnfound) == 0:
             print('Nothing found :(((( for REGEX')
             continue
@@ -120,23 +432,43 @@ def collectPerformanceInfo2(rawnames, prefixes, ndays_before = None,
         for fni in range(len(fnfound) ):
             fnf = fnfound[fni]
             fname_full = os.path.join(dir_to_use,fnf)
-            if ndays_before is not None:
-                nh = getFileAge(fname_full)
-                nd = nh / 24
-                if nd > ndays_before:
-                    #print('  !!! too old ({} days before), skipping {}'.format(nd,fnf) )
-                    n_old += 1
-                    continue
+
+            mod_time = os.stat( fname_full ).st_mtime
+            dt = datetime.fromtimestamp(mod_time)
+
+            date_ok = True
+            if start_time is not None:
+                date_ok &= dt >= start_time
+            if end_time is not None:
+                date_ok &= dt <= end_time
+
+            if not date_ok:
+                n_old += 1
+                continue
+            else:
+                if ndays_before is not None:
+                    nh = getFileAge(fname_full)
+                    nd = nh / 24
+                    if nd > ndays_before:
+                        #print('  !!! too old ({} days before), skipping {}'.format(nd,fnf) )
+                        n_old += 1
+                        continue
             # if we had'nt skiiped due to age
             match_info = match_infos[fni]
             mg = match_info.groups()
+            #import pdb;pdb.set_trace()
+            rawstrid = mg[0]
+            rawels = rawstrid.split(',')
+            subjs = list( set( [rawel[:3] for rawel in rawels] ) )
+            #subjs_analyzed, subjs_analyzed_glob = \
+            #    getRawnameListStructure(rawels, ret_glob=True)
+
             intset = mg[-1]
             int_grouping = mg[-2]
             prefix = mg[-3]
 
             mod_time = os.stat( fname_full ).st_mtime
             if printFilenames:
-                dt = datetime.fromtimestamp(mod_time)
                 print( dt.strftime(" Time: %d %b %Y %H:%M" ), ': ', fnf )
             time_earliest = min(time_earliest, mod_time)
             time_latest   = max(time_latest, mod_time)
@@ -170,7 +502,7 @@ def collectPerformanceInfo2(rawnames, prefixes, ndays_before = None,
         ####################
 
         if not list_only:
-            print(f'!!!!!!!!!!   Start loading files for {rawname_}')
+            print(f'!!!!!!!!!!   Start loading files for {rawgroup_idstr}')
             for s in fn_per_fntype:
                 tuples = fn_per_fntype[s]
                 #print(f'   {s}: {len( tuples ) } tuples')
@@ -191,13 +523,10 @@ def collectPerformanceInfo2(rawnames, prefixes, ndays_before = None,
 
                     #fnf,mod_time = fn_per_fntype[s]
                     fnf,mod_time = tpl
-
                     fname_full = os.path.join(dir_to_use,fnf )
 
                     t0 = time()
-
                     f = np.load(fname_full, allow_pickle=1)
-
 
                     if use_light_files:
                         res_cur = f['results_light'][()]
@@ -216,24 +545,6 @@ def collectPerformanceInfo2(rawnames, prefixes, ndays_before = None,
                     else:
                         output_per_prefix[prefix_eff]['feature_names_filtered'] = res_cur['feature_names_filtered']
 
-                    #if remove_large_items:
-                    #    for lda_anver in res_cur['lda_analysis_versions'].values():
-                    #        keys_to_clean = ['X_transformed', 'ldaobj', 'ldaobjs']
-                    #        for ktc in keys_to_clean:
-                    #            if ktc in lda_anver:
-                    #                del lda_anver[ktc]
-                    #        #del lda_anver['ldaobj']
-                    #    if 'Xconcat_good_cur' in res_cur:
-                    #        del res_cur['Xconcat_good_cur']
-                    #    del res_cur['transformed_imputed']
-                    #    del res_cur['transformed_imputed_CV']
-                    #    for pt in ['perfs_XGB','perfs_XGB_fs' ]:
-                    #        for i in range(len(res_cur[pt]) ):
-                    #            if 'clf_obj' in res_cur[pt]:
-                    #                del res_cur[pt]['clf_obj']
-                    #            #if 'fold_type_shuffled' in res_cur[pt]:
-                    #            #    del res_cur[pt]['clf_obj']
-
                     output_per_prefix[prefix_eff][int_grouping][intset] = res_cur
 
                     ######################
@@ -248,16 +559,19 @@ def collectPerformanceInfo2(rawnames, prefixes, ndays_before = None,
 
                     tnow=time()
                     print(f'------- Loading and processing {fnf} took {tnow-t0:.2f}s, of it gc={tnow-t1:.2f}')
+
+                    #if fnf.find('S07') >= 0:
+                    #    import pdb;pdb.set_trace()
         else:
             output_per_prefix = None
             Ximputed_per_prefix = None
             good_bininds_per_prefix = None
 
         if load_X:
-            Ximputed_per_raw[rawname_]     =  Ximputed_per_prefix
-            good_bininds_per_raw[rawname_] =  good_bininds_per_prefix
+            Ximputed_per_raw[rawgroup_idstr]     =  Ximputed_per_prefix
+            good_bininds_per_raw[rawgroup_idstr] =  good_bininds_per_prefix
 
-        output_per_raw[rawname_] = output_per_prefix
+        output_per_raw[rawgroup_idstr] = output_per_prefix
 
     if not np.isinf(time_earliest):
         print('Earliest file {}, latest file {}'.format(
@@ -276,8 +590,8 @@ def collectPerformanceInfo2(rawnames, prefixes, ndays_before = None,
     return output_per_raw,Ximputed_per_raw, good_bininds_per_raw
 
 def getFileAge(fname_full, ret_hours=True):
-    created = os.stat( fname_full ).st_ctime
-    dt = datetime.fromtimestamp(created)
+    #created = os.stat( fname_full ).st_ctime
+    #dt = datetime.fromtimestamp(created)
     modified = os.stat( fname_full ).st_mtime
     dt = datetime.fromtimestamp(modified)
     today = datetime.today()
@@ -288,40 +602,61 @@ def getFileAge(fname_full, ret_hours=True):
         r = nh
     return r
 
-def listRecent(days = 5, hours = None, lookup_dir = None):
+def listRecent(days = 5, hours = None, lookup_dir = None,
+               start_time=None,end_time=None):
     if lookup_dir is None:
         lookup_dir = gv.data_dir
     lf = os.listdir(lookup_dir)
     final_list = []
     for f in lf:
-        age_hours = getFileAge(pjoin(lookup_dir,f)  , 1)
-#        print(age_hours, f)
-        age_days = age_hours / 24
-        #print( age_days ,f )
-        if hours is None and days is not None:
-            if age_days < days:
-                final_list += [f]
+
+        date_ok = True
+        modified = os.stat( pjoin(lookup_dir,f) ).st_mtime
+        dt = datetime.fromtimestamp(modified)
+        if start_time is not None:
+            date_ok &= dt >= start_time
+        if end_time is not None:
+            date_ok &= dt <= end_time
+        if not date_ok:
+            continue
+        if date_ok and days is None and hours is None:
+            final_list += [f]
         else:
-            if days is None:
-                if age_hours < hours:
+            # created earlier
+            age_hours = getFileAge(pjoin(lookup_dir,f)  , 1)
+    #        print(age_hours, f)
+            age_days = age_hours / 24
+            #print( age_days ,f )
+            if hours is None and days is not None:
+                if age_days < days:
                     final_list += [f]
             else:
-                if age_hours < hours + days * 24:
-                    final_list += [f]
+                if days is None:
+                    if age_hours < hours:
+                        final_list += [f]
+                else:
+                    if age_hours < hours + days * 24:
+                        final_list += [f]
     return final_list
 
-def listRecentPrefixes(days = 5, hours = None, lookup_dir = None, light_only=True):
+def listRecentPrefixes(days = 5, hours = None, lookup_dir = None,
+                       light_only=True, custom_rawname_regex=None,
+                      start_time=None,end_time=None ):
     import re
-    lf = listRecent(days, hours, lookup_dir)
+    lf = listRecent(days, hours, lookup_dir, start_time=start_time,
+                    end_time=end_time)
     prefixes = []
     for f in lf:
-        regex = '_S.._.*grp[0-9\-]+_(.*)_ML'
+        if custom_rawname_regex is None:
+            regex = '_S.._.*grp[0-9\-]+_(.*)_ML'
+        else:
+            regex = '_'+custom_rawname_regex+ '_.*grp[0-9\-]+_(.*)_ML'
         if light_only:
             regex = '_!' + regex
         out = re.match(regex, f)
         if out is None:
             continue
-        prefix = out.groups()[0]
+        prefix = out.groups()[-1]
         prefixes += [prefix]
     return list(sorted(set(prefixes) ) )
 
@@ -681,15 +1016,14 @@ def prepTableInfo3(output_per_raw, prefixes=None, perf_to_use_list = [('perfs_XG
         k0 = list( output_per_raw.keys() ) [0]
         prefixes = list( sorted( list( output_per_raw[k0].keys() ) ) )
 
-    class_label_names              = mult_clf_output('class_label_names_ordered',None)
-    if class_label_names is not None:
-        lblind_trem = class_label_names.index('trem_L')
-        print('prepTableInfo3: warninig: Using fixed side for tremor: trem_L')
-    else:
-        lblind_trem = 0
 
     for tpl in perf_to_use_list:
-        clf_type,perf_to_use,perf_red_to_use = tpl
+        clf_type,perf_to_use,perf_red_to_use = tpl[:3]
+        if len(tpl) == 4:
+            perf_add = tpl[3]
+            print('AAAAAAAAAAAAAA',perf_add)
+        else:
+            perf_add = None
         info_per_rn_pref ={}
         red_mode = False
         if perf_to_use.endswith('_red'):
@@ -721,8 +1055,15 @@ def prepTableInfo3(output_per_raw, prefixes=None, perf_to_use_list = [('perfs_XG
                     else:
                         mult_clf_results = r[it_grp][it_set]
                         if mult_clf_results is not None:
+                            class_label_names = mult_clf_results.get('class_label_names_ordered',None)
+                            if class_label_names is not None:
+                                lblind_trem = class_label_names.index('trem_L')
+                                print('prepTableInfo3: warninig: Using fixed side for tremor: trem_L')
+                            else:
+                                lblind_trem = 0
 
                             perfs_CV,perfs_noCV, perfs_red_CV,perfs_red_noCV  = None,None,None,None
+                            perfs_CV_recalc,perfs_red_CV_recalc = None,None
                             if clf_type == 'XGB':
                                 XGB_anver = mult_clf_results['XGB_analysis_versions']
                                 anver_cur = XGB_anver.get(perf_to_use)
@@ -736,6 +1077,14 @@ def prepTableInfo3(output_per_raw, prefixes=None, perf_to_use_list = [('perfs_XG
                                         perfs_noCV = anver_cur['perf_dict']['perf_nocv']
                                         ps = anver_cur['perf_dict'].get('perfs_CV', None)
                                     perfs_CV_recalc = recalcPerfFromCV(ps,lblind_trem)
+
+                                    if perf_add is not None:
+                                        if perf_add == 'across_subj':
+                                            pdict = anver_cur['across']['subj']
+                                            perfs_add_CV = pdict['perf_aver']
+                                            perfs_add_noCV = pdict['perf_nocv']
+                                            ps = pdict['perfs_CV']
+                                            perfs_add_CV_recalc = recalcPerfFromCV(ps,lblind_trem)
                                 else:
                                     print(f'perf_to_use (={perf_to_use}): None!')
 
@@ -748,7 +1097,7 @@ def prepTableInfo3(output_per_raw, prefixes=None, perf_to_use_list = [('perfs_XG
                                     num_red = len(oo['featis'] )
                                     num_red_set = True
                                 else:
-                                    anver_red_cur = XGB_anver.get(perf_red_to_use)
+                                    anver_red_cur = mult_clf_results['XGB_analysis_versions'][perf_red_to_use]
                                 if anver_red_cur is not None:
                                     if 'perf_aver' in anver_red_cur:
                                         perfs_red_CV   = anver_red_cur['perf_aver']
@@ -761,7 +1110,7 @@ def prepTableInfo3(output_per_raw, prefixes=None, perf_to_use_list = [('perfs_XG
                                         ps = anver_red_cur['perf_dict'].get('perfs_CV', None)
                                     perfs_red_CV_recalc = recalcPerfFromCV(ps,lblind_trem)
                                 else:
-                                    print(f'perf_to_use (={perf_to_use}): None!')
+                                    print(f'perf_red_to_use (={perf_to_use}): None!')
 
                                 if 'importances' in anver_cur:
                                     num = len(anver_cur['importances'] )
@@ -806,7 +1155,8 @@ def prepTableInfo3(output_per_raw, prefixes=None, perf_to_use_list = [('perfs_XG
                                     anver_red_cur =     mult_clf_results['LDA_analysis_versions'][f'all_present_features_only_{chn_LFP}']
                                     num_red == len(anver_red_cur['featis'])
                                 else:
-                                    anver_red_cur = lda_anver.get(perf_to_use,None)
+                                    anver_red_cur = None
+
                                 if anver_red_cur is not None:
                                     perfs_red_CV = anver_red_cur['CV']['CV_perfs']
                                     perfs_red_CV = np.mean(np.array([ perfs_red_CV[ip][:3] for ip in range(len(perfs_red_CV)) ]   ), axis=0)
@@ -847,15 +1197,29 @@ def prepTableInfo3(output_per_raw, prefixes=None, perf_to_use_list = [('perfs_XG
                     if num is not None and num_red is not None:
                         assert num >= num_red, f'{rn},{lt},{it_grp},{it_set},{tpl}:{prefix}  {num},{num_red}'
 
-                    info_cur['sens_recalc'] = perfs_CV_recalc[0]
-                    info_cur['spec_recalc'] = perfs_CV_recalc[1]
+                    if perfs_CV_recalc is not None:
+                        info_cur['sens_recalc'] = perfs_CV_recalc[0]
+                        info_cur['spec_recalc'] = perfs_CV_recalc[1]
                     info_cur['sens'] = sens
                     info_cur['spec'] = spec
                     info_cur['F1'] = F1
                     info_cur['sens_red'] = sens_red
                     info_cur['spec_red'] = spec_red
-                    info_cur['sens_red_recalc'] = perfs_red_CV_recalc[0]
-                    info_cur['spec_red_recalc'] = perfs_red_CV_recalc[1]
+                    if perfs_red_CV_recalc is not None:
+                        info_cur['sens_red_recalc'] = perfs_red_CV_recalc[0]
+                        info_cur['spec_red_recalc'] = perfs_red_CV_recalc[1]
+                    else:
+                        info_cur['sens_red_recalc'] = np.nan
+                        info_cur['spec_red_recalc'] = np.nan
+                    if perf_add is not None:
+                        info_cur['sens_add'] = perfs_add_CV[0]
+                        info_cur['spec_add'] = perfs_add_CV[1]
+                        info_cur['F1_add'] = perfs_add_CV[2]
+                        info_cur['sens_add_recalc'] = perfs_add_CV_recalc[0]
+                        info_cur['spec_add_recalc'] = perfs_add_CV_recalc[1]
+                        #info_cur['F1_add_recalc']  = perfs_add_CV_recalc[2]
+
+
                     info_cur['F1_red'] = F1_red
                     info_cur['num'] = num
                     info_cur['num_red'] = num_red
@@ -912,7 +1276,7 @@ def plotFeatureImportance(ax, feature_names, shap_values,
     #print('Start plot feat importance')
 
     z = None
-    aggregate = shap_values
+    aggregate = np.abs(shap_values)
     if mode.startswith('XGB_Shapley'):
         aggregate = np.mean(np.abs(shap_values[:, 0:-1]), axis=0)
         # sort by magnitude
@@ -945,7 +1309,7 @@ def plotFeatureImportance(ax, feature_names, shap_values,
     ax.tick_params(axis='x', labelrotation=90 )
     #ax.tight_layout()
 
-    ax.set_title(f'Scores of type {mode}');
+    ax.set_title(f'Scores (their abs vals) of type {mode}');
 
 def mergeScores(scores,feature_names,collect_groups,
                 feature_names_subset=None,feature_groups_names=None, aux=None):
@@ -957,7 +1321,9 @@ def mergeScores(scores,feature_names,collect_groups,
     if aux is not None:
         assert len(aux) == len(collect_groups), ( len(aux), len(collect_groups) )
     mean_scores, std_scores, max_scores = [],[],[]
+    mean_signed_scores, std_signed_scores, max_signed_scores = [],[],[]
     sum_scores = []
+    sum_signed_scores = []
 
     if feature_names_subset is not None:
         assert set( feature_names ) >= set(feature_names_subset), f'{set( feature_names )}, {set(feature_names_subset) }'
@@ -981,7 +1347,7 @@ def mergeScores(scores,feature_names,collect_groups,
             inds = utsne.selFeatsRegexInds(feature_names,cgr)
         if len(inds):
             if isinstance(cgr,list):
-                cgr_ = '||'.joing(cgr)
+                cgr_ = '||'.join(cgr)
             else:
                 cgr_ = cgr
 
@@ -990,11 +1356,17 @@ def mergeScores(scores,feature_names,collect_groups,
 
             names += [cgr_]
             aux_res += [aux[cgri] ]
-            scc = np.abs( np.array(scores)[inds] )
-            mean_scores +=  [ scc.mean()  ]
-            std_scores +=   [ scc.std()  ]
-            max_scores +=   [ scc.max()  ]
-            sum_scores +=   [ np.sum(scc)  ]
+            scca = np.abs( np.array(scores)[inds] )
+            mean_scores +=  [ scca.mean()  ]
+            std_scores +=   [ scca.std()  ]
+            max_scores +=   [ scca.max()  ]
+            sum_scores +=   [ np.sum(scca)  ]
+
+            scc = np.array(scores)[inds]
+            mean_signed_scores +=  [ scc.mean()  ]
+            std_signed_scores +=   [ scc.std()  ]
+            max_signed_scores +=   [ scc.max()  ]
+            sum_signed_scores +=   [ np.sum(scc)  ]
 
             inds_lists +=   [inds]
         else:
@@ -1006,9 +1378,140 @@ def mergeScores(scores,feature_names,collect_groups,
     stats['aux'] = aux_res
     stats['names_display'] = names_display
     stats['mean'] = mean_scores
-    stats['sum'] = sum_scores
-    stats['std'] = std_scores
-    stats['max'] = max_scores
+    stats['sum']  = sum_scores
+    stats['std']  = std_scores
+    stats['max']  = max_scores
+    stats['mean_signed'] = mean_signed_scores
+    stats['sum_signed']  = sum_signed_scores
+    stats['std_signed']  = std_signed_scores
+    stats['max_signed']  = max_signed_scores
+    stats['inds_lists'] = inds_lists
+    #return mean_scores,std_scores,max_scores
+    return stats
+
+def mergeScores2(scores,class_labels,lblind,
+                 feature_names,collect_groups,
+                feature_names_subset=None,feature_groups_names=None, aux=None):
+    '''
+    uses full scores (not averaged over points)
+    scores is for the fixed class for each data point
+    here collect_groups can be either list of strings or list of lists (or mixed)'''
+    from featlist import selFeatsRegexInds
+    # pool scores
+    assert scores.ndim == 2
+    # raw scores contain bias term
+    assert scores.shape[-1] - 1 == len(feature_names), (scores.shape[-1] - 1, len(feature_names))
+    assert scores.shape[0] == len(class_labels), (scores.shape[0], len(class_labels) )
+    if aux is not None:
+        assert len(aux) == len(collect_groups), ( len(aux), len(collect_groups) )
+    stats = {}
+    stats['mean']       = []
+    stats['std']        = []
+    stats['max']        = []
+    stats['absmin']     = []
+    stats['sum']        = []
+    stats['mean_abs']   = []
+    stats['std_abs']    = []
+    stats['max_abs']    = []
+    stats['absmin_abs'] = []
+    stats['sum_abs']    = []
+    stats['names']      = []
+
+    if feature_names_subset is not None:
+        assert set( feature_names ) >= set(feature_names_subset), f'{set( feature_names )}, {set(feature_names_subset) }'
+        #indices of subset features in the larger things
+        #subinds = [ feature_names.index(f) for f in feature_names_subset  ]
+    # lists of features to be pooled
+    inds_lists = []
+    names = []
+    aux_res = []
+    if feature_groups_names is not None:
+        assert len(feature_groups_names) == len(collect_groups), ( len(feature_groups_names), len(collect_groups) )
+        names_display = []
+    else:
+        names_display = None
+
+    ptinds = np.where(class_labels == lblind)[0]
+    scores_cur_full = scores[ptinds,0:-1]
+
+    feature_names_l = feature_names.tolist()
+    for cgri,cgr in enumerate(collect_groups):
+        # indices of features
+        if feature_names_subset is not None:
+            inds_small_set = selFeatsRegexInds(feature_names_subset,cgr)
+            inds = [ feature_names_l.index(feature_names_subset[i]) for i in inds_small_set  ]
+        else:
+            inds = utsne.selFeatsRegexInds(feature_names,cgr)
+        if len(inds):
+            if isinstance(cgr,list):
+                cgr_ = '||'.join(cgr)
+            else:
+                cgr_ = cgr
+
+            if feature_groups_names is not None:
+                names_display += [feature_groups_names[cgri]]
+
+            sc = scores_cur_full[:,inds]
+            scores_feat_grouped_sum  = np.sum( sc, axis=1 ) #signed sum over features
+            scores_feat_grouped_mean = np.mean(sc, axis=1 ) #signed
+            scores_feat_grouped_std  = np.std (sc, axis=1 ) #signed
+            scores_feat_grouped_max  = np.max (sc, axis=1 ) #signed
+            scores_feat_grouped_min  = np.min (sc, axis=1 ) #signed
+
+
+            scabs = np.abs(sc)
+            scores_feat_grouped_sum_abs  = np.sum( scabs, axis=1 ) #UNsigned sum over features
+            scores_feat_grouped_mean_abs = np.mean(scabs, axis=1 ) #UNsigned
+            scores_feat_grouped_std_abs  = np.std (scabs, axis=1 ) #UNsigned
+            scores_feat_grouped_max_abs  = np.max (scabs, axis=1 ) #UNsigned
+            scores_feat_grouped_min_abs  = np.min (scabs, axis=1 ) #UNsigned
+            #scores_cur = np.mean(sc, axis=0)
+            #scores_cur = np.mean(sc, axis=0)  axis 0 -- ptind, axis 1 -- featis
+
+
+            #now compute means over datapoints
+            names += [cgr_]
+            aux_res += [aux[cgri] ]
+            # acorss data points
+            stats['mean']   +=     [np.abs(scores_feat_grouped_mean).mean() ]
+            stats['std']    +=     [np.abs(scores_feat_grouped_std).mean()  ]
+            stats['max']    +=     [np.abs(scores_feat_grouped_max).mean()  ]
+            stats['absmin'] +=     [np.abs(scores_feat_grouped_min).mean()  ]
+            stats['sum']    +=     [np.abs(scores_feat_grouped_sum).mean()  ]
+            #stats['mean'] [cgri] =  [ np.abs(scores_feat_grouped_sum).mean()  ]
+            #stats['std']  [cgri] =   [ np.abs(scores_feat_grouped_std).mean()  ]
+            #stats['max']  [cgri] =   [ np.abs(scores_feat_grouped_max).mean()  ]
+            #stats['absmin']  [cgri] =   [ np.abs(scores_feat_grouped_min).mean()  ]
+            #stats['sum']  [cgri] =   [ np.abs(scores_feat_grouped_sum).mean()  ]
+
+            #assert  stats['mean'][cgri] <=  stats['max'][cgri] -- it actually can happen if mean is large negative
+
+            stats['mean_abs']   += [   scores_feat_grouped_mean_abs.mean()   ]
+            stats['std_abs']    += [   scores_feat_grouped_std_abs.mean()    ]
+            stats['max_abs']    += [   scores_feat_grouped_max_abs.mean()    ]
+            stats['absmin_abs'] += [    scores_feat_grouped_min_abs.mean() ]
+            stats['sum_abs']    += [   scores_feat_grouped_sum_abs.mean()    ]
+
+
+            stats['names'] += [ cgr_ ]
+
+            #scc = np.array(scores)[inds]
+            #mean_signed_scores +=  [ scc.mean()  ]
+            #std_signed_scores +=   [ scc.std()  ]
+            #max_signed_scores +=   [ scc.max()  ]
+            #sum_signed_scores +=   [ np.sum(scc)  ]
+
+            inds_lists +=   [inds]
+        else:
+            print(f'{cgr} gave zero features')
+
+    #print(feature_names[inds_lists[-1] ])
+    stats['aux'] = aux_res
+    stats['names_display'] = names_display
+    #stats['mean_signed'] = mean_signed_scores
+    #stats['sum_signed']  = sum_signed_scores
+    #stats['std_signed']  = std_signed_scores
+    #stats['max_signed']  = max_signed_scores
     stats['inds_lists'] = inds_lists
     #return mean_scores,std_scores,max_scores
     return stats
@@ -1016,7 +1519,8 @@ def mergeScores(scores,feature_names,collect_groups,
 def plotFeatImpStats(feat_types_all, scores_stats, fign='', axs=None,
                      bias=None, color=None, alpha=0.8, bar=True,
                      markersize = 10, show_max = True,
-                     show_std = True, marker_mean = 'o', marker_max = 'x'):
+                     show_std = True, marker_mean = 'o', marker_max = 'x',
+                     plot_signed = True):
     import matplotlib.pyplot as plt
     from plots import plotErrorBarStrings
     assert isinstance(scores_stats, dict)
@@ -1027,7 +1531,14 @@ def plotFeatImpStats(feat_types_all, scores_stats, fign='', axs=None,
     else:
         assert len(axs) >= nc
 
-    ks = ['max', 'sum', 'mean', 'std' ]
+    if plot_signed:
+        # for a fixed data point we look at a signed sum
+        # we really need max_abs here as well, otherwise max can be less than
+        # mean
+        stat_keys = {'max':'max_abs', 'sum':'sum', 'mean':'mean', 'std':'std' }
+    else:
+        stat_keys = {'max':'max_abs', 'sum':'sum_abs', 'mean':'mean_abs',
+                     'std':'std_abs' }
     names = scores_stats.get('names_display',scores_stats['names'] )
     #for i,k in enumerate(ks):
     #    #print(k ,  scores_stats[k] )
@@ -1066,7 +1577,8 @@ def plotFeatImpStats(feat_types_all, scores_stats, fign='', axs=None,
     #print('color_cur =', color_cur)
 
     ax = axs[1]
-    sc = scores_stats['sum']
+    stat_key = stat_keys['sum']
+    sc = scores_stats[stat_key]
 
     names_cur =  names
     sc =  list(sc)
@@ -1092,13 +1604,14 @@ def plotFeatImpStats(feat_types_all, scores_stats, fign='', axs=None,
         plotErrorBarStrings(ax,names_cur,sc,xerr=None,
             add_args={'fmt':marker_mean, 'color':color_cur,
                       'alpha':alpha*0.9, 'markersize':markersize} )
-    ax.set_title('sum')
+    ax.set_title(stat_key)
     ax.set_yticks([])
 
     #####################################
 
     ax = axs[0]
-    sc = scores_stats['max']
+    stat_key = stat_keys['max']
+    sc = scores_stats[stat_key]
 
     if bias is not None:
         bias_cur = np.max(bias)
@@ -1125,7 +1638,9 @@ def plotFeatImpStats(feat_types_all, scores_stats, fign='', axs=None,
                     'color':color_cur, 'alpha':alpha*0.9,
                     'markersize':markersize * 1.2} )
 
-    sc = scores_stats['mean']
+    stat_key = stat_keys['mean']
+    stat_key_std = stat_keys['std']
+    sc = scores_stats[stat_key]
     names_cur = names
     if bias is not None:
         nm = 'bias'
@@ -1135,17 +1650,24 @@ def plotFeatImpStats(feat_types_all, scores_stats, fign='', axs=None,
     ax = axs[0]
     xerr_to_show = None
     if show_std:
-        xerr_to_show = [0] + list(scores_stats['std'] )
+        xerr_to_show = [0] + list(scores_stats[stat_key_std] )
     if bar:
         ax.barh(names_cur,np.array(sc), color=color_cur,
                 alpha=alpha*0.9, xerr= xerr_to_show );
         #ax.tick_params(axis='x', labelrotation=90 )
     else:
-        plotErrorBarStrings(ax,names_cur,sc,xerr=xerr_to_show, add_args={'fmt':marker_mean,
-                'color':color_cur,
+        plotErrorBarStrings(ax,names_cur,sc,xerr=xerr_to_show,
+                add_args={'fmt':marker_mean, 'color':color_cur,
                 'alpha':alpha*0.9, 'markersize':markersize} )
         #ax.errorbar(names_cur,np.array(sc), color=color_cur, alpha=alpha*0.9, xerr= [0] + list(scores_stats['std'] ), fmt='o' ); #ax.tick_params(axis='x', labelrotation=90 )
-    ax.set_title('max,mean,std')
+    keystr = [ stat_keys['mean'] ]
+    if show_max:
+        keystr += [stat_keys['max']]
+    if show_std:
+        keystr += [stat_keys['std']]
+    keystr = ','.join(keystr)
+
+    ax.set_title(keystr)
 
     #sc = scores_stats['std']
     #ax = axs[0]
@@ -1277,7 +1799,7 @@ def plotFeatSignifSHAP(pdf,featsel_per_method, fshs, featnames_list,
                 ft_templ = f'({"|".join(gv.noband_feat_types) })'
                 a = [f'^{ft_templ}_LFP.*']
                 feat_groups_all += a
-                feature_groups_names += [  f'^Hjorth_LFP'  ]
+                feature_groups_names += [  '^Hjorth_LFP'  ]
                 clrs += [cmap(clri)] * len(a)
 
 
@@ -1312,7 +1834,7 @@ def plotFeatSignifSHAP(pdf,featsel_per_method, fshs, featnames_list,
                 clri += 1
                 separate_by_band2 = True
                 # now group per LFPch but with free source
-                chn_templ = f'msrc(R|L)_9_[0-9]+_c[0-9]+'
+                chn_templ = 'msrc(R|L)_9_[0-9]+_c[0-9]+'
                 grpn = 'msrc*'
 
                 ft = 'bpcorr'
@@ -1455,7 +1977,7 @@ def plotFeatSignifSHAP(pdf,featsel_per_method, fshs, featnames_list,
             ax = subaxs[-1]
             #postp.plotFeatureImportance(ax, featnames, scores[ptinds,lblind,:], 'XGB_Shapley')
             sort_individ_feats = fshi == 0
-            postp.plotFeatureImportance(ax, featnames,
+            plotFeatureImportance(ax, featnames,
                                         scores_pre_class[lblind,:],
                                         'labind_vs_score', color=colors_fsh[fshi],
                                         sort = sort_individ_feats, nshow=n_individ_feats_show)
@@ -1483,8 +2005,7 @@ def plotFeatSignifSHAP(pdf,featsel_per_method, fshs, featnames_list,
 #class_label_names,
 
 #outputs_grouped   #
-def plotFeatSignifSHAP_list(pdf,
-                            outputs_grouped, fshs=['XGB_Shapley'],
+def plotFeatSignifSHAP_list(pdf, outputs_grouped, fshs=['XGB_Shapley'],
                        figname_prefix='',
                        n_individ_feats_show=4, roi_labels = None,
                        chnames_LFP = None, body_side='L', hh=8,
@@ -1492,7 +2013,8 @@ def plotFeatSignifSHAP_list(pdf,
                       tickfontsize = 10, show_bias=False,
                             use_best_LFP=False, markersize=10, show_max = True,
                            merge_Hjorth = False, show_std = True, average_over_subjects = True,
-                            alpha = 0.8, alpha_over_subj = 1.):
+                            alpha = 0.8, alpha_over_subj = 1., use_full_scores=False,
+                            featsel_on_VIF=True, show_abs_plots=False ):
     '''
     fshs -- names of featsel method to use
     '''
@@ -1519,7 +2041,17 @@ def plotFeatSignifSHAP_list(pdf,
     (prefix,grp,int_type), mult_clf_output = a
     featsel_per_method             = mult_clf_output['featsel_per_method']
     featnames                      = mult_clf_output['feature_names_filtered']
-    class_labels_good_for_classif  = mult_clf_output['class_labels_good']
+    #class_labels_good_for_classif  = mult_clf_output['class_labels_good']
+    class_labels_good_for_classif  = mult_clf_output['class_labels_good_for_classif']
+
+    colinds_good_VIFsel  = mult_clf_output['VIF_truncation'].get('colinds_good_VIFsel',None)
+    if colinds_good_VIFsel is not None and featsel_on_VIF:
+        featnames = np.array(featnames)[colinds_good_VIFsel]
+
+    subskip_fit = mult_clf_output['pars'].get('subskip_fit',1)
+    subskip_fit = int(subskip_fit)
+    assert subskip_fit is not None
+
 
     #assert len(featnames_list) == len(fshs)
     #if isinstance(featnames_list, Iterable) and \
@@ -1537,9 +2069,14 @@ def plotFeatSignifSHAP_list(pdf,
         scores_pre_class_def = utsne.getScoresPerClass(class_labels_good_for_classif, scores)
     nscores = len(scores_pre_class_def)
 
-    nr = nscores; nc = 4; #nc= len(scores_stats) - 2;
+    nr = nscores;
     ww = 2 + 3 + 5;
-    fig,axs = plt.subplots(nr,nc, figsize = (nc*ww,nr*hh), gridspec_kw={'width_ratios': [1,1,0.7,3]} );
+    if show_abs_plots:
+        nc = 2 + 2 + 1 + 1; #nc= len(scores_stats) - 2;
+        fig,axs = plt.subplots(nr,nc, figsize = (nc*ww,nr*hh), gridspec_kw={'width_ratios': [1,1,1,1,0.4,3]} );
+    else:
+        nc = 2 + 1 + 1;
+        fig,axs = plt.subplots(nr,nc, figsize = (nc*ww,nr*hh), gridspec_kw={'width_ratios': [1,1,0.4,3]} );
     plt.subplots_adjust(top=1-0.02)
 
 
@@ -1547,16 +2084,32 @@ def plotFeatSignifSHAP_list(pdf,
     #cmap( (ri0 + i*ri1) % 20)
 
     from featlist import getFeatIndsRelToOnlyOneLFPchan
+    from featlist import getChnamesFromFeatlist
+
+    outs = []
 
     stats_per_all = []
     for rn,a in outputs_grouped.items():
         (prefix,grp,int_type), mult_clf_output = a
-        featsel_per_method             = mult_clf_output['featsel_per_method']
-        featnames                      = mult_clf_output['feature_names_filtered'].copy()
-        class_label_names              = mult_clf_output('class_label_names_ordered',None)
+        featsel_per_method   = mult_clf_output['featsel_per_method']
+        featnames            = mult_clf_output['feature_names_filtered'].copy()
+        class_label_names    = mult_clf_output.get('class_label_names_ordered',None)
+        colinds_good_VIFsel  = mult_clf_output['VIF_truncation'].get('colinds_good_VIFsel',None)
+        #print('colinds_good_VIFsel ',colinds_good_VIFsel)
+
+        assert not ( (colinds_good_VIFsel is not None) and use_best_LFP), 'requires more thinking'
+
+        if colinds_good_VIFsel is not None and featsel_on_VIF:
+            featnames_sub = np.array(featnames)[colinds_good_VIFsel]
+        else:
+            featnames_sub = featnames
+
+
+        featnames_nice_sub = utils.nicenFeatNames(featnames_sub, {'kk':roi_labels},['kk'])
+
+        class_labels_good_for_classif  = mult_clf_output['class_labels_good_for_classif']
         if class_label_names is None:
             class_labels_good  = mult_clf_output['class_labels_good']
-            #class_labels_good_for_classif  = mult_clf_output['class_labels_good_for_classif']
             revdict = mult_clf_output['revdict']
 
             from sklearn import preprocessing
@@ -1568,18 +2121,25 @@ def plotFeatSignifSHAP_list(pdf,
             class_label_names = [revdict[cli] for cli in class_label_ids]
             #print(class_label_names)
 
+        if chnames_LFP is None:
+            chnames_LFP = getChnamesFromFeatlist(featnames_sub, mod='LFP')
+
 
         if use_best_LFP:
             chn_LFP = mult_clf_output['best_LFP']['XGB']['winning_chan']
             new_channel_name_templ='LFP007'
             #print(chn_LFP)
-            feat_inds_curLFP, feat_inds_except_curLFP = getFeatIndsRelToOnlyOneLFPchan(featnames,
+            feat_inds_curLFP, feat_inds_except_curLFP = \
+                getFeatIndsRelToOnlyOneLFPchan(featnames,
                     chnpart=chn_LFP, chnames_LFP=chnames_LFP,
                            new_channel_name_templ=new_channel_name_templ,
                             mainLFPchan=chn_LFP)
-            featnames = np.array(featnames)[feat_inds_curLFP]
+            if colinds_good_VIFsel is not None:
+                print('Intersecting VIF and curLFP inds')
+                feat_inds_curLFP = np.intersect1d(feat_inds_curLFP,colinds_good_VIFsel)
+            featnames_sub = np.array(featnames)[feat_inds_curLFP]
             chnames_LFP_cur = [new_channel_name_templ]
-            print(rn,chn_LFP, len(featnames) )
+            #print(rn,chn_LFP, len(featnames) )
         else:
             chnames_LFP_cur = chnames_LFP
 
@@ -1589,15 +2149,29 @@ def plotFeatSignifSHAP_list(pdf,
             fspm = featsel_per_method[fsh]
             #featnames = featnames_list[fshi]
             scores = fspm.get('scores',None)
+            #print(scores.shape)
             if scores is None:
+                if use_full_scores:
+                    raise ValueError('we need full scores!')
                 scores_pre_class = fspm.get('scores_av',None)
                 bias = fspm.get('scores_bias_av',None)
 
             else:
-                assert scores.shape[-1] - 1 == len(featnames), (scores.shape[-1] , len(featnames))
+                if use_full_scores:
+                    if len(set(class_labels_good_for_classif) ) == 2:
+                        scores = scores[:,None,:]
+                        scores = np.concatenate( [scores,scores], axis=1)
+                    assert scores.ndim == 3, scores.shape
+                assert scores.shape[-1] - 1 == len(featnames_sub), (scores.shape[-1] , len(featnames_sub))
                 # XGB doc: Note the final column is the bias term
-                scores_pre_class, bias = utsne.getScoresPerClass(class_labels_good_for_classif, scores, ret_bias=1)
-                print( fspm.keys(), scores.shape )
+                scores_pre_class, bias = utsne.getScoresPerClass(class_labels_good_for_classif,
+                                                                 scores, ret_bias=1)
+                #print( fspm.keys(), scores.shape )
+            print('scores.shape = ',scores.shape)
+            #import pdb;pdb.set_trace()
+
+            assert scores_pre_class.shape[-1] == len(featnames_sub),  (scores_pre_class.shape[-1], len(featnames_sub))
+
 
 
             # make plots for every class label
@@ -1608,10 +2182,12 @@ def plotFeatSignifSHAP_list(pdf,
                 #scores_cur = np.mean(scores[ptinds,lblind,0:-1], axis=0)
 
                 scores_cur = scores_pre_class[lblind]
+                if use_full_scores:
+                    scores_full_cur = scores[:,lblind,:]
                 label_str = class_label_names[lblind]
 
                 ###############################
-                ftype_info = utils.collectFeatTypeInfo(featnames)
+                ftype_info = utils.collectFeatTypeInfo(featnames_sub)
 
                 feat_groups_all = []
                 feature_groups_names = []
@@ -1658,7 +2234,7 @@ def plotFeatSignifSHAP_list(pdf,
                     ft_templ = f'({"|".join(gv.noband_feat_types) })'
                     a = [f'^{ft_templ}_LFP.*']
                     feat_groups_all += a
-                    feature_groups_names += [  f'^Hjorth_LFP'  ]
+                    feature_groups_names += [  '^Hjorth_LFP'  ]
                     clrs += [cmap(clri)] * len(a)
 
                 if wasH and not merge_Hjorth:
@@ -1709,7 +2285,7 @@ def plotFeatSignifSHAP_list(pdf,
                     clri += 1
                     separate_by_band2 = True
                     # now group per LFPch but with free source
-                    chn_templ = f'msrc(R|L)_9_[0-9]+_c[0-9]+'
+                    chn_templ = 'msrc(R|L)_9_[0-9]+_c[0-9]+'
                     grpn = 'msrc*'
 
                     ft = 'bpcorr'
@@ -1826,13 +2402,27 @@ def plotFeatSignifSHAP_list(pdf,
 
 
                 #display(feat_groups_all)
-                feat_imp_stats = mergeScores(scores_cur, featnames,
-                    feat_groups_all,
-                    feature_names_subset=None,
-                    feature_groups_names=feature_groups_names, aux=clrs)
+                if use_full_scores:
+                    feat_imp_stats = mergeScores2(scores_full_cur,
+                                                  class_labels_good_for_classif,
+                        lblind, featnames_sub, feat_groups_all,
+                        feature_names_subset=None,
+                        feature_groups_names=feature_groups_names, aux=clrs)
+                else:
+                    feat_imp_stats = mergeScores(scores_cur, featnames_sub,
+                        feat_groups_all,
+                        feature_names_subset=None,
+                        feature_groups_names=feature_groups_names, aux=clrs)
                 stats_per_all += [ (rn,fsh,lblind , feat_imp_stats ) ]
                 ####################################
 
+                if isinstance(rn,tuple):
+                    rn_ = rn[0]
+                else:
+                    rn_ = rn
+                #outs +=   [ (rn_,prefix,grp,int_type,fsh,scores_pre_class,bias)  ]
+
+                outs +=   [ (rn_,prefix,grp,int_type,fsh,featnames_nice_sub,label_str,scores_pre_class[lblind],feat_imp_stats )  ]
 
                 ####################################
                 subaxs = axs[lblind,:]
@@ -1841,12 +2431,24 @@ def plotFeatSignifSHAP_list(pdf,
 
                 if not show_bias:
                     bias = None
+
+                print( f'len(feat_groups_all) = {len(feat_groups_all)}, len(featnames_sub) = {len(featnames_sub)}')
+                #import pdb;pdb.set_trace()
                 plotFeatImpStats(feat_groups_all, feat_imp_stats, axs= subaxs[:2],
                                 bias=bias, color=colors_fsh[fshi], bar=False,
                                  markersize=markersize, show_max = show_max,
-                                 show_std = show_std, alpha=alpha)
+                                 show_std = show_std, alpha=alpha, plot_signed=True)
                 subaxs[0].tick_params(axis='y', labelsize=  tickfontsize)
                 subaxs[0].set_title( f'{subaxs[0].get_title()}  {label_str}' )
+
+                if show_abs_plots:
+                    plotFeatImpStats(feat_groups_all, feat_imp_stats, axs= subaxs[2:4],
+                                    bias=bias, color=colors_fsh[fshi], bar=False,
+                                    markersize=markersize, show_max = show_max,
+                                    show_std = show_std, alpha=alpha,plot_signed=False)
+                    subaxs[2].set_yticks([])
+                    subaxs[2].set_title( f'{subaxs[2].get_title()}  {label_str}' )
+
                 #subaxs[0].tick_params(axis='y', labelsize=  tickfontsize)
                 #plt.tight_layout()
                 #ax.set_title(  )
@@ -1856,16 +2458,16 @@ def plotFeatSignifSHAP_list(pdf,
                 #plt.figure(figsize = (12,10))
                 #ax = plt.gca()
                 ax = subaxs[-1]
-                #postp.plotFeatureImportance(ax, featnames, scores[ptinds,lblind,:], 'XGB_Shapley')
+                #postp.plotFeatureImportance(ax, featnames_sub, scores[ptinds,lblind,:], 'XGB_Shapley')
                 sort_individ_feats = fshi == 0
-                postp.plotFeatureImportance(ax, featnames,
+                plotFeatureImportance(ax, featnames_nice_sub,
                                             scores_pre_class[lblind,:],
                                             'labind_vs_score',
                                             color=colors_fsh[fshi],
                                             sort = sort_individ_feats,
                                             nshow=n_individ_feats_show)
                 ax.set_title( f'{figname_prefix}: ' + ax.get_title() + f'_lblind = {label_str} (lblind={lblind}):  {fsh}' )
-                ax.tick_params(axis="x",direction="in", pad=-300)
+                ax.tick_params(axis="x",direction="in", pad=-300, labelsize=tickfontsize)
 
                 ###############3
 
@@ -1889,7 +2491,7 @@ def plotFeatSignifSHAP_list(pdf,
                     #perf_from_confmat = perfFromConfmat(confmats,lblind)
 
                 else:
-                    pcm = mult_clf_output['XGB_analysis_versions'][f'all_present_features']['perf_dict']
+                    pcm = mult_clf_output['XGB_analysis_versions']['all_present_features']['perf_dict']
                     perfs = pcm['perf_aver']
 
                 ax = subaxs[-2]
@@ -1916,31 +2518,40 @@ def plotFeatSignifSHAP_list(pdf,
     #stats['max'] = max_scores
     #stats['inds_lists'] = inds_lists
 
-    for lblind in range(scores_pre_class.shape[0] ):
-    # assume same number of scores in all subjects
-        for fshi,fsh in enumerate(fshs):
-            stats = [ feat_imp_stats for (rn,fsh_,lblind_ , feat_imp_stats ) in stats_per_all \
-                if fsh_ == fsh and lblind_ == lblind]
-            # make sure we have same order
-            for st in stats[1:]:
-                assert tuple(st['names']) == tuple( stats[0]['names']   )
-            for st in stats[1:]:
-                assert tuple(st['names_display']) == tuple( stats[0]['names_display']   )
-            stats_av = {}
-            for k,kv in stats[0].items():
-                #print(k,type(kv) )
-                #if isinstance(kv,np.ndarray) and kv.dtype == np.float:
-                if k in ['names', 'names_display', 'inds_lists']:
-                    stats_av[k] = kv
-                else:
-                    stats_av[k] = np.mean( np.array([ st[k] for st in stats ] ), axis=0 )
-                #else:
+    # mutli-subjects on one? or across fshs?
+    #for lblind in range(scores_pre_class.shape[0] ):
+    ## assume same number of scores in all subjects
+    #    for fshi,fsh in enumerate(fshs):
+    #        stats = [ feat_imp_stats for (rn,fsh_,lblind_ , feat_imp_stats ) in stats_per_all \
+    #            if fsh_ == fsh and lblind_ == lblind]
+    #        subaxs = axs[lblind,:]
+    #        # make sure we have same order
+    #        #for st in stats[1:]:
+    #        #    assert tuple(st['names']) == tuple( stats[0]['names']   )
+    #        #for st in stats[1:]:
+    #        #    assert tuple(st['names_display']) == tuple( stats[0]['names_display']   )
+    #        #stats_av = {}
+    #        #for k,kv in stats[0].items():
+    #        #    #print(k,type(kv) )
+    #        #    #if isinstance(kv,np.ndarray) and kv.dtype == np.float:
+    #        #    if k in ['names', 'names_display', 'inds_lists', 'aux']:
+    #        #        stats_av[k] = kv
+    #        #    else:
+    #        #        tmp = np.array([ st[k] for st in stats ] )
+    #        #        print(tmp.shape, tmp.dtype)
+    #        #        stats_av[k] = np.mean(tmp  , axis=0 )
+    #        #    #else:
 
-            subaxs = axs[lblind,:]
-            plotFeatImpStats(feat_groups_all, stats_av, axs= subaxs[:2],
-                            bias=bias, color=colors_fsh[fshi], bar=False,
-                                markersize=markersize * 1.5, show_max = show_max,
-                                show_std = show_std, marker_mean='x', alpha=alpha_over_subj)
+    #        #plotFeatImpStats(feat_groups_all, stats_av, axs= subaxs[:2],
+    #        #                bias=bias, color=colors_fsh[fshi], bar=False,
+    #        #                    markersize=markersize * 1.5, show_max = show_max,
+    #        #                    show_std = show_std, marker_mean='x', alpha=alpha_over_subj)
+
+    #        for st in stats:
+    #            plotFeatImpStats(feat_groups_all, st, axs= subaxs[:2],
+    #                            bias=bias, color=colors_fsh[fshi], bar=False,
+    #                                markersize=markersize * 1.5, show_max = show_max,
+    #                                show_std = show_std, marker_mean='x', alpha=alpha_over_subj)
 
 
     plt.tight_layout()
@@ -1950,6 +2561,8 @@ def plotFeatSignifSHAP_list(pdf,
     if pdf is not None:
         pdf.savefig()
         plt.close()
+
+    return axs, outs
 
 
 def plotTableInfos2(table_info_per_perf_type, perf_tuple,
@@ -2012,7 +2625,7 @@ def plotTableInfos2(table_info_per_perf_type, perf_tuple,
 
     for rowname,rowinfo in info_per_rn_pref.items():
         xs, xs_red, xs_red2 = [],[],[]
-        ys, ys_red = [],[]
+        ys, ys_red, ys_add = [],[],[]
         nums_red = []
         prefixes_sorted = list(sorted(rowinfo.keys()))
         prefixes_wnums = []
@@ -2038,22 +2651,28 @@ def plotTableInfos2(table_info_per_perf_type, perf_tuple,
             if use_recalc_perf:
                 pvec = [prefinfo.get(os + '_recalc',np.nan) for os in order]
                 pvec_red = [prefinfo.get(os + '_red' + '_recalc',np.nan) for os in order]
+                pvec_add = [prefinfo.get(os + '_add' + '_recalc',np.nan) for os in order]
                 #print(pvec_red)
             else:
                 pvec = [prefinfo[os] for os in order]
                 pvec_red = [prefinfo[os + '_red' ] for os in order]
+                pvec_add = [prefinfo[os + '_add' ] for os in order]
             pvec = pvec[:pveclen]
             pvec_red = pvec_red[:pveclen]
             #pvec_red = [prefinfo['sens_red'], prefinfo['spec_red'] , prefinfo['F1_red']]
-            if pveclen == 3:
-                str_to_put_ =  '{:.0f}%,{:.0f}%,{:.0f}%'.format(100*pvec[0],100*pvec[1],100*pvec[2])
-                str_to_put_red =  '{:.0f}%,{:.0f}%,{:.0f}%'.format(100*pvec_red[0],100*pvec_red[1],100*pvec_red[2])
-            elif pveclen == 2:
-                pvec = [pvec[0], pvec[1] ]
-                str_to_put_ =  '{:.0f}%,{:.0f}%'.format(100*pvec[0],100*pvec[1])
-                str_to_put_red =  '{:.0f}%,{:.0f}%'.format(100*pvec_red[0],100*pvec_red[1])
-            else:
-                raise ValueError('wrong pveclen')
+            assert pveclen in [2,3]
+            str_to_put_ = utsne.sprintfPerfs(pvec)
+            str_to_put_red = utsne.sprintfPerfs(pvec_red)
+            str_to_put_add = utsne.sprintfPerfs(pvec_add)
+            #if pveclen == 3:
+            #    str_to_put_ =  '{:.0f}%,{:.0f}%,{:.0f}%'.format(100*pvec[0],100*pvec[1],100*pvec[2])
+            #    str_to_put_red =  '{:.0f}%,{:.0f}%,{:.0f}%'.format(100*pvec_red[0],100*pvec_red[1],100*pvec_red[2])
+            #elif pveclen == 2:
+            #    pvec = [pvec[0], pvec[1] ]
+            #    str_to_put_ =  '{:.0f}%,{:.0f}%'.format(100*pvec[0],100*pvec[1])
+            #    str_to_put_red =  '{:.0f}%,{:.0f}%'.format(100*pvec_red[0],100*pvec_red[1])
+            #else:
+            #    raise ValueError('wrong pveclen')
 
 
             str_to_put = str_to_put_
@@ -2066,9 +2685,11 @@ def plotTableInfos2(table_info_per_perf_type, perf_tuple,
             #p = np.mean(pvec)
             p     = np.min(pvec)
             p_red = np.min(pvec_red)
+            p_add = np.min(pvec_add)
             #ys += [prefinfo[perftype]]
             ys += [p]
             ys_red += [p_red]
+            ys_add += [p_add]
 
         #print(ys_red)
         str_per_pref_per_rowname[rowname] = str_per_pref
@@ -2113,6 +2734,7 @@ def plotTableInfos2(table_info_per_perf_type, perf_tuple,
         sis = np.argsort(xs)
         ax.barh(np.array(prefixes_wnums)[sis], np.array(ys)[sis], color = color_full,    alpha=alpha_bar)
         ax.barh(np.array(prefixes_wnums)[sis], np.array(ys_red)[sis], color = color_red, alpha=alpha_bar)
+        ax.barh(np.array(prefixes_wnums)[sis], np.array(ys_add)[sis], color = color_red, alpha=alpha_bar)
         ax.set_xlabel(perftype)
         ax.set_xlim(0,1)
         #ax.tick_params(axs=)
@@ -2450,15 +3072,14 @@ def plotImportantFeatLocations(sind_str, multi_clf_output,
 
     plt.tight_layout()
 
-def plotConfmats(outputs_grouped, normalize_mode = 'true', best_LFP=False, common_norm = True ):
+def plotConfmats(outputs_grouped, normalize_mode = 'true', best_LFP=False, common_norm = True,
+                 ww=3,hh=3):
     '''
     normalize_mode == true means that we start from real positives (nut just correctly predicted)
     '''
     nc = int( np.ceil( np.sqrt( len(outputs_grouped) ) ) );
     nr = len(outputs_grouped) // nc; #nc= len(scores_stats) - 2;
     #print(nr,nc)
-    ww = 3;
-    hh = 3
     fig,axs = plt.subplots(nr,nc, figsize = (nc*ww + ww*0.5,nr*hh))#, gridspec_kw={'width_ratios': [1,1,3]} );
     #plt.subplots_adjust(top=1-0.02)
     #normalize_mode = 'total'
@@ -2526,7 +3147,7 @@ def plotConfmats(outputs_grouped, normalize_mode = 'true', best_LFP=False, commo
         norm = mpl.colors.Normalize(vmin=mn, vmax=mx)
     for axi,(ax,(rn,(spec_key,mult_clf_output) ) ) in enumerate(zip(axs, outputs_grouped.items() ) ):
 
-        class_label_names              = mult_clf_output('class_label_names_ordered',None)
+        class_label_names              = mult_clf_output.get('class_label_names_ordered',None)
         if class_label_names is None:
             class_labels_good = mult_clf_output['class_labels_good']
             revdict = mult_clf_output['revdict']
@@ -2550,16 +3171,17 @@ def plotConfmats(outputs_grouped, normalize_mode = 'true', best_LFP=False, commo
         rowi,coli = np.unravel_index(axi,(nr,nc))
 
         xts = ax.get_xticks()
-        xtsd = (xts[1] - xts[0]) / 2 + xts[:-1]
+        shift  = (xts[1] - xts[0]) / 2
+        xtsd = (shift)  + xts[:-1]
         if rowi == nr-1:
-            ax.set_xticks(xtsd)
+            ax.set_xticks(shift +np.linspace(xts[0],xts[-1],len(class_label_names) ) )
             ax.set_xticklabels( class_label_names,rotation=90)
             ax.set_xlabel('predicted')
         else:
             ax.set_xticks([])
 
         if coli == 0:
-            ax.set_yticks(xtsd)
+            ax.set_yticks(shift +np.linspace(xts[0],xts[-1],len(class_label_names) ))
             ax.set_yticklabels( class_label_names)
             ax.set_ylabel('true')
         else:
@@ -2703,3 +3325,92 @@ def perfFromConfmat(confmat,ind):
     #keystr = ','.join(keys)
     #figfname = f'PerfSummary_{keystr}_perf_kind={perf_kind}_pveclen={pveclen}.pdf'
     #plt.savefig(pjoin(gv.dir_fig, output_subdir,figfname))
+
+def plotFeatHists(rawnames,featnames,featis,X_pri,Xconcat, bindict_per_rawn,
+                  ivalis_tb_indarrays_merged, xlim_common = (-5,5), nbins = 20):
+    cmap = plt.cm.get_cmap('Set1', max(4,len(rawnames)) )
+    from globvars import gp
+
+    nr = len(featis); nc = len(rawnames) + 2 + len(gp.int_types_basic)
+    ww = 4; hh = 2.5
+    fig,axs = plt.subplots(nr,nc, figsize=(nc*ww,nr*hh))
+    axs = axs.reshape((nr,nc))
+    bt = None; top=None
+    if len(featis) >= 8:
+        bt = 0.01
+        top = 0.99
+    plt.subplots_adjust(bottom=bt,top=top, left=0.01,right=0.99)
+
+    #xlim_common = None
+
+    show_all = 0
+    for axi,feati in enumerate(featis):
+        featn = featnames[feati]
+        print(featn)
+        #ax = plt.gca()
+        axdef = axs[axi,0]
+        axconcat = axs[axi,1]
+        for rawi in range(len(X_pri)):
+            rawn = rawnames[rawi]
+            axcur = axs[axi,rawi+2]
+
+            dat = X_pri[rawi][:,feati]
+            adat = np.abs(dat)
+            q = np.quantile(adat,0.98)
+            mask = adat < q
+
+            # just pull all data together separately for each dataset on the
+            # SAME axis
+            ax = axdef
+            ax.hist(dat[mask],alpha=0.5, density=1,bins=nbins, label=rawn, color=cmap(rawi))
+
+            # just pull all data together separately for each dataset on
+            # separate axes
+            ax = axcur
+            if show_all:
+                ax.hist(dat[mask],alpha=0.5, density=1,bins=nbins, label=rawn)
+            for iti,it in enumerate(gp.int_types_basic):
+                itcur = it + '_L'
+                binis = bindict_per_rawn[rawn]['beh_state'].get(itcur,None)
+                if binis is None:
+                    continue
+                dat_it = dat[binis][adat[binis] < q]
+                ax.hist(dat_it,alpha=0.5, density=1,bins=nbins, label=itcur, color=cmap(iti))
+
+                axit = axs[axi,iti+len(rawnames) + 2]
+                axit.hist(dat_it,alpha=0.5, density=1,bins=nbins,
+                                     label=rawn, color=cmap(rawi))
+                if (not it.startswith('notrem') ) or len(X_pri) <= 6:
+                    axit.legend(loc='upper right')
+                axit.set_title(itcur)
+
+            axcur.legend(loc='upper right')
+            axcur.set_title(rawn)
+
+        for iti,it in enumerate(gp.int_types_basic):
+            itcur = it + '_L'
+            binis = ivalis_tb_indarrays_merged.get(itcur,None)
+            dat_concat = Xconcat[binis,feati]
+            adat_concat = np.abs(dat_concat)
+            dat_concat = dat_concat[adat_concat  < np.quantile(adat_concat,0.98) ]
+            axconcat.hist(dat_concat,alpha=0.5, density=1,bins=nbins, label=itcur, color=cmap(iti))
+
+    #         for rawi in range(len(X_pri)):
+    #             rawn = rawnames[rawi]
+    #             axcur = axs[axi,rawi+6]
+        axconcat.legend(loc='upper right')
+        axconcat.set_title('concat')
+
+        axdef.set_title(featn)
+        if len(X_pri) <= 6:
+            axdef.legend(loc='lower left')
+
+    if xlim_common is not None:
+        for ax in axs.flatten():
+            ax.set_xlim(xlim_common)
+
+    figname = ','.join(rawnames) + f'_hists_n={nr}.pdf'
+    plt.savefig(pjoin(gv.dir_fig, figname))
+    plt.close()
+
+

@@ -190,16 +190,18 @@ else
 fi
 
 ######## common for ML and nlproj
+#if [ -z ${var+x} ]; then echo "var is unset"; else echo "var is set to '$var'"; fi
             PREFIX_ALL_FEATS=1
                PREFIXES_MAIN=1
       PREFIXES_CROSS_MOD_AUX=1
 PREFIXES_CROSS_BPCORR_SUBMOD=0
 PREFIXES_CROSS_BPCORR_SUBMOD_ORDBAND=0
-PREFIXES_CROSS_BPCORR_SUBMOD_ORDBAND2=1
-PREFIXES_CROSS_BPCORR_SUBMOD_ORDBAND3=0  # subset of ORDBAND2
-PREFIXES_CROSS_RBCORR_SUBMOD=1
-            PREFIXES_AUX_SRC=0
+PREFIXES_CROSS_BPCORR_SUBMOD_ORDBAND2=0
+PREFIXES_CROSS_BPCORR_SUBMOD_ORDBAND3=1  # subset of ORDBAND2
+PREFIXES_CROSS_RBCORR_SUBMOD=0
+            PREFIXES_AUX_SRC=1
                 PREFIXES_AUX=0
+           PREFIX_SEARCH_LFP=0
 
 #ALLFEATS_ADD_OPTS="--search_best_LFP LDA"
 ALLFEATS_ADD_OPTS=""
@@ -223,7 +225,8 @@ GROUPINGS_TO_USE="merge_movements"
 #int_types_to_use = gp.int_types_to_include
 #INT_SETS_TO_USE="basic trem_vs_quiet"
 #INT_SETS_TO_USE="basic"
-INT_SETS_TO_USE="trem_vs_hold&move"
+#INT_SETS_TO_USE="trem_vs_hold&move"
+INT_SETS_TO_USE="basic"
 
 if [ $USE_AUX_IVAL_GROUPINGS -gt 0 ]; then
   GROUPINGS_TO_USE="$GROUPINGS_TO_USE merge_within_subj merge_within_medcond merge_within_task"
@@ -384,6 +387,21 @@ if [ $do_ML -gt 0 ]; then
       RUNSTRING_CUR=' $RS $CROSS_MOD --feat_types bpcorr          --prefix LFPrel_noself_onlyBpcorr  '
       RUNSTRINGS+=("$RUNSTRING_CUR")
     fi 
+    if [ $PREFIX_SEARCH_LFP -ne 0 ]; then
+      RUNSTRING_CUR=' $RS --mods LFP                               --prefix modLFP               '
+      RUNSTRINGS+=("$RUNSTRING_CUR")
+      RUNSTRING_CUR=' $RS --LFP_related_only 1 --cross_couplings_only 1   --prefix LFPrel_noself '       
+      RUNSTRINGS+=("$RUNSTRING_CUR")
+      RUNSTRING_CUR=' $RS --feat_types H_act,H_mob,H_compl        --prefix onlyH           '        
+      RUNSTRINGS+=("$RUNSTRING_CUR")
+      CROSS_MOD="--LFP_related_only 1 --cross_couplings_only 1"
+      RUNSTRING_CUR=' $RS $CROSS_MOD --feat_types con             --prefix LFPrel_noself_onlyCon     '
+      RUNSTRINGS+=("$RUNSTRING_CUR")
+      RUNSTRING_CUR=' $RS $CROSS_MOD --feat_types rbcorr          --prefix LFPrel_noself_onlyRbcorr  '
+      RUNSTRINGS+=("$RUNSTRING_CUR")
+      RUNSTRING_CUR=' $RS $CROSS_MOD --feat_types bpcorr          --prefix LFPrel_noself_onlyBpcorr  '
+      RUNSTRINGS+=("$RUNSTRING_CUR")
+    fi
     if [ $PREFIXES_CROSS_BPCORR_SUBMOD -ne 0 ]; then 
       BPCORR_SUBMOD="--LFP_related_only 1 --cross_couplings_only 1 --feat_types bpcorr"
       #########
@@ -512,8 +530,6 @@ if [ $do_ML -gt 0 ]; then
       RUNSTRINGS+=("$RUNSTRING_CUR")
     fi 
     if [ $PREFIXES_AUX -gt 0 ]; then
-      RUNSTRING_CUR=' $RS --feat_types H_act,H_mob,H_compl        --prefix onlyH           '        
-      RUNSTRINGS+=("$RUNSTRING_CUR")
       RUNSTRING_CUR=' $RS --LFP_related_only 1                    --prefix LFPrel          '           
       RUNSTRINGS+=("$RUNSTRING_CUR")
       RUNSTRING_CUR=' $RS --fbands $BANDS_GAMMA                   --prefix allb_gamma      '    

@@ -659,19 +659,20 @@ def removeLargeItems(res_cur, keep_featsel=['XGB_Shapley','XGB_Shapley2'], remov
     if ('best_inds_XGB_fs' not in res_cur) and 'perfs_XGB_fs' in res_cur:
         res_cur['best_inds_XGB_fs'] =  res_cur['perfs_XGB_fs'][-1]['featinds_present']
 
-    for lda_anver in res_cur['LDA_analysis_versions'].values():
-        keys_to_clean = ['X_transformed', 'ldaobj', 'ldaobjs']
-        for subver in lda_anver.values():
-            for ktc in keys_to_clean:
-                if ktc in subver:
-                    if ktc == 'ldaobj':
-                        subver['nfeats'] = len( subver[ktc].scalings_ )
-                    elif ktc == 'ldaobjs':
-                        subver['nfeats'] = [ len( ldaobj.scalings_ ) for ldaobj in subver[ktc] ]
+    if 'LDA_analysis_versions' in res_cur:
+        for lda_anver in res_cur['LDA_analysis_versions'].values():
+            keys_to_clean = ['X_transformed', 'ldaobj', 'ldaobjs']
+            for subver in lda_anver.values():
+                for ktc in keys_to_clean:
+                    if ktc in subver:
+                        if ktc == 'ldaobj':
+                            subver['nfeats'] = len( subver[ktc].scalings_ )
+                        elif ktc == 'ldaobjs':
+                            subver['nfeats'] = [ len( ldaobj.scalings_ ) for ldaobj in subver[ktc] ]
 
-                    if verbose:
-                        print('delted ',ktc)
-                    del subver[ktc]
+                        if verbose:
+                            print('delted ',ktc)
+                        del subver[ktc]
         #del lda_anver['ldaobj']
     if 'Xconcat_good_cur' in res_cur:
         if verbose:
@@ -709,30 +710,34 @@ def removeLargeItems(res_cur, keep_featsel=['XGB_Shapley','XGB_Shapley2'], remov
                         print('delted clf_obj')
                     del sub['clf_objs']
 
-        XGB_anvers = res_cur.get('XGB_analysis_versions',{} )
-        for aname,sub in XGB_anvers.items():
-            if 'args' in sub:
-                if 'X' in sub['args']:
-                    del sub['args']['X']
-                if 'class_labels' in sub['args']:
-                    del sub['args']['class_labels']
-                if 'clf' in sub['args']:
-                    del sub['args']['clf']
-            if 'clf_obj' in sub:
-                if verbose:
-                    print('delted clf_obj')
-                del sub['clf_obj']
-            if 'clf_objs' in sub:
-                if verbose:
-                    print('delted clf_obj')
-                del sub['clf_objs']
+    XGB_anvers = res_cur.get('XGB_analysis_versions',{} )
+    for aname,sub in XGB_anvers.items():
+        if 'args' in sub:
+            if 'X' in sub['args']:
+                del sub['args']['X']
+            if 'class_labels' in sub['args']:
+                del sub['args']['class_labels']
+            if 'clf' in sub['args']:
+                del sub['args']['clf']
+        if 'clf_obj' in sub:
+            if verbose:
+                print('delted clf_obj')
+            del sub['clf_obj']
+        if 'clf_objs' in sub:
+            if verbose:
+                print('delted clf_obj')
+            del sub['clf_objs']
 
     return res_cur
 
-def printSizeInfo(res_cur,depthcur=0,depthleft=0, units=1024**2):
-    if not ( isinstance(res_cur, dict) or hasattr( res_cur, '__dict__') ):
-        print( '{total_size(res_cur) / units:.4f}' )
+def printSizeInfo(res_cur,depthcur=0,depthleft=0, units=1024**2, minsize=1):
+    if isinstance((int,float,str)):
         return
+    if not ( isinstance(res_cur, dict) or hasattr( res_cur, '__dict__') ):
+        print( f'{total_size(res_cur) / units:.4f}' )
+        return
+    if hasattr( res_cur, '__dict__') :
+        res_cur = res_cur.__dict__
     sz = 0
     keys = list(res_cur.keys() )
     sz_per_key = [0] * len(keys)
@@ -750,7 +755,8 @@ def printSizeInfo(res_cur,depthcur=0,depthleft=0, units=1024**2):
 
     print(f'{indent}Sorted subparts')
     for k,s in  sorted( zip(keys,sz_per_key), key=lambda x: x[1], reverse=1 ) :
-        print(f'{indent}{s/ units:.4f} Mb -- size of {k}' )
+        if s/units >= minsize:
+            print(f'{indent}{s/ units:.4f} Mb -- size of {k}' )
 
 
 from collections.abc import Iterable
@@ -909,7 +915,8 @@ def multiLevelDict2TupleList(d,min_depth=0,max_depth=99999, cur_depth = 0):
             continue
     return r
 
-def groupOutputs(output_per_raw, prefixes = None, label_groupings=None, int_types_sets=None, filter_by_spec=None):
+def groupOutputs(output_per_raw, prefixes = None, label_groupings=None,
+                 int_types_sets=None, filter_by_spec=None, printLog=False):
     '''
     convert multilevel dict with specific possible keys to a list of tuples
     with dictionaries at the end of each tuple
@@ -949,6 +956,9 @@ def groupOutputs(output_per_raw, prefixes = None, label_groupings=None, int_type
                 kvs += [oo[spec_ind]]
             #key = ','.join(kvs)
             key = tuple(kvs)
-            print(oo[:-1], 'turns into ',key,spec_cur)
-            outputs_grouped[key] = tuple(spec_cur), oo[-1]
+            if printLog:
+                print(oo[:-1], 'turns into ',key,spec_cur)
+            if key not in outputs_grouped:
+                outputs_grouped[key] = []
+            outputs_grouped[key] += [ tuple(spec_cur), oo[-1] ]
     return outputs_grouped

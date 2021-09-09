@@ -32,6 +32,9 @@
                 ]
             }
         },
+        "task_per_medcond": 
+        {"off": ["hold","move"], 
+          "on": ["hold","move"]},
         "dbs_system": "medtronic",
         "lfpchan_used_in_paper": "LFPR12",
         "lfpchan_selected_by_pipeline": "LFPR12",
@@ -66,6 +69,7 @@
                 ]
             }
         },
+        "task_per_medcond": {"off": ["hold","move"], "on": ["hold","move"]},
         "dbs_system": "medtronic",
         "lfpchan_used_in_paper": "LFPR12",
         "lfpchan_used_in_paper2": "LFPL12",
@@ -122,6 +126,7 @@
         "bad_lfp": [
             "LFPR01"
         ],
+        "task_per_medcond": {"off": ["hold","move"]},
         "dbs_system": "medtronic",
         "lfpchan_used_in_paper": "LFPR01",
         "move_side": "left",
@@ -184,6 +189,7 @@
             "LFPL01",
             "LFPL12"
         ],
+        "task_per_medcond": {"off": ["hold","move"], "on": ["hold","move"]},
         "dbs_system": "medtronic",
         "lfpchan_used_in_paper": "LFPL12",
         "lfpchan_selected_by_pipeline": "LFPR01",
@@ -225,6 +231,7 @@
                 ]
             }
         },
+        "task_per_medcond": {"off": ["hold","move"], "on": ["hold","move"]},
         "dbs_system": "medtronic",
         "lfpchan_used_in_paper": "LFPL01",
         "move_side": "right",
@@ -279,6 +286,7 @@
         "bad_lfp": [
             "LFPR23"
         ],
+        "task_per_medcond": {"off": ["hold","move"], "on": ["hold","move"]},
         "dbs_system": "medtronic",
         "lfpchan_used_in_paper": "LFPR12",
         "move_side": "left",
@@ -312,6 +320,7 @@
                 ]
             }
         },
+        "task_per_medcond": {"off": ["hold","move"], "on": ["hold","move"]},
         "dbs_system": "medtronic",
         "lfpchan_used_in_paper": "LFPL23",
         "lfpchan_selected_by_pipeline": "LFPR12",
@@ -339,6 +348,7 @@
                 "move": []
             }
         },
+        "task_per_medcond": {"off": ["rest"], "on": ["rest"]},
         "dbs_system": "boston_sc",
         "lfpchan_used_in_paper": "LFPR67",
         "lfpchan_used_in_paper2": "LFPL56",
@@ -363,6 +373,7 @@
                 "move": []
             }
         },
+        "task_per_medcond": {"off": ["rest"]}, 
         "dbs_system": "boston_sc",
         "lfpchan_used_in_paper": "LFPL56",
         "tremfreq": 5,
@@ -390,6 +401,7 @@
                 ]
             }
         },
+        "task_per_medcond": {"off": ["move","rest"]}, 
         "dbs_system": "PC+S",
         "lfpchan_used_in_paper": "LFPL23",
         "move_side": "right",

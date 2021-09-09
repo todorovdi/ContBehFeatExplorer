@@ -9,4 +9,4 @@ lastfile=slurmout/"$lastfile"
 #lastfile=`find slurmout -maxdepth 1 -not -type d | tail -1`
 echo ":::Showing end of lastfile=$lastfile"
 echo ""
-vim ${lastfile[0]} 
+vim -R ${lastfile[0]} 

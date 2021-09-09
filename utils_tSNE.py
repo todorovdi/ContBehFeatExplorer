@@ -1325,7 +1325,9 @@ def findByPrefix(data_dir, rawname, prefix, ftype='PCA',regex=None, ret_aux=0):
         regex = '{}_{}_{}_[0-9]+chs_nfeats([0-9]+)_pcadim([0-9]+).*'.format(rawname, prefix,ftype)
     fnfound = []
     match_infos = []
+    ntot = 0
     for fn in os.listdir(data_dir):
+        ntot += 1
         r = re.match(regex,fn)
         if r is not None:
             #n_feats,PCA_dim = r.groups()
@@ -1335,6 +1337,7 @@ def findByPrefix(data_dir, rawname, prefix, ftype='PCA',regex=None, ret_aux=0):
             if ret_aux:
                 match_infos += [r]
             fnfound += [fn]
+    print(f'findByPrefix: selected {len(fnfound)} files among {ntot}')
     if ret_aux:
         return fnfound, match_infos
     return fnfound
@@ -1717,8 +1720,12 @@ def mergeAnnBinArrays(ivalis_tb_indarrays):
 #    return spec
 
 def sprintfPerfs(perfs):
-    p = np.array(perfs) * 100
-    perfs_str = '{:.2f}%,{:.2f}%,{:.2f}%'.format(p[0], p[1], p[2])
+    p = np.array(list(perfs) ) * 100
+    perfs_str = '{:.2f}%'.format(p[0])
+    if len(perfs) > 1:
+        perfs_str += ',{:.2f}%'.format(p[1])
+    if len(perfs) > 2:
+        perfs_str += ',{:.2f}%'.format(p[2])
     return perfs_str
 
 
@@ -1825,17 +1832,32 @@ def getClfPredPower(clf,X,class_labels,class_ind, label_ids_order = None,
     # ordering: sorted(set()+set())
     confmat = confusion_matrix(class_labels, preds, labels=label_ids_order)
 
-    #tn, fp, fn, tp = confusion_matrix([0, 1, 0, 1], [1, 1, 1, 0]).ravel()
+    ##tn, fp, fn, tp = confusion_matrix([0, 1, 0, 1], [1, 1, 1, 0]).ravel()
+    from sklearn.metrics import recall_score
+    #sens_sk = recall_score(class_labels, preds)
 
+    #recall_per_class = recall_score(class_labels, preds,
+    #                                average = None, labels=label_ids_order)
 
     ind_to_check = class_ind
-    # mask of really positive
-    mask = (np.array(class_labels,dtype=int) == np.array(ind_to_check,dtype=int ) )
-    # mask of really negative
-    mask_inv = np.logical_not(mask)
+    ## pos_actual of really positive
+    pos_actual = (np.array(class_labels,dtype=int) == \
+                  int(ind_to_check) )
+    ## mask of really negative
+    neg_actual = np.logical_not(pos_actual)
 
-    if np.sum(mask) == 0 or np.sum(mask_inv) == 0:
-        s = f'one of masks is bad {np.sum(mask)}, {np.sum(mask_inv)}'
+    bin_ver = np.zeros( len(class_labels), dtype=int )
+    bin_ver[pos_actual] = 1
+    bin_ver[neg_actual] = 0
+    bin_ver_pred = np.zeros( len(class_labels), dtype=int )
+    bin_ver_pred[preds == ind_to_check] = 1
+    bin_ver_pred[preds != ind_to_check] = 0
+    ## yes, I want 1,0
+    recall_per_class_bin = recall_score(bin_ver, bin_ver_pred,
+                                    average = None, labels=[1,0])
+
+    if np.sum(pos_actual) == 0 or np.sum(neg_actual) == 0:
+        s = f'one of masks is bad {np.sum(pos_actual)}, {np.sum(neg_actual)}'
         print('getClfPredPower: WARNING {}'.format(s) )
         #raise ValueError(s)
         sens = np.nan
@@ -1844,33 +1866,33 @@ def getClfPredPower(clf,X,class_labels,class_ind, label_ids_order = None,
     else:
         ntot = len(class_labels)
 
-        #X_P = X[mask]
+        #X_P = X[pos_actual]
         #Pos = clf.predict(X_P)
-        #Pos = preds[mask]
+        #Pos = preds[pos_actual]
         #TP = sum(Pos == ind_to_check)
         #sens = TP / len(Pos)
 
         predicted_pos = (preds == ind_to_check)
-        TP = sum(predicted_pos & mask)
-        sens = TP / sum(mask)
+        TP = sum(predicted_pos & pos_actual)
+        sens = TP / sum(pos_actual)
 
-        #X_N = X[mask_inv]
+        #X_N = X[neg_actual]
         #Neg = clf.predict(X_N)
-        #Neg = preds[mask_inv]
+        #Neg = preds[neg_actual]
         #TN = sum(Neg != ind_to_check)
         #spec = TN / len(Neg)
         #spec = specificity_score(y_true,y_pred)
 
         predicted_neg = (preds != ind_to_check)
-        TN = sum(predicted_neg & mask_inv)
-        spec = TN / sum(mask_inv)
+        TN = sum(predicted_neg & neg_actual)
+        spec = TN / sum(neg_actual)
 
         #FP = len(Pos) - TP
         #FN = len(Neg) - TN
         #F1 =  TP / (TP + 0.5 * ( FP + FN ) )
 
-        FP = sum(mask) - TP
-        FN = sum(mask_inv) - TN
+        FP = sum(pos_actual) - TP
+        FN = sum(neg_actual) - TN
         F1 =  TP / (TP + 0.5 * ( FP + FN ) )
 
         #if printLog:
@@ -1888,11 +1910,18 @@ def getClfPredPower(clf,X,class_labels,class_ind, label_ids_order = None,
     return sens,spec, F1, confmat
 
 def _getPredPower_singleFold(arg):
+    from xgboost import XGBClassifier
     from numpy.linalg import LinAlgError
     (fold_type,clf,add_clf_creopts,add_fitopts,X_train,X_test,y_train,y_test,class_ind,printLog)  = arg
     model_cur = type(clf)(**add_clf_creopts)  # I need num LDA compnents I guess
     try:
-        model_cur.fit(X_train, y_train, **add_fitopts)
+        if isinstance(clf, XGBClassifier):
+            #print('WEIGHTS COMPUTED')
+            from sklearn.utils.class_weight import compute_sample_weight
+            class_weights = compute_sample_weight('balanced', y_train)
+            model_cur.fit(X_train, y_train, **add_fitopts, sample_weight=class_weights)
+        else:
+            model_cur.fit(X_train, y_train, **add_fitopts)
         perf_cur = getClfPredPower(model_cur,X_test,y_test,
                                     class_ind, printLog=printLog)
         if printLog:
@@ -1907,10 +1936,11 @@ def _getPredPower_singleFold(arg):
 
 def getPredPowersCV(clf,X,class_labels,class_ind, printLog = False, n_splits=None,
                     ret_clf_obj=False, skip_noCV =False, add_fitopts={},
-                   add_clf_creopts ={}, train_on_shuffled =True, seed=0 ):
+                   add_clf_creopts ={}, train_on_shuffled =True, seed=0,
+                    label_groups=None ):
     # clf is assumed to be already fitted on entire training data here
     # TODO: maybe I need to adapt for other classifiers
-    # ret = [perf_nocv, perfs_CV, perf_aver, confmat_aver ] and maybe list of classif objects
+    # ret = [perf_nocv, perfs_CV, perf_aver, confmat_avGroupKFolder ] and maybe list of classif objects
     # obtained during CV
     ret = []
     from globvars import gp
@@ -1926,13 +1956,20 @@ def getPredPowersCV(clf,X,class_labels,class_ind, printLog = False, n_splits=Non
     retcur = {}
     retcur['perf_nocv'] = perf_nocv
 
+    y = class_labels
+
     #for model_cur in cv_results['estimator']
     if n_splits is not None:
         #if n_KFold_splits is not None:
-        from sklearn.model_selection import KFold
+        from sklearn.model_selection import KFold,GroupKFold
         from sklearn.model_selection import train_test_split
-        kf = KFold(n_splits=n_splits, shuffle=True, random_state=seed)
-        split_res = kf.split(X)
+        if label_groups is None:
+            kf = KFold(n_splits=n_splits, shuffle=True, random_state=seed)
+            split_res = kf.split(X,y)
+        else:
+            assert len(label_groups) == len(class_labels), (len(label_groups), len(class_labels) )
+            kf = GroupKFold(n_splits=n_splits)  # no shuffling is possible here
+            split_res = kf.split(X,y,groups=label_groups)  # trains on some groups then tests on other
 
         n_jobs_perrun = add_clf_creopts.get('n_jobs', 1)
 
@@ -2017,6 +2054,9 @@ def getPredPowersCV(clf,X,class_labels,class_ind, printLog = False, n_splits=Non
         not_nan_fold_inds = np.where(  np.max( np.isnan(perfarr).astype(int) , axis= 1) == 0 )[0]
         assert len(not_nan_fold_inds) > 0
         perf_aver = np.mean(perfarr[not_nan_fold_inds] , axis = 0)
+        # it is bad to averge non-normalized confmat. But I still keep full
+        # ones as well
+        confmats = [ confmatNormalize(cm, 'true') for cm in confmats ]
         confmat_aver =  np.mean( confmats, axis=0 )
         #ret = [perf_nocv, perfs_CV, perf_aver, confmat_aver ]
         retcur['perfs_CV'] = perfs_CV
@@ -2137,7 +2177,8 @@ def calcLDAVersions(X_to_fit, X_to_transform, class_labels,n_components_LDA,
     lda_aver.coef_ = coef_aver
     lda_aver.intercept_ = intercept_aver
 
-    sens_avCV,spec_avCV,F1_avCV, confmat_avCV = getClfPredPower(lda_aver,X_to_fit, class_labels, class_ind_to_check)
+    sens_avCV,spec_avCV,F1_avCV, confmat_avCV = \
+        getClfPredPower(lda_aver,X_to_fit, class_labels, class_ind_to_check)
     print('-- LDA avCV on train sens {:.2f} spec {:.2f} F1 {:.2f}'.format(sens_avCV,spec_avCV,F1_avCV) )
 
     #perf_nocv_LDA_avCV, results_LDA_avCV, res_aver_LDA_avCV, confmat_av_avCV, ldas_CV_avCV = \
@@ -2483,14 +2524,15 @@ def makeClassLabels(sides_hand, grouping, int_types_to_distinguish,
 
     # if I don't want to classify against points I am not sure about (that
     # don't have a definite label)
+    inds_not_neut = None
     if rem_neut:
         neq = class_labels_good != gp.class_id_neut
-        inds = np.where( neq)[0]
-        class_labels_good = class_labels_good[inds]
+        inds_not_neut = np.where( neq)[0]
+        class_labels_good = class_labels_good[inds_not_neut]
     #else:
     #    classes = ['neut'] + classes  # will fail if run more than once
 
-    return class_labels, class_labels_good, revdict, class_ids_grouped
+    return class_labels, class_labels_good, revdict, class_ids_grouped, inds_not_neut
 
 def countClassLabels(class_labels_good, class_ids_grouped=None,revdict=None):
     assert revdict is not None or (class_ids_grouped is not None)
@@ -2571,7 +2613,7 @@ def getScoresPerClass(class_ids,scores, ret_bias=False):
         lblinds = range(scores.shape[1] )
     else:
         raise ValueError(f'Wrong ndim, {scores.shape}')
-    assert scores.shape[0] == len(class_ids)
+    assert scores.shape[0] == len(class_ids), (scores.shape[0], len(class_ids) )
     r = np.zeros( (len(lblinds) ,scores.shape[-1] - 1 ) )
     biases = np.zeros( len(lblinds) )
     for lblind in lblinds:
@@ -2581,21 +2623,24 @@ def getScoresPerClass(class_ids,scores, ret_bias=False):
         if scores.ndim == 3:
             # XGB doc: Note the final column is the bias term
             sc = scores[ptinds,lblind,0:-1]
+            bias_cur = np.mean(scores[ptinds,lblind,-1] )
         elif scores.ndim == 2:
             # XGB doc: Note the final column is the bias term
             sc = scores[ptinds,0:-1]
+            bias_cur = np.mean(scores[ptinds,-1] )
         scores_cur = np.mean(sc, axis=0)
         r[lblind,:]  = scores_cur
 
-        bias_cur = np.mean(scores[ptinds,-1] )
         biases[lblind] = bias_cur
     rr = r
     if ret_bias:
         rr = r,biases
     return rr
 
-def sklearn_vif(X, exogs,n_jobs):
+def sklearn_VIF(X, exogs,n_jobs, VIF_thr=10, search_worst=True,
+                return_obj = 'no'):
     from sklearn.linear_model import LinearRegression
+    import gc
     # data is nbins, nchans x
     # exogs -- indeices of chans
 
@@ -2604,6 +2649,13 @@ def sklearn_vif(X, exogs,n_jobs):
 
     # initialize dictionaries
     vif_dict, tolerance_dict = {}, {}
+    if return_obj == 'no':
+        linreg_dict = None
+    else:
+        linreg_dict = {}
+
+    worst_VIF = -1
+    worst_VIF_exog = -1
 
     # form input data for each exogenous variable
     for exog in exogs:
@@ -2613,7 +2665,8 @@ def sklearn_vif(X, exogs,n_jobs):
         #print(Xcur.shape,ycur.shape)
 
         # extract r-squared from the fit
-        r_squared = LinearRegression(n_jobs=n_jobs).fit(Xcur, ycur).score(Xcur, ycur)
+        linreg = LinearRegression(n_jobs=n_jobs)
+        r_squared = linreg.fit(Xcur, ycur).score(Xcur, ycur)
 
         # can happen on test data
         if 1 - r_squared < 1e-10:
@@ -2627,43 +2680,80 @@ def sklearn_vif(X, exogs,n_jobs):
         # calculate tolerance
         tolerance = 1 - r_squared
         tolerance_dict[exog] = tolerance
-    #    The cutoff to detect multicollinearity: VIF > 10 or Tolerance < 0.1
-    return vif_dict,tolerance_dict
 
-def findBadColumnsVF(X,vf_thr=10,n_jobs=-1):
+
+        if return_obj == 'all':
+            linreg_dict[exog] = linreg
+
+        if vif > worst_VIF :
+            worst_VIF = vif
+            worst_VIF_exog = exog
+            if return_obj == 'worst':
+                # we want to forget the others (to save mem)
+                linreg_dict = {exog:linreg}
+
+        if not search_worst and vif > VIF_thr:
+            break
+
+        gc.collect()
+    #    The cutoff to detect multicollinearity: VIF > 10 or Tolerance < 0.1
+    return vif_dict,tolerance_dict,linreg_dict
+
+def findBadColumnsVIF(X,VIF_thr=10,n_jobs=-1, search_worst=False, featnames=None):
     # finds iteratively what to get rid of
     #for coi,col_ind in enumerate(col_ordering):
+    # search_worst -- whether we throw away worst or just first bad
+    # order in colinds_bad, vfs_list and lingreg_obj is the same
+    # colind_bad is the index in global numbering
+    if featnames is not None:
+        assert len(featnames) == X.shape[1]
     import gc;
     colinds_all = np.arange(X.shape[1])
     colinds_bad = []
     vfs_list = []
+    featsets_list = []
+    linreg_objs = []
     for iter_num in colinds_all:
         colinds_good = np.setdiff1d(np.arange(X.shape[1]),colinds_bad)
+        featsets_list += [colinds_good]
         Xcur = X[:,colinds_good]
-        vfs,_ = sklearn_vif(Xcur, np.arange(Xcur.shape[1]),n_jobs=n_jobs)
+        vfs,tol_dict,linreg_dict = sklearn_VIF(Xcur, np.arange(Xcur.shape[1]),
+                            n_jobs=n_jobs, VIF_thr=VIF_thr,
+                            search_worst=search_worst, return_obj='worst')
         gc.collect()
         vfs_list += [vfs]
         keys,values = zip(*vfs.items())
         mi = np.argmax(values)
         vf_worst = values[mi]
+        linreg_obj = linreg_dict[mi]
+        linreg_objs += [linreg_obj]
+
+        colind_bad = colinds_good [keys[mi] ]
+
+        featname_info = ''
+        if featnames is not None:
+            featname_info = featnames[colind_bad]
         print(f'findBadColumnsVF: iter_num={iter_num} '
               f'len(colinds_bad)={len(colinds_bad)}/{len(colinds_all)} '
-              f'worst VF is {vf_worst}')
-        if vf_worst >= vf_thr:
-            colind_bad = colinds_good [keys[mi] ]
+              f'worst(-ish) VIF is {vf_worst} for ind={colind_bad}{featname_info} (search_worst={search_worst})', flush=True)
+        if vf_worst >= VIF_thr:
             colinds_bad += [colind_bad]
         else:
             break
+
+        gc.collect()
 
     if len(colinds_bad) == 0:
         cols_good = colinds_all
     else:
         cols_good = np.setdiff1d(colinds_all,colinds_bad)
-    return colinds_bad,cols_good, vfs_list
+    return colinds_bad,cols_good, vfs_list, featsets_list, linreg_objs
 
 def selFeatsBoruta(X,y,verbose = 2,add_clf_creopts=None, n_jobs = -1, random_state=0):
     from boruta import BorutaPy
     from xgboost import XGBClassifier
+    #from sklearn.utils.class_weight import compute_sample_weight
+    #class_weights = compute_sample_weight('balanced', y)
 
     ######
 
@@ -2679,7 +2769,8 @@ def selFeatsBoruta(X,y,verbose = 2,add_clf_creopts=None, n_jobs = -1, random_sta
     ##########
 
     # define Boruta feature selection method
-    feat_selector = BorutaPy(clf_XGB, n_estimators='auto', verbose=verbose, random_state=random_state)
+    feat_selector = BorutaPy(clf_XGB, n_estimators='auto',
+                             verbose=verbose, random_state=random_state)
 
     # find all relevant features - 5 features should be selected
     feat_selector.fit(X, y)
@@ -2701,7 +2792,8 @@ def selFeatsBoruta(X,y,verbose = 2,add_clf_creopts=None, n_jobs = -1, random_sta
 #    return chnames
 
 
-def selBestLFP(output_cur, clf_type = 'XGB', chnames_LFP = None, s= '' ):
+def selBestLFP(output_cur, clf_type = 'XGB', chnames_LFP = None, s= '',
+               featnames=None, nperfs = 2):
     #output_cur = output_per_int_types[int_type]
     #s = '{}:{}:{}:{}'.format(k,prefix,grouping,int_type)
     #s = '{}:{}:{}:{}'.format(ki,prefix,grouping,int_type)
@@ -2709,17 +2801,17 @@ def selBestLFP(output_cur, clf_type = 'XGB', chnames_LFP = None, s= '' ):
     featnames = output_cur['feature_names_filtered']
     if chnames_LFP is None:
         from featlist import getChnamesFromFeatlist
-        chnames_LFP = featlist.getChnamesFromFeatlist(featnames, mod='LFP')
+        chnames_LFP = getChnamesFromFeatlist(featnames, mod='LFP')
 
     anvers = output_cur['{}_analysis_versions'.format(clf_type)]
     anver_full = anvers['all_present_features']
     if 'CV_aver' in anver_full:
-        perfs_full = anver_full['CV_aver']['perfs'][:3]   # exclude conf matrix
+        perfs_full = anver_full['CV_aver']['perfs']   # exclude conf matrix
     else:
-        perfs_full = anver_full['perf_dict']['perf_aver'][:3]   # exclude conf matrix
+        perfs_full = anver_full['perf_dict']['perf_aver']   # exclude conf matrix
 
-    perfs_full = np.array(perfs_full)
-    perfs_str_full = sprintfPerfs(perfs_full)
+    perfs_str_full = sprintfPerfs(perfs_full[:3])
+    perfs_full = np.array(perfs_full[:nperfs])
     print('selBestLFP {}:: Full avCV perfs {}'.format(s,perfs_str_full))
     pdrop = {}
     for chn in chnames_LFP:
@@ -2728,22 +2820,22 @@ def selBestLFP(output_cur, clf_type = 'XGB', chnames_LFP = None, s= '' ):
         if anver is None:
             print(f'selBestLFP: {chn} anver is None')
             break
-        #perfs = [p[:3] for p in anver['CV']['CV_perfs'] ]
-        #perfs = [p[:3] for p in anver['CV']['CV_perfs'] ]
+        #perfs = [p[:nperfs] for p in anver['CV']['CV_perfs'] ]
+        #perfs = [p[:nperfs] for p in anver['CV']['CV_perfs'] ]
         if 'CV_aver' in anver:
-            perfs = anver['CV_aver']['perfs'][:3]
+            perfs = anver['CV_aver']['perfs']
         else:
-            perfs = anver['perf_dict']['perf_aver'][:3]
-        perfs = np.array(perfs)
+            perfs = anver['perf_dict']['perf_aver']
 
         #print(perfs_full, perfs)
-        perfs_str = sprintfPerfs(perfs)
+        perfs_str = sprintfPerfs(perfs[:3] )
+        perfs = np.array(perfs[:nperfs] )
 
         print('selBestLFP {}:: No {} avCV perfs {}'.format(s,chn,perfs_str))
-        perf_drop = perfs_full - perfs
+        perf_drop = perfs_full[:nperfs] - perfs
 
         pdrop[chn] = perf_drop
-        print('selBestLFP:  Perf drop: ', sprintfPerfs(perf_drop) )
+        print(f'selBestLFP: no {chn} perf drop: {sprintfPerfs(perf_drop)}' )
     if len(pdrop) == 0:
         pdrop = None
         winning_chan = None
@@ -2800,11 +2892,13 @@ def chooseBestLFPchan(pdrop, chnames_LFP):
 def selLFP_calcPerfDrops_multi(output_per_raw, rawnames_to_use = None, groupings_to_use = None,
                          prefixes_to_use = None, clf_type = 'XGB' ):
     perf_drops = {}
+    from featlist import getChnamesFromFeatlist
     # if all raws were processed together, they'll have same performances saved, no need to repeat
     if rawnames_to_use is None:
         rawnames_to_use = output_per_raw.keys()
 
     perf_drops_res = {}
+    best_chans = {}
 
     #for k in output_per_raw:
     for ki,k in enumerate(rawnames_to_use):
@@ -2864,9 +2958,145 @@ def selLFP_calcPerfDrops_multi(output_per_raw, rawnames_to_use = None, groupings
                     else:
                         winning_chan = chooseBestLFPchan(perf_drops[s], chnames_LFP)
 
-                best_chans[rawn][prefix][grouping][int_type] = winning_chan
+                best_chans[k][prefix][grouping][int_type] = winning_chan
 
 
                     #print(lda_anver.keys())
 
     return perf_drops, best_chans
+
+def genParList(param_grids, keys=None):
+    # taken from sklearn CV
+    #print('fds')
+    if not isinstance(param_grids,list):
+        param_grids = [param_grids]
+    from itertools import product
+    for p in param_grids:
+
+        # Always sort the keys of a dictionary, for reproducibility
+        if keys is None:
+            keys = p.keys()
+
+        items = [(k,v) for k,v in p.items() if k in keys]
+        items = sorted(items)
+        if items is None:
+            yield {}
+        else:
+            keys, values = zip(*items)
+            for v in product(*values):
+                params = dict(zip(keys, v))
+                yield params
+
+def gridSearch(dtrain, params, param_grids, keys, num_boost_round=100,
+              early_stopping_rounds=10, nfold=5, seed=0, shuffle=True,
+               printLog = False, main_metric = 'mae'):
+    search_grid_cur = list ( genParList(param_grids, keys) )
+    # Define initial best params and MAE
+    import xgboost
+    from time import time
+
+
+    min_mae = float("Inf")
+    best_params = None
+    cv_results_best = None
+    for pd in search_grid_cur:
+        params_cur = dict(params.items()) #copy
+
+        for k in ['use_label_encoder', 'importance_type', 'n_estimators']:
+            if k in params_cur:
+                del params_cur[k]
+
+
+        for parname,parval in pd.items():
+            params_cur[parname] = parval
+
+        #print(params_cur)
+
+        time_start = time()
+        #metrics = {'mae','rmse','logloss'}
+        if main_metric == 'mlogloss':
+            second_metric = 'merror'
+        else:
+            second_metric = 'mae'
+        metrics = {main_metric, second_metric}
+        cv_results = xgboost.cv(params_cur,
+            dtrain,
+            num_boost_round=num_boost_round,
+            seed=seed,
+            nfold=nfold, shuffle=shuffle,
+            metrics=metrics,
+            early_stopping_rounds=early_stopping_rounds )
+
+
+        time_end = time()
+        time_passed = time_end - time_start
+#         display(cv_results)
+#         return
+
+        # Update best MAE
+        mean_mm = cv_results[f'test-{main_metric}-mean'].min()
+        boost_rounds = cv_results[f'test-{main_metric}-mean'].argmin()
+        mean_secmet = cv_results[f'test-{second_metric}-mean'].min()
+        if printLog:
+            print(f"{pd} \t{main_metric}: mae={mean_secmet:.4f} for {boost_rounds} rounds, {time_passed:.3f}s", flush=True)
+        if mean_mm < min_mae:
+            min_mae = mean_mm
+            best_params = pd
+            cv_results_best = cv_results
+    return best_params, cv_results_best
+
+def gridSearchSeq(X,y,params,search_grid,param_list_search_seq,
+                  num_boost_round=100,
+              early_stopping_rounds=10, nfold=5, seed=0, shuffle=True,
+                  printLog=False, sel_num_boost_round = False,
+                  main_metric='mae', test_dataset_prop = 0.2):
+
+    assert X.shape[0] == len(y), (X.shape[0], len(y)  )
+
+    from sklearn.model_selection import train_test_split
+    import xgboost as xgb
+    X_train, X_test, y_train, y_test =\
+        train_test_split(X,y,test_size=test_dataset_prop, random_state=seed,
+                         shuffle=True)
+    #assert len(set(y_train) ) == len(set(
+
+    dtrain = xgb.DMatrix(X, y)
+
+    best_params_list = []
+    cv_resutls_best_list = []
+    params_mod = dict( params.items() )
+    for parlist in param_list_search_seq:
+        best_params,cv_results_best= gridSearch(dtrain, params_mod,
+                search_grid, parlist, num_boost_round = num_boost_round,
+                early_stopping_rounds = early_stopping_rounds,
+                nfold=nfold, seed=seed, printLog= printLog, main_metric=main_metric )
+        best_params_list += [best_params]
+        cv_resutls_best_list += [cv_results_best]
+        params_mod.update(best_params)
+    params_final = params_mod
+
+
+    num_boost_round_best = None
+    if sel_num_boost_round:
+        dtrain = xgb.DMatrix(X_train, y_train)
+        dtest  = xgb.DMatrix(X_test,  y_test)
+        #evals=[(dtest, "Test")],
+
+        params_cur = dict(params_mod.items()) #copy
+        for k in ['use_label_encoder', 'importance_type', 'n_estimators']:
+            if k in params_cur:
+                del params_cur[k]
+
+
+        model = xgb.train( params_cur,
+                dtrain, num_boost_round=num_boost_round,
+                evals=[(dtest, "Test")],
+                early_stopping_rounds=early_stopping_rounds,
+                verbose_eval = printLog)
+        num_boost_round_best = model.best_iteration + 1
+        params_final['n_estimators'] = num_boost_round_best
+        if printLog:
+            print("boost rounds sel: best score: {:.2f} in {} rounds".format(model.best_score,
+                                                                             num_boost_round_best))
+
+    return params_final, best_params_list, cv_resutls_best_list, num_boost_round_best

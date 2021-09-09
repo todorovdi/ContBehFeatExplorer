@@ -351,6 +351,8 @@ def parseMEGsrcChnameShort(chn):
 
 
 def getMEGsrc_chname_nice(chn, roi_labels=None, keyorder=None, preserve_prefix = False):
+    # keyorder is needed to convert the number in the channel name to the
+    # number we want to see in the nicened version
     name = chn
     if chn.find('HirschPt2011') >= 0:  # old vere
         r = re.match( ".*_([0-9]+)", chn ).groups()
@@ -584,8 +586,11 @@ def filterFavChnames(chnames,subj):
 
     return chnames_new
 
-def getParamsFromRawname(rawname):
-    r = re.match( "(S\d{2})_(.+)_(.+)*", rawname ).groups()
+def getParamsFromRawname(rawname,allow_long_subjinds=True):
+    if allow_long_subjinds:
+        r = re.match( "(S\d{2,3})_(.+)_(.+)*", rawname ).groups()
+    else:
+        r = re.match( "(S\d{2})_(.+)_(.+)*", rawname ).groups()
     subjstr = r[0]
     medcond = r[1]
     task = r[2]
@@ -2215,7 +2220,7 @@ def ann2ivalDict(anns):
             tpl = an['onset'], an['onset']+ an['duration'], descr
             ivalis[descr] += [ tpl  ]#bandnames = ['tremor', 'beta', 'gamma', 'allf']
     # can happen due to use of different MNE versions
-    except AttributeError as e:
+    except (AttributeError,TypeError) as e:
         nanns = len(anns.onset)
         for i in range(nanns ):
             descr = anns.description[i]
@@ -3548,7 +3553,7 @@ def parseIntervalName(interval_name):
                 r['interval_type'] = 'beh_state'
                 r['beh_state_type'] = itp
                 r['body_side'] = side
-                r['brain_side'] = getOppositeSide(side )
+                r['brain_side'] = getOppositeSideStr(side )
 
     return r
 
@@ -4263,12 +4268,67 @@ def genStatsMultiBandFn(rawnames,
 def genMLresFn(rawnames, sources_type, src_file_grouping_ind, src_grouping,
             prefix, n_channels, nfeats_used,
                 pcadim, skip, windowsz,use_main_LFP_chan,
-               grouping_key,int_types_key, nr=None, regex_mode=False):
+               grouping_key,int_types_key, nr=None, regex_mode=False,
+               smart_rawn_grouping = False, rawname_format= 'subj',
+               custom_rawname_str=None):
+    #rawname_format = 'subj,medcond,task'
 
     if nr is None:
         nr = len(rawnames)
-    sind_str_list_sorted = list( sorted( set([rawn[0:3] for rawn in rawnames] ) ))
-    sind_join_str = ','.join(sind_str_list_sorted )
+
+    ml = np.max( [len(rn) for rn in rawnames ] )
+
+    if custom_rawname_str is None:
+        if ml>4 and not regex_mode:
+            import utils_preproc as upre
+            subjs_analyzed, subjs_analyzed_glob = \
+                upre.getRawnameListStructure(rawnames, ret_glob=True)
+            medconds = subjs_analyzed_glob['per_medcond'].keys()
+            subjs = subjs_analyzed_glob['subject_list']
+            if smart_rawn_grouping:
+                if len(subjs) == 1:
+                    tpmc = gv.gen_subj_info[ subjs[0] ]['task_per_medcond']
+                    all_medconds = tpmc.keys()
+                    if set(all_medconds) == set(medconds):
+                        set_complete = True
+                        for mc in all_medconds:
+                            set_complete &= \
+                                set( subjs_analyzed[subjs[0] ][mc]['tasks'] ) == \
+                                    set( tpmc[mc] )
+
+            str_list_sorted = []
+            rawname_format_items = rawname_format.split(',')
+            #print(rawname_format_items,subjs)
+            if 'subj' in rawname_format_items:
+                if 'medcond' in rawname_format_items:
+                    if 'task' in rawname_format_items:
+                        str_list_sorted = rawnames
+                    else:
+                        for subj in sorted(subjs):
+                            #print(subjs_analyzed[subj])
+                            for mc in subjs_analyzed[subj]['medconds']:
+                                str_list_sorted += [ f'{subj}_{mc}' ]
+                if 'medcond_glob' in rawname_format_items:
+                    str_list_sorted = [','.join(subjs) + '_' + ','.join(medconds)]
+
+
+                if 'task' == rawname_format_items[1]:
+                    for subj in sorted(subjs):
+                        for task in subjs_analyzed[subj]['tasks']:
+                            str_list_sorted += [ f'{subj}_{task}' ]
+                #else:
+                #    str_list_sorted = list( sorted( subjs ) )
+            else:
+                raise ValueError(f'not implemented {rawname_format_items}')
+            # gen_subj_info on it
+            #import re; regex = re.compile('S[0-9]+')
+        else:
+            str_list_sorted = rawnames
+
+        #str_list_sorted = list( sorted( set([rawn[0:3] for rawn in rawnames] ) ))
+        sind_join_str = ','.join(str_list_sorted )
+    else:
+        sind_join_str = custom_rawname_str
     out_name_templ = '_{}_grp{}-{}_{}ML_nr{}_{}chs_nfeats{}_pcadim{}_skip{}_wsz{}'
     out_name = (out_name_templ ).\
         format(sources_type, src_file_grouping_ind, src_grouping,

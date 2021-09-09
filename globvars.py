@@ -28,6 +28,7 @@ global subjs_analyzed
 
 global gparams
 global artifact_intervals
+global code_dir
 global data_dir
 global dir_fig
 global dir_fig_preproc
@@ -210,7 +211,7 @@ class globparams:
         #self.int_types_trem_and_mov = ['trem', 'hold', 'move']
         #self.int_types_trem_and_rest = ['trem', 'notrem']
         self.int_types_aux = ['undef', 'holdtrem', 'movetrem']
-        self.subj_strs_all = [ 'S{:02d}'.format(i) for i in range(1,11) ] + ['S97', 'S98', 'S99']
+        self.subj_strs_all = [ 'S{:02d}'.format(i) for i in range(1,11) ] + ['S95', 'S97', 'S98', 'S99']
 
         medconds = ['on', 'off']
         self.subj_medcond_strs_all = []
@@ -231,7 +232,8 @@ class globparams:
                     'merge_nothing':[],
                           'merge_within_task':int_types_all,
                           'merge_within_medcond':int_types_all,
-                          'merge_within_subj':int_types_all     }
+                          'merge_within_subj':int_types_all     ,
+                          'merge_within_medcond_across':int_types_all     }
 
         # I prefer to have globally non-intersecting class ids
         basic_shift = len(int_types_all) * 2 + 10  # just in case
@@ -240,6 +242,10 @@ class globparams:
             self.int_types_aux_cid_shift['subj'] + len(self.subj_strs_all) * 2
         self.int_types_aux_cid_shift['subj_medcond_task'] = \
             self.int_types_aux_cid_shift['subj_medcond'] + len(self.subj_medcond_strs_all) * 2
+        self.int_types_aux_cid_shift['medcond'] = \
+            self.int_types_aux_cid_shift['subj_medcond_task'] + len(self.subj_medcond_task_strs_all) * 2
+        #self.int_types_aux_cid_shift['subj_medcond_task'] = \
+        #    self.int_types_aux_cid_shift['subj_medcond'] + len(self.subj_medcond_strs_all) * 2
 
         self.int_type_datset_rel = list(sorted(self.int_types_aux_cid_shift.keys() ))
 
@@ -255,7 +261,8 @@ class globparams:
                                 'move_vs_quiet':['move','notrem'],
                                  'subj_medcond_task':self.subj_medcond_task_strs_all,
                                  'subj_medcond':self.subj_medcond_strs_all,
-                                 'subj': self.subj_strs_all  }
+                                 'subj': self.subj_strs_all  ,
+                                 'medcond': medconds  }
 
         # in trem_vs_quiet we dont' want merge_movements because it will do
         # nothing and just eat computation time
@@ -267,7 +274,8 @@ class globparams:
                                 'move_vs_quiet': ['merge_nothing'],
                                           'subj_medcond_task': ['merge_within_task'],
                                           'subj_medcond': ['merge_within_medcond'],
-                                          'subj': ['merge_within_subj'] }
+                                          'subj': ['merge_within_subj'],
+                                          'medcond': ['merge_within_medcond_across']}
 
         #motor-related
         self.areas_list_aal_my_guess = ["Precentral", "Rolandic_Oper",

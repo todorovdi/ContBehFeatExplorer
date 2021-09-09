@@ -510,6 +510,7 @@ else:
     extdat_pri                      = [0]*len(rawnames)
     ivalis_pri                      = [0]*len(rawnames)
     anndict_per_intcat_per_rawn    = {}
+    fname_dat_full_pri = [0]*len(rawnames)
 
     aux_info_perraw = {}
     for rawi,rawn in enumerate(rawnames):
@@ -518,6 +519,7 @@ else:
                                     src_grouping)
         fname_dat_full = pjoin(gv.data_dir, input_subdir, fname)
         f = np.load(fname_dat_full, allow_pickle=True)
+        fname_dat_full_pri[rawi] = fname_dat_full
         print('Loading data from ',fname_dat_full)
         # for some reason if I don't do it explicitly, it has int64 type which
         # offends MNE
@@ -1183,8 +1185,9 @@ if not (use_existing_TFR and have_TFR):
 
 
             rawn = rawnames[rawind]
-            dat_for_tfr = utils.imputeInterpArtif(dat_for_tfr.T,  anndict_per_intcat_per_rawn[rawn], \
-                                    chnames_tfr, sfreq=sfreq, in_place=False)
+            artif_cur = anndict_per_intcat_per_rawn[rawn]['artif']
+            dat_for_tfr = utils.imputeInterpArtif(dat_for_tfr.T,  artif_cur['LFP'] + artif_cur['MEG'], \
+                                    chnames_tfr, sfreq=sfreq, in_place=False).T
 
 
             tfrres_,wbd = utils.tfr(dat_for_tfr, sfreq, freqs, n_cycles,
@@ -1202,8 +1205,8 @@ if not (use_existing_TFR and have_TFR):
                 #dat_for_tfr = dat_lfp_hires
                 dat_for_tfr = dat_lfp_hires_pri[rawind]
 
-                dat_for_tfr = utils.imputeInterpArtif(dat_for_tfr.T,  anndict_per_intcat_per_rawn[rawn], \
-                                        subfeature_order_lfp_hires, sfreq=sfreq_hires, in_place=False)
+                dat_for_tfr = utils.imputeInterpArtif(dat_for_tfr.T,  artif_cur['LFP'], \
+                                        subfeature_order_lfp_hires, sfreq=sfreq_hires, in_place=False).T
 
                 print('Starting TFR for LFP HFO data #{} with shape {}'.format(rawind,dat_for_tfr.shape) )
                 tfrres_LFP_,wbd_HFO = utils.tfr(dat_for_tfr, sfreq_hires, freqs_inc_HFO, n_cycles_inc_HFO,
@@ -2450,6 +2453,7 @@ if save_feat:
 
         info['chnames_newsrcgrp_pri'] = subfeature_order_newsrcgrp_pri
         info['chnames_pri'] = subfeature_order_pri
+        info['fname_dat_full_pri'] = fname_dat_full_pri
 
         #r = raws_permod_both_sides[rawname_]
         #using r['src'].ch_names   would be WRONG !

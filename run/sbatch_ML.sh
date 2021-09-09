@@ -9,13 +9,13 @@
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=128
 
-##SBATCH --time=23:00:00
-##SBATCH --partition=batch
-##SBATCH --mem=80G
-
+#SBATCH --time=23:00:00
 #SBATCH --partition=batch
-#SBATCH --time=4:00:00
 #SBATCH --mem=80G
+
+##SBATCH --partition=batch
+##SBATCH --time=4:00:00
+##SBATCH --mem=80G
 
 ## max array size = 256  (as shown by scontrol show config)
 ## 22 decent dataset 

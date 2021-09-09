@@ -1,5 +1,8 @@
 export SLURM_TIME_FORMAT=relative
-sacct -u todorov1 --format JobId,State,Elapsed,Start,End | sed -n '1~2p' 
+FMTSTR=JobId,State,Start,Elapsed,End
+echo $FMTSTR
+sacct -u todorov1 --format $FMTSTR | sed -n '1~2p' | tail -$1
+#sacct -u todorov1 --format JobId,State,Elapsed,Start,End,AveRss,MaxVMSize,MaxVMSizeTask,ReqMem | sed -n '1~2p' 
 
 #sacct -u todorov1 --format JobId,State,Submit,Start,End
 #Submit,

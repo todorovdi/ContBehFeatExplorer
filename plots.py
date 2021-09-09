@@ -19,16 +19,24 @@ def plotStepsWbd(dat_stepped, wbd, sfreq, ax=None):
     plt.fill_betweenx( [ymin,ymax], wbd[0,n-1], wbd[1,n-1], color='yellow', alpha=0.1)
 
 def shadeAnn(ax,anns,ymin,ymax,color='red',alpha=0.2, sfreq=256, skip=32, plot_bins = 0,
-             shift_by_anntype = 1, seed=0 ):
+             shift_by_anntype = 1, seed=0, ann_color_dict = None,
+             intervals_to_plot = None, printLog=False ):
     '''
     plot_bins means X axis is assumed to be bin number (and not times)
+    intervals_to_plot -- have sides
     '''
     cmap = plt.cm.get_cmap('tab20', 20)
     #start,end pairs
-    descrs = list(sorted( set(anns.description)) )
+    descrs = list(dict.fromkeys(anns.description))  # preserveas ordering
     if len(descrs) == 0:
-        print('shadeAnn: empty annotation')
-        return {}
+        if printLog:
+            print('shadeAnn: empty annotation, exiting')
+        return {},[]
+    if intervals_to_plot is not None:
+        #descrs = [d  for d in descrs if d in intervals_to_plot ]
+        descrs = [d for d in intervals_to_plot if d in descrs ]
+
+    #print('shadeAnn lim ',ymin,ymax)
     #print( len(descrs), len(anns) )
     np.random.seed(seed)
     ri0 = np.random.randint(1e6)
@@ -38,10 +46,17 @@ def shadeAnn(ax,anns,ymin,ymax,color='red',alpha=0.2, sfreq=256, skip=32, plot_b
         height = (ymax - ymin ) / len(descrs)
         for i,descr in enumerate(descrs):
             attr = {}
-            attr['color'] = cmap( (ri0 + i*ri1) % 20)
-            attr['ylim'] = ymin + i * height, ymin + (i+1) * height
+            if ann_color_dict is None:
+                attr['color'] = cmap( (ri0 + i*ri1) % 20)
+            else:
+                #print('fff ',descr)
+                attr['color'] = ann_color_dict[descr]
+                #attr['color'] = #cmap( (ri0 + i*ri1) % 20)
+            #attr['ylim'] = ymin + i * height, ymin + (i+1) * height
+            #attr['ylim'] = ymax - attr['ylim'][1], ymax - attr['ylim'][0]
+            attr['ylim'] = ymax - (i+1) * height, ymax - i * height
             attrs_per_descr[descr] = attr
-            #print(descr, attrs_per_descr)
+            #print(descr, attr['ylim'])
             #cmap(3)
 
     #intervals_se_pairs = list( zip( anns.onset, anns.onset + anns.duration ) )
@@ -50,6 +65,8 @@ def shadeAnn(ax,anns,ymin,ymax,color='red',alpha=0.2, sfreq=256, skip=32, plot_b
     for ann in anns:
         pa = ann['onset'],ann['onset'] + ann['duration']
         descr = ann['description']
+        if (intervals_to_plot is not None) and (descr not in intervals_to_plot):
+            continue
         if plot_bins:
             pa = np.array(list(pa)) * sfreq // skip
         attr = attrs_per_descr.get(descr,None)
@@ -57,14 +74,23 @@ def shadeAnn(ax,anns,ymin,ymax,color='red',alpha=0.2, sfreq=256, skip=32, plot_b
             color_cur = attr['color']
             ymin_cur, ymax_cur =  attr['ylim']
         #ax.fill_between( list(pa) , ymin_cur, ymax_cur, facecolor=color_cur, alpha=alpha)
+
+        # I don't want duplicate entries in the legend if we have several intervals of same type
         if descr in descrs_were_shown:
             lab = None
         else:
             lab = descr
-        ax.fill_between( list(pa) , ymin_cur, ymax_cur, facecolor=color_cur, alpha=alpha, label=lab)
-        descrs_were_shown += [descr]
+            #print('fff__ ',descr)
+            descrs_were_shown += [descr]
 
-    return attrs_per_descr
+        ax.fill_between( list(pa) , ymin_cur, ymax_cur,
+                        facecolor=color_cur, alpha=alpha, label=lab)
+
+    #assert tuple(descrs) == tuple(descrs_were_shown)
+    assert set(descrs) == set(descrs_were_shown)
+
+    #return attrs_per_descr, descrs_were_shown
+    return attrs_per_descr, descrs
 
 
 def plotMeansPerIt(ax,anns,means_per_it,chi, sfreq=256, plot_bins=0,
@@ -120,6 +146,8 @@ def plotDataAnnStat(rawnames,dat_pri,times_pri,chnames_pri,
         #nr = dat_pri[0].shape[0]
     nc = len(rawnames)
     fig,axs = plt.subplots(nr,nc,figsize=(nc*ww,nr*hh))
+    if not isinstance(axs,np.ndarray):
+        axs = np.array( [[axs]] )
     axs = axs.reshape((nr,nc))
     for rawi,rawn in enumerate(rawnames):
         for i in range(nr):
@@ -220,13 +248,18 @@ def plotFeatsAndRelDat(rawnames,featnames_sel, dat_pri,chnames_all_pri,
                        wbd_pri=None, extdat_dict = None,
                       dat_hires_pri=None,chnames_all_hires_pri=None,times_hires_pri=None,
                       anndict_per_intcat_per_rawn = None, artif_height_prop=0.3, sfreq=None,
-                      legend_loc = 'lower right', ww=6, hh=2  ):
+                      legend_loc = 'lower right', ww=6, hh=2, mainLFP_per_rawn = None, roi_labels=None,
+                       srcgrouping_names_sorted = None, alpha=0.5, main_side_let = None,
+                       legend_alpha=0.5, legend_alpha_artif=0.8, beh_states_to_shade=None):
     from featlist import parseFeatNames
     r = parseFeatNames(featnames_sel)
     chnames_involved = [chn for chn in (r['ch1'] + r['ch2']) if chn is not None]
     chnames_involved = list(set(chnames_involved))
     assert len(chnames_involved) > 0
     print(chnames_involved)
+
+    for X,featns in zip(X_pri,featnames_all_pri):
+        assert X.shape[1] == len(featns), ( X.shape[1] ,len(featns) )
 
 #     if extdat_dict is not None:
 #         for extdat_type,ed in extdat_dict:
@@ -246,6 +279,32 @@ def plotFeatsAndRelDat(rawnames,featnames_sel, dat_pri,chnames_all_pri,
 #             fig,axs = plt.subplots(nr,nc,figsize=(nc*ww,nr*hh))
 #             axs = axs.reshape((nr,nc))
 
+    import utils
+
+    all_it = []
+    for rawn in rawnames:
+        ann = anndict_per_intcat_per_rawn[rawn]['beh_state']
+        all_it += list(ann.description)
+
+        ann = anndict_per_intcat_per_rawn[rawn]['artif'].get('LFP',None)
+        if ann is not None:
+            all_it += list(ann.description)
+
+        ann = anndict_per_intcat_per_rawn[rawn]['artif'].get('MEG',None)
+        if ann is not None:
+            all_it += list(ann.description)
+    all_it = list(set(all_it) )
+
+    ann_color_dict = {}
+    cmap = plt.cm.get_cmap('tab20', 20)
+    for iit, it in enumerate(all_it):
+        ann_color_dict[it] = cmap(iit % 20)
+    #from globvars import gp
+    # global color code, indep of function arg values
+    #sided_int_types = [it + '_L' for it in gp.int_types_ext]
+    ##[it + '_R' for it in gp.int_types_ext]
+    #for iit, it in enumerate(sided_int_types):
+    #    attrs_per_descr[it] = cmap()
 
 
     nr = len(chnames_involved) + len(featnames_sel)
@@ -253,20 +312,33 @@ def plotFeatsAndRelDat(rawnames,featnames_sel, dat_pri,chnames_all_pri,
     nc = len(rawnames)
     fig,axs = plt.subplots(nr,nc,figsize=(nc*ww,nr*hh))
     axs = axs.reshape((nr,nc))
+    # plot raw data
     for rawi,rawn in enumerate(rawnames):
+        # LFP main chan would be 007
         for chni,chn in enumerate(chnames_involved):
             ax = axs[chni, rawi]
+
+            if chn.startswith('LFP') and mainLFP_per_rawn is not None:
+                mainLFP_cur = mainLFP_per_rawn[rawn]
+                chn = mainLFP_cur
+
             if chnames_all_newsrcgrp_pri is not None:
                 orig_ind  = chnames_all_newsrcgrp_pri[rawi].index(chn)
             else:
                 orig_ind  = chnames_all_pri[rawi].index(chn)
 
+
             if chn.startswith('LFP') and dat_hires_pri is not None:
-                ax.plot(times_hires_pri[rawi], dat_hires_pri[rawi][chnames_all_hires_pri[rawi].index(chn)] )
+                ax.plot(times_hires_pri[rawi], dat_hires_pri[rawi][chnames_all_hires_pri[rawi].index(chn)], alpha=alpha )
+                ax.set_xlim( (times_hires_pri[rawi][0],times_hires_pri[rawi][-1] ) )
             else:
-                ax.plot(times_pri[rawi], dat_pri[rawi][orig_ind])
+                ax.plot(times_pri[rawi], dat_pri[rawi][orig_ind],  alpha=alpha)
+                ax.set_xlim( (times_pri[rawi][0],times_pri[rawi][-1] ) )
 
 
+
+
+            descr_order = None
             if anndict_per_intcat_per_rawn is not None:
                 ann = anndict_per_intcat_per_rawn[rawn]['beh_state']
                 if chn.startswith('msrc'):
@@ -281,16 +353,38 @@ def plotFeatsAndRelDat(rawnames,featnames_sel, dat_pri,chnames_all_pri,
                 d = (shadey_aftif[1] - shadey_aftif[0])
                 shadey_aftif[1] = shadey_aftif[0] + d * artif_height_prop / 0.5
                 shadey_beh_state[0] = shadey_aftif[1]
+                ax.axhline(y=shadey_beh_state[0], ls=':' )
 
-                attrs = shadeAnn(ax,ann,*shadey_beh_state,color='red',alpha=0.4, sfreq=sfreq, skip=1, plot_bins = 0,
-                        shift_by_anntype = 1, seed=1)
-                shadeAnn(ax,ann_artif,*shadey_aftif,color='red',alpha=0.4, sfreq=sfreq, skip=1, plot_bins = 0,
-                        shift_by_anntype = 1, seed=4)
+                attrs1, descr_order1 = shadeAnn(ax,ann,*shadey_beh_state,color='red',
+                                                alpha=legend_alpha, sfreq=sfreq, skip=1, plot_bins = 0,
+                        shift_by_anntype = 1, seed=1,
+                        ann_color_dict=ann_color_dict,
+                        intervals_to_plot = beh_states_to_shade)
+                attrs2, descr_order2 = shadeAnn(ax,ann_artif,*shadey_aftif,color='red',
+                                                alpha=legend_alpha_artif, sfreq=sfreq, skip=1, plot_bins = 0,
+                        shift_by_anntype = 1, seed=4,ann_color_dict=ann_color_dict)
+                descr_order = descr_order1 + descr_order2
 
 
+            if roi_labels is not None:
+                chn = utils.nicenMEGsrc_chnames([chn],roi_labels,srcgrouping_names_sorted)
+                chn = chn[0]
             ax.set_title(f'{rawn} : {chn}')
-            ax.legend(loc=legend_loc)
+            if descr_order is None:
+                ax.legend(loc=legend_loc)
+            else:
+                # default ordering of labels in legend is weird, I want it
+                # consistent
+                handles, labels = ax.get_legend_handles_labels()
+                assert tuple(sorted(labels) ) ==  tuple(sorted(descr_order )), \
+                    (sorted(labels), sorted(descr_order ))
+                handles_reord = [ handles[labels.index(lbl)] \
+                                 for lbl in descr_order ]
+                # sort both labels and handles by labels
+                #labels, handles = zip(*sorted(zip(labels, handles), key=lambda t: t[0]))
+                ax.legend(handles, descr_order, loc=legend_loc)
 
+    # plot features
     for rawi,rawn in enumerate(rawnames):
         for feati,featn in enumerate(featnames_sel):
             ax = axs[feati + len(chnames_involved), rawi ]
@@ -299,14 +393,12 @@ def plotFeatsAndRelDat(rawnames,featnames_sel, dat_pri,chnames_all_pri,
                 ts = wbd_pri[rawi][1]
                 ts = times_pri[rawi][ts]
             #print(ts,ts.shape,wbd_pri[rawi].shape)
-            ax.plot(ts, X_pri[rawi] [:,featnames_all_pri[rawi].index(featn)])
+            feati_true = list(featnames_all_pri[rawi]).index(featn)
+            ax.plot(ts, X_pri[rawi] [:,feati_true],  alpha=alpha)
 
+            descr_order = None
             if anndict_per_intcat_per_rawn is not None:
                 ann = anndict_per_intcat_per_rawn[rawn]['beh_state']
-                if chn.startswith('msrc'):
-                    ann_artif = anndict_per_intcat_per_rawn[rawn]['artif']['MEG']
-                else:
-                    ann_artif = anndict_per_intcat_per_rawn[rawn]['artif']['LFP']
 
                 mn,mx = ax.get_ylim()
                 shadey_aftif     = [mn, (mn+mx) * 0.5   ]
@@ -315,18 +407,42 @@ def plotFeatsAndRelDat(rawnames,featnames_sel, dat_pri,chnames_all_pri,
                 d = (shadey_aftif[1] - shadey_aftif[0])
                 shadey_aftif[1] = shadey_aftif[0] + d * artif_height_prop / 0.5
                 shadey_beh_state[0] = shadey_aftif[1]
+                ax.axhline(y=shadey_beh_state[0], ls=':' )
 
-                attrs = shadeAnn(ax,ann,*shadey_beh_state,color='red',alpha=0.4, sfreq=sfreq, skip=1, plot_bins = 0,
-                        shift_by_anntype = 1, seed=1)
-                shadeAnn(ax,ann_artif,*shadey_aftif,color='red',alpha=0.4, sfreq=sfreq, skip=1, plot_bins = 0,
-                        shift_by_anntype = 1, seed=4)
+                attrs, descr_order  = shadeAnn(ax,ann,*shadey_beh_state,color='red',alpha=legend_alpha, sfreq=sfreq, skip=1, plot_bins = 0,
+                        shift_by_anntype = 1, seed=1,
+                        ann_color_dict=ann_color_dict,
+                        intervals_to_plot = beh_states_to_shade)
+                if featn.find('msrc') >= 0:
+                    ann_artif = anndict_per_intcat_per_rawn[rawn]['artif']['MEG']
+                    _,descr_order_cur = shadeAnn(ax,ann_artif,*shadey_aftif,
+                            color='red',alpha=legend_alpha_artif, sfreq=sfreq, skip=1, plot_bins = 0,
+                            shift_by_anntype = 1, seed=4, ann_color_dict=ann_color_dict)
+                    descr_order += descr_order_cur
+                if featn.find('LFP') >= 0:
+                    ann_artif = anndict_per_intcat_per_rawn[rawn]['artif']['LFP']
+                    _,descr_order_cur = shadeAnn(ax,ann_artif,*shadey_aftif,
+                            color='red',alpha=legend_alpha_artif, sfreq=sfreq, skip=1, plot_bins = 0,
+                            shift_by_anntype = 1, seed=4, ann_color_dict=ann_color_dict)
+                    descr_order += descr_order_cur
 
 
-
-
+            if roi_labels is not None:
+                featn = utils.nicenFeatNames([featn],roi_labels,srcgrouping_names_sorted)
+                featn = featn[0]
             ax.set_title(f'{rawn} : {featn}')
             ax.set_xlim(0,ts[-1])
-            ax.legend(loc=legend_loc)
+            if descr_order is None:
+                ax.legend(loc=legend_loc)
+            else:
+                handles, labels = ax.get_legend_handles_labels()
+                assert tuple(sorted(labels) ) ==  tuple(sorted(descr_order )), \
+                    (sorted(labels), sorted(descr_order ))
+                handles_reord = [ handles[labels.index(lbl)] \
+                                 for lbl in descr_order ]
+                # sort both labels and handles by labels
+                #labels, handles = zip(*sorted(zip(labels, handles), key=lambda t: t[0]))
+                ax.legend(handles, descr_order, loc=legend_loc)
 
     # all data
 
@@ -543,33 +659,167 @@ def plotErrorBarStrings(ax,xs,ys,xerr, add_args={}):
     from collections.abc import Iterable
 
     labs = [a.get_text() for a in ax.get_yticklabels() ]
+    xs = [ str(x) for x in xs]
     lens = [len(s) for s in labs]
     maxlen = 0
     if len(lens):
         maxlen = max(lens )
+    inds_list = []
     if maxlen > 0:
-        assert set(labs) == set(xs)
-        inds = [labs.index(x) for x in xs]
-    else:
-        inds = np.arange(len(xs))
+        slabs = set(labs)
+        sxs = set(xs)
+        if slabs != sxs:
+            #print(sxs,slabs)
+            print('Warning, different label sizes! ', (len(set(labs)), len(set(xs))), slabs-sxs,sxs-slabs )
+            union = slabs | sxs
+            intersect = slabs & sxs
+            inds = [ (labs.index(x),x,  ys[xs.index(x)] ) for x in intersect]
+            inds_list = [inds]
 
-    #ax.set_yticklabels(xs)
-    if xerr is not None:
-        xerr = np.array(xerr)[inds]
-    color = add_args.get('color',None)
-    if color is not None and isinstance(color,Iterable):
-        del add_args['color']
-        if xerr is None:
-            xerr = [0] * len(ys)
-        for y,x,xe,c in zip( np.array(ys)[inds],np.array(xs)[inds],xerr, color ):
-            assert len(c) < 5
-            ax.errorbar([y],[x],xerr=[xe],color=c,**add_args)
+            inds = [ ( max(len(inds),maxlen) + xs.index(x),x,  ys[xs.index(x)] ) for x in sxs - slabs]
+            inds_list += [inds]
+        else:
+            inds = [ (labs.index(x),x,ys[xs.index(x)]) for x in xs]
+            inds_list = [inds]
     else:
-        ax.errorbar(np.array(ys)[inds],np.array(xs)[inds],xerr=xerr,**add_args)
+        inds = list(zip(np.arange(len(xs)),xs,ys))
+        inds_list = [inds]
+
+        #print(list(inds))
+
+    totinds = []
+    for inds in inds_list:
+        totinds += list(inds)
+        #ax.set_yticklabels(xs)
+        if xerr is not None:
+            #xerr = np.array(xerr)[inds]
+            xerr = [xerr[ xs.index(x) ] for (oldi,x,y) in inds ]
+        color = add_args.get('color',None)
+        if color is not None and isinstance(color,Iterable):
+            del add_args['color']
+            if xerr is None:
+                xerr = [0] * len(ys)
+            olids,xs_cur,ys_cur = zip(*inds)
+            for y,x,xe,c in zip( ys_cur,xs_cur,xerr, color ):
+            #for y,x,xe,c in zip( np.array(ys)[inds],np.array(xs)[inds],xerr, color ):
+                assert len(c) < 5
+                ax.errorbar([y],[x],xerr=[xe],color=c,**add_args)
+        else:
+            olids,xs_cur,ys_cur = zip(*inds)
+            ax.errorbar(ys_cur,xs_cur,xerr=xerr,**add_args)
+            #ax.errorbar(np.array(ys)[inds],np.array(xs)[inds],xerr=xerr,**add_args)
     if maxlen == 0:
-        ax.set_yticks(inds)
+        ax.set_yticks(olids)
         ax.set_yticklabels(xs)
+    else:
+        olids,xs_cur,ys_cur = zip(*totinds)
+        ax.set_yticks(olids)
+        ax.set_yticklabels(xs_cur)
 
+def plotFeatsWithEverything(dat_pri, times_pri, X_pri, Xtimes_pri, dat_lfp_hires_pri, times_hires_pri,
+                            rawnames,
+                            subfeature_order_pri, subfeature_order_newsrcgrp_pri,
+                            subfeature_order_lfp_hires_pri,
+                            anndict_per_intcat_per_rawn,
+                            feature_names_all, wbd_H_pri,
+                            sfreq, raw_perband_flt_pri, raw_perband_bp_pri,
+                            scale_data_combine_type,
+                            stats_multiband_flt, stats_multiband_bp,
+                            test_plots_descr, special_chns,
+                           fband_names_inc_HFO ):
+    '''
+    plots features AND raw data AND intermediate data separately for reach raw
+    '''
+    from os.path import join as pjoin
+    import globvars as gv
+
+    from featlist import parseFeatNames
+    from featlist import selectFeatNames
+    from utils import freqs2relevantBands
+    featnames_parse_res = parseFeatNames( feature_names_all)
+    featnames_parse_res.keys()
+
+    #from plots import plotFeatsAndRelDat
+    #from plots import plotDataAnnStat
+    #from plots import shadeAnn
+    #from plots import plotMeansPerIt
+
+    #%debug
+    for tpd in test_plots_descr:
+    #for tpd in test_plots_descr[:1]:
+    #for tpd in test_plots_descr[0:1]:
+    #for tpd in test_plots_descr[1:2]:
+    #for tpd in test_plots_descr[2:3]:
+
+        from matplotlib.backends.backend_pdf import PdfPages
+        #fign = rawnstr + '__rawdata_vs_feat'
+        fign = tpd['figname'] + '__rawdata_vs_feat'
+        figfn_full = pjoin(gv.dir_fig, fign+'.pdf')
+        #plt.savefig(figfn_full)
+        pdf= PdfPages(figfn_full  )
+
+
+        ds = tpd['chn_descrs']
+        print('   ',tpd['informal_descr'])
+        desired_chns = [special_chns[chnd] for chnd in ds]
+        fts = tpd['feat_types_actual_coupling']
+        relevant_freqs = tpd['relevant_freqs']
+        print(ds,desired_chns)
+        print(fts,relevant_freqs)
+
+        featnames_sel = selectFeatNames(fts,relevant_freqs,desired_chns, feature_names_all,
+                                        fband_names=fband_names_inc_HFO)
+        print(featnames_sel)
+
+        # select features related to these channels
+        plotFeatsAndRelDat(rawnames, featnames_sel, dat_pri,subfeature_order_pri,
+                        X_pri,[feature_names_all]*3,times_pri,Xtimes_pri,
+                        subfeature_order_newsrcgrp_pri, wbd_H_pri,
+                        dat_hires_pri=dat_lfp_hires_pri,
+                        chnames_all_hires_pri = subfeature_order_lfp_hires_pri,
+                        times_hires_pri=times_hires_pri,
+                        anndict_per_intcat_per_rawn=anndict_per_intcat_per_rawn, sfreq=sfreq )
+        plt.tight_layout()
+        pdf.savefig()
+        plt.close()
+
+
+    #ct = 'medcond'
+
+        tpl1 = (raw_perband_flt_pri,stats_multiband_flt,'flt')
+        tpl2 = (raw_perband_bp_pri, stats_multiband_bp,'bp')
+        tpls = (tpl1,tpl2)
+        for dat_dict,stat_dict,dat_type in tpls:
+            bands_cur = freqs2relevantBands(relevant_freqs, fband_names_inc_HFO)
+            for band in bands_cur:
+            #for band in ['HFO']:
+            #for band in ['beta']:
+            #band = 'gamma'
+            #band = 'beta'
+            #band = 'tremor'
+                means_per_iset = stat_dict['means'].get(band, None)
+                indsets = stat_dict['indsets']
+                suptitle = f'combin={scale_data_combine_type}  band={band} dat_type={dat_type}'
+
+                if means_per_iset is None:
+                    continue
+
+                r = parseFeatNames(featnames_sel)
+                chnames_involved = [chn for chn in (r['ch1'] + r['ch2']) if chn is not None]
+                chnames_involved = list(set(chnames_involved))
+                chis = [subfeature_order_newsrcgrp_pri[0].index( chn ) for chn in chnames_involved]
+
+                plotDataAnnStat(rawnames, dat_pri, times_pri, subfeature_order_pri,
+                                dat_lfp_hires_pri,times_hires_pri,subfeature_order_lfp_hires_pri,
+                                anndict_per_intcat_per_rawn,
+                                indsets,means_per_iset,suptitle=suptitle,
+                                dat_dict=dat_dict,band=band,legend_loc='upper left',
+                            chis_to_show = chis)
+                plt.tight_layout()
+                pdf.savefig()
+                plt.close()
+
+        pdf.close()
 
 #funloc = plotTFRlike(dat_pri,bpow_abscds_all_reshaped,0, 'beta', chns=['msrcR_0_3_c5', 'LFPR092'])
 #funloc = plotTFRlike(dat_pri,bpow_abscds_all_reshaped,0, 'beta', chns=['LFPR092'])
