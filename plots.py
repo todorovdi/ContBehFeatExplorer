@@ -282,18 +282,23 @@ def plotFeatsAndRelDat(rawnames,featnames_sel, dat_pri,chnames_all_pri,
     import utils
 
     all_it = []
+    all_it_a1 = []
+    all_it_a2 = []
     for rawn in rawnames:
         ann = anndict_per_intcat_per_rawn[rawn]['beh_state']
         all_it += list(ann.description)
 
         ann = anndict_per_intcat_per_rawn[rawn]['artif'].get('LFP',None)
         if ann is not None:
-            all_it += list(ann.description)
+            all_it_a1 += list(ann.description)
 
         ann = anndict_per_intcat_per_rawn[rawn]['artif'].get('MEG',None)
         if ann is not None:
-            all_it += list(ann.description)
-    all_it = list(set(all_it) )
+            all_it_a2 += list(ann.description)
+    all_it = list(dict.fromkeys(all_it))
+    all_it_a1 = list(dict.fromkeys(all_it_a1))
+    all_it_a2 = list(dict.fromkeys(all_it_a2))
+    all_it = all_it + all_it_a1 + all_it_a2
 
     ann_color_dict = {}
     cmap = plt.cm.get_cmap('tab20', 20)
@@ -312,8 +317,10 @@ def plotFeatsAndRelDat(rawnames,featnames_sel, dat_pri,chnames_all_pri,
     nc = len(rawnames)
     fig,axs = plt.subplots(nr,nc,figsize=(nc*ww,nr*hh))
     axs = axs.reshape((nr,nc))
+    print('Plotting rawdata')
     # plot raw data
     for rawi,rawn in enumerate(rawnames):
+        print(rawn)
         # LFP main chan would be 007
         for chni,chn in enumerate(chnames_involved):
             ax = axs[chni, rawi]
@@ -370,6 +377,9 @@ def plotFeatsAndRelDat(rawnames,featnames_sel, dat_pri,chnames_all_pri,
                 chn = utils.nicenMEGsrc_chnames([chn],roi_labels,srcgrouping_names_sorted)
                 chn = chn[0]
             ax.set_title(f'{rawn} : {chn}')
+
+
+            ax.legend(loc=legend_loc)
             if descr_order is None:
                 ax.legend(loc=legend_loc)
             else:
@@ -380,12 +390,19 @@ def plotFeatsAndRelDat(rawnames,featnames_sel, dat_pri,chnames_all_pri,
                     (sorted(labels), sorted(descr_order ))
                 handles_reord = [ handles[labels.index(lbl)] \
                                  for lbl in descr_order ]
+
+                p = [ (handles[labels.index(lbl)],lbl) \
+                                 for lbl in all_it if lbl in labels ]
+                handles2, labels2 = zip(*p)
+
                 # sort both labels and handles by labels
                 #labels, handles = zip(*sorted(zip(labels, handles), key=lambda t: t[0]))
-                ax.legend(handles, descr_order, loc=legend_loc)
+                ax.legend(handles_reord, descr_order, loc=legend_loc)
 
     # plot features
+    print('Plotting features')
     for rawi,rawn in enumerate(rawnames):
+        print(rawn)
         for feati,featn in enumerate(featnames_sel):
             ax = axs[feati + len(chnames_involved), rawi ]
             ts = Xtimes_pri[rawi]
@@ -448,7 +465,7 @@ def plotFeatsAndRelDat(rawnames,featnames_sel, dat_pri,chnames_all_pri,
 
     # plot raw data
     # plot features
-    print('plotting')
+    #print('plotting')
 
     return axs
 
