@@ -250,7 +250,8 @@ def plotFeatsAndRelDat(rawnames,featnames_sel, dat_pri,chnames_all_pri,
                       anndict_per_intcat_per_rawn = None, artif_height_prop=0.3, sfreq=None,
                       legend_loc = 'lower right', ww=6, hh=2, mainLFP_per_rawn = None, roi_labels=None,
                        srcgrouping_names_sorted = None, alpha=0.5, main_side_let = None,
-                       legend_alpha=0.5, legend_alpha_artif=0.8, beh_states_to_shade=None):
+                       legend_alpha=0.5, legend_alpha_artif=0.8, beh_states_to_shade=None,
+                      extdat_pri = None ):
     from featlist import parseFeatNames
     r = parseFeatNames(featnames_sel)
     chnames_involved = [chn for chn in (r['ch1'] + r['ch2']) if chn is not None]
@@ -260,24 +261,6 @@ def plotFeatsAndRelDat(rawnames,featnames_sel, dat_pri,chnames_all_pri,
 
     for X,featns in zip(X_pri,featnames_all_pri):
         assert X.shape[1] == len(featns), ( X.shape[1] ,len(featns) )
-
-#     if extdat_dict is not None:
-#         for extdat_type,ed in extdat_dict:
-#             nr = 0
-#             if extdat_type in ['flt','bp']:
-#                 for band in ed:
-#                     #nr += len(ed[band].ch_names)
-#                     nr += len(chnames_involved)
-#                 #ts = times_pri[rawi]
-#                 #d = raw_perband_bp_pri[rawi][band]._data[chni]
-#                 #plt.plot(ts,d)
-
-#             nr = len(chnames_involved) + len(featnames_sel)
-#                 #nr = dat_pri[0].shape[0]
-#             nc = len(rawnames)
-#             ww = 6; hh = 2
-#             fig,axs = plt.subplots(nr,nc,figsize=(nc*ww,nr*hh))
-#             axs = axs.reshape((nr,nc))
 
     import utils
 
@@ -313,17 +296,51 @@ def plotFeatsAndRelDat(rawnames,featnames_sel, dat_pri,chnames_all_pri,
 
 
     nr = len(chnames_involved) + len(featnames_sel)
+    if extdat_pri is not None:
+        nr += 1
         #nr = dat_pri[0].shape[0]
     nc = len(rawnames)
     fig,axs = plt.subplots(nr,nc,figsize=(nc*ww,nr*hh))
     axs = axs.reshape((nr,nc))
+
+
+    rowi_offset = 0
+    if extdat_pri is not None:
+        rowi_offset = 1
+
+        for rawi,rawn in enumerate(rawnames):
+            ax = axs[0, rawi]
+            ts = times_pri[rawi]
+            exdat = exdat_pri[rawi]
+            for chni in range(exdat.shape[0]):
+                plot.plot(ts,exdat[chni,:] )
+
+        #for extdat_type,ed in extdat_dict:
+        #    nr = 0
+        #    if extdat_type in ['flt','bp']:
+        #        for band in ed:
+        #            #nr += len(ed[band].ch_names)
+        #            nr += len(chnames_involved)
+        #        #ts = times_pri[rawi]
+        #        #d = raw_perband_bp_pri[rawi][band]._data[chni]
+        #        #plt.plot(ts,d)
+
+        #    nr = len(chnames_involved) + len(featnames_sel)
+        #        #nr = dat_pri[0].shape[0]
+        #    nc = len(rawnames)
+        #    ww = 6; hh = 2
+        #    fig,axs = plt.subplots(nr,nc,figsize=(nc*ww,nr*hh))
+        #    axs = axs.reshape((nr,nc))
+
+
+
     print('Plotting rawdata')
     # plot raw data
     for rawi,rawn in enumerate(rawnames):
         print(rawn)
         # LFP main chan would be 007
         for chni,chn in enumerate(chnames_involved):
-            ax = axs[chni, rawi]
+            ax = axs[chni + rowi_offset, rawi]
 
             if chn.startswith('LFP') and mainLFP_per_rawn is not None:
                 mainLFP_cur = mainLFP_per_rawn[rawn]
@@ -391,9 +408,10 @@ def plotFeatsAndRelDat(rawnames,featnames_sel, dat_pri,chnames_all_pri,
                 handles_reord = [ handles[labels.index(lbl)] \
                                  for lbl in descr_order ]
 
-                p = [ (handles[labels.index(lbl)],lbl) \
-                                 for lbl in all_it if lbl in labels ]
-                handles2, labels2 = zip(*p)
+                # just in case, not really needed
+                #p = [ (handles[labels.index(lbl)],lbl) \
+                #                 for lbl in all_it if lbl in labels ]
+                #handles2, labels2 = zip(*p)
 
                 # sort both labels and handles by labels
                 #labels, handles = zip(*sorted(zip(labels, handles), key=lambda t: t[0]))
@@ -401,10 +419,11 @@ def plotFeatsAndRelDat(rawnames,featnames_sel, dat_pri,chnames_all_pri,
 
     # plot features
     print('Plotting features')
+    rowi_offset += len(chnames_involved)
     for rawi,rawn in enumerate(rawnames):
         print(rawn)
         for feati,featn in enumerate(featnames_sel):
-            ax = axs[feati + len(chnames_involved), rawi ]
+            ax = axs[feati + rowi_offset, rawi ]
             ts = Xtimes_pri[rawi]
             if wbd_pri is not None:
                 ts = wbd_pri[rawi][1]
