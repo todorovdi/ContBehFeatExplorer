@@ -924,3 +924,20 @@ def getChnamesFromFeatlist(featnames, mod='LFP'):
     chnames = [chn for chn in r['ch1'] if chn.find(mod) >= 0] + [chn for chn in r['ch2'] if (chn is not None and chn.find(mod) >= 0) ]
     chnames = list(sorted(set(chnames)))
     return chnames
+
+
+def sortFeats(featnames, desired_feature_order=None):
+    if desired_feature_order is None:
+        import globvars as gv
+        desired_feature_order = gv.desired_feature_order
+    pfn = parseFeatNames(featnames)
+    regex_same_LFP = r'.?.?con.*(LFP.[0-9]+),.*\1.*'
+    regex_same_src = r'.?.?con.*(msrc._[0-9]+_[0-9]+_c[0-9]+),.*\1.*'
+    regexs = [regex_same_LFP, regex_same_src]
+    inds_self_coupling = selFeatsRegexInds(featnames,regexs)
+    #print(inds_self_coupling,featnames[inds_self_coupling] )
+
+    # I want same-channel info come first
+    ordinds = [desired_feature_order.index(ft) + 0.1 * (fti not in inds_self_coupling) \
+               for fti,ft in enumerate(pfn['ftype']) ]
+    return np.argsort(ordinds)

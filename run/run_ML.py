@@ -603,6 +603,7 @@ for rawn in rawnames:
     chnames_src = f['chnames_src']
     chnames_LFP = f['chnames_LFP']
 
+
     feature_names_list_info = collectFeatTypeInfo(feature_names_all, ext_info = 0 )
     missing_ftypes = set(features_to_use)  - set(feature_names_list_info['ftypes'])
     assert missing_ftypes == set([]), f'Feat file is missing feature types {missing_ftypes}'
@@ -712,6 +713,15 @@ for rawn in rawnames:
         print('!!!!!!!!!!!!--------  We got zero features! Exiting')
         sys.exit(5)
     X = X_allfeats[:, selected_feat_inds]
+
+
+    canonical_feat_order = 1
+    if canonical_feat_order:
+        from featlist import sortFeats
+        ordinds = sortFeats(good_feats,gv.desired_feature_order)
+        good_feats = good_feats[ ordinds ]
+        X = X[:,ordinds]
+
 
     X_pri += [ X ]
     del X_allfeats
@@ -1376,24 +1386,39 @@ if do_Classif:
 
             colinds_bad_VIFsel,colinds_good_VIFsel,vfs_list = None,None,None
             if calc_VIF:
+                VIF_reversed_order = 1
+                revinds = np.arange(Xconcat_good_cur.shape[1] )[::-1]
                 X_for_VIF = Xconcat_good_cur[::subskip_fit,:]
+                featnames_VIF = featnames_nice
+                if VIF_reversed_order:
+                    X_for_VIF = X_for_VIF[:,revinds]
+                    featnames_VIF = list( np.array(featnames_VIF)[revinds] )
+
                 print(f'starting VIF for X_for_VIF.shape={X_for_VIF.shape}')
-                colinds_bad_VIFsel,colinds_good_VIFsel,VIFs_list, \
-                    VIFsel_featsets_list,VIFsel_linreg_objs  = \
+                colinds_bad_VIFsel_unrev,colinds_good_VIFsel_unrev,VIFs_list, \
+                    VIFsel_featsets_list,VIFsel_linreg_objs,exogs_list  = \
                     utsne.findBadColumnsVIF(X_for_VIF, VIF_thr=VIF_thr,n_jobs=n_jobs,
-                                            search_worst=VIF_search_worst, featnames = featnames_nice)
+                                            search_worst=VIF_search_worst, featnames = featnames_VIF )
+
+                colinds_bad_VIFsel   =  revinds[colinds_bad_VIFsel_unrev]
+                colinds_good_VIFsel  =  revinds[colinds_good_VIFsel_unrev]
+
                 print(f'VIF truncation found {len(colinds_bad_VIFsel)}' +\
                       f'bad indices of total {Xconcat_good_cur.shape[1]}')
-                print('VIF-selected bad features are ',np.array(featnames_nice)[colinds_bad_VIFsel] )
+                print('VIF-selected bad features are ',np.array(featnames_VIF)[colinds_bad_VIFsel_unrev] )
                 gc.collect()
 
                 VIF_truncation = {}
                 VIF_truncation['VIF_thr'] = VIF_thr
+                VIF_truncation['exogs_list']  = exogs_list
                 VIF_truncation['VIF_search_worst'] = VIF_search_worst
                 VIF_truncation['X_for_VIF_shape'] = X_for_VIF.shape
                 VIF_truncation[ 'colinds_bad_VIFsel'] = colinds_bad_VIFsel
                 VIF_truncation[ 'colinds_good_VIFsel'] = colinds_good_VIFsel
+                VIF_truncation[ 'colinds_bad_VIFsel_unrev'] = colinds_bad_VIFsel_unrev
+                VIF_truncation[ 'colinds_good_VIFsel_unrev'] = colinds_good_VIFsel_unrev
                 VIF_truncation[ 'VIFs_list'] = VIFs_list
+                VIF_truncation['reversed_order'] = 1
                 results_cur['VIF_truncation'] = VIF_truncation
 
                 saveResToFolder(results_cur, 'VIF_truncation' )

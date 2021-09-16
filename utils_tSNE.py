@@ -2643,6 +2643,7 @@ def sklearn_VIF(X, exogs,n_jobs, VIF_thr=10, search_worst=True,
     import gc
     # data is nbins, nchans x
     # exogs -- indeices of chans
+    # if search_worse is False, returns first of exogs that is bad
 
     if isinstance(exogs , int):
         exogs = [exogs]
@@ -2657,9 +2658,12 @@ def sklearn_VIF(X, exogs,n_jobs, VIF_thr=10, search_worst=True,
     worst_VIF = -1
     worst_VIF_exog = -1
 
+    colinds_all = np.arange(X.shape[1])
+
     # form input data for each exogenous variable
     for exog in exogs:
-        not_exog = [i for i in exogs if i != exog]
+        not_exog = [i for i in colinds_all if i != exog]
+        assert len(not_exog) > 0
         #print(not_exog,exog)
         Xcur, ycur = X[:,not_exog], X[:,exog]
         #print(Xcur.shape,ycur.shape)
@@ -2713,22 +2717,54 @@ def findBadColumnsVIF(X,VIF_thr=10,n_jobs=-1, search_worst=False, featnames=None
     vfs_list = []
     featsets_list = []
     linreg_objs = []
+    exogs_list = []
     for iter_num in colinds_all:
-        colinds_good = np.setdiff1d(np.arange(X.shape[1]),colinds_bad)
+        colinds_good = np.setdiff1d(colinds_all,colinds_bad)
         featsets_list += [colinds_good]
         Xcur = X[:,colinds_good]
-        vfs,tol_dict,linreg_dict = sklearn_VIF(Xcur, np.arange(Xcur.shape[1]),
+
+        if len(colinds_bad) >= 2:  # assert we have increasing order
+            bads_increasing_order = np.min( np.diff(colinds_bad) ) > 0
+        else:
+            bads_increasing_order = True
+
+        if len(colinds_bad) == 0:
+            exogs = np.arange( len(colinds_good) )
+        else:
+            # bad inds were added in increasing order
+            # so before the last bad ind all other inds were not dependent of
+            # following columns, so we should start checking next after last
+            # bad since by removing we cannot increase number of regressable
+            # so take only columns of (X[:,colinds_good]) with lower
+
+            if not search_worst:
+                assert bads_increasing_order
+
+            # if we lucky for search_worst we can also use this trick
+            if bads_increasing_order:
+                exogs = np.where(colinds_good > np.max(colinds_bad) )[0]
+            else:
+                exogs = np.arange( len(colinds_good) )
+
+        if len(exogs) == 0:
+            print('len(exogs) == 0, exiting')
+            break
+        #exogs = np.arange(Xcur.shape[1])
+        ret_obj = 'worst'
+        vfs,tol_dict,linreg_dict = sklearn_VIF(Xcur, exogs,
                             n_jobs=n_jobs, VIF_thr=VIF_thr,
-                            search_worst=search_worst, return_obj='worst')
+                            search_worst=search_worst, return_obj=ret_obj)
         gc.collect()
         vfs_list += [vfs]
-        keys,values = zip(*vfs.items())
+        exog_outs,values = zip(*vfs.items())
         mi = np.argmax(values)
         vf_worst = values[mi]
-        linreg_obj = linreg_dict[mi]
+        #if ret_obj == 'all':
+        linreg_obj = linreg_dict[exog_outs[mi] ]
         linreg_objs += [linreg_obj]
+        exogs_list += [exogs]  # indices of elements of good_inds
 
-        colind_bad = colinds_good [keys[mi] ]
+        colind_bad = colinds_good [ exog_outs[mi] ]
 
         featname_info = ''
         if featnames is not None:
@@ -2747,7 +2783,7 @@ def findBadColumnsVIF(X,VIF_thr=10,n_jobs=-1, search_worst=False, featnames=None
         cols_good = colinds_all
     else:
         cols_good = np.setdiff1d(colinds_all,colinds_bad)
-    return colinds_bad,cols_good, vfs_list, featsets_list, linreg_objs
+    return colinds_bad,cols_good, vfs_list, featsets_list, linreg_objs, exogs_list
 
 def selFeatsBoruta(X,y,verbose = 2,add_clf_creopts=None, n_jobs = -1, random_state=0):
     from boruta import BorutaPy

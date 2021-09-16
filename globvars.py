@@ -130,6 +130,8 @@ bichan_bifreq_feat_types = ['rbcorr', 'bpcorr' ]
 bichan_bifreq_cross_feat_types = [ 'bpcorr' ]
 noband_feat_types = [ 'H_act', 'H_mob', 'H_compl']
 feat_types_all = [ 'con',  'Hjorth', 'H_act', 'H_mob', 'H_compl', 'bpcorr', 'rbcorr']
+# used for ML and VIF selection
+desired_feature_order = ['H_act', 'H_mob',  'H_compl', 'con', 'rbcorr', 'bpcorr' ]
 
 EMG_per_hand = {'right':['EMG061_old', 'EMG062_old'], 'left':['EMG063_old', 'EMG064_old' ] }
 EMG_per_hand_base = {'right':['EMG061', 'EMG062'], 'left':['EMG063', 'EMG064' ] }

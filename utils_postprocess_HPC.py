@@ -3327,7 +3327,8 @@ def perfFromConfmat(confmat,ind):
     #plt.savefig(pjoin(gv.dir_fig, output_subdir,figfname))
 
 def plotFeatHists(rawnames,featnames,featis,X_pri,Xconcat, bindict_per_rawn,
-                  ivalis_tb_indarrays_merged, xlim_common = (-5,5), nbins = 20):
+                  ivalis_tb_indarrays_merged,
+                  xlim_common = (-5,5), nbins = 20, savefig = True):
     cmap = plt.cm.get_cmap('Set1', max(4,len(rawnames)) )
     from globvars import gp
 
@@ -3409,8 +3410,9 @@ def plotFeatHists(rawnames,featnames,featis,X_pri,Xconcat, bindict_per_rawn,
         for ax in axs.flatten():
             ax.set_xlim(xlim_common)
 
-    figname = ','.join(rawnames) + f'_hists_n={nr}.pdf'
-    plt.savefig(pjoin(gv.dir_fig, figname))
-    plt.close()
+    if savefig:
+        figname = ','.join(rawnames) + f'_hists_n={nr}.pdf'
+        plt.savefig(pjoin(gv.dir_fig, figname))
+        plt.close()
 
 

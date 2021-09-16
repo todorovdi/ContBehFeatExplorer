@@ -4312,7 +4312,7 @@ def genMLresFn(rawnames, sources_type, src_file_grouping_ind, src_grouping,
                     str_list_sorted = [','.join(subjs) + '_' + ','.join(medconds)]
 
 
-                if 'task' == rawname_format_items[1]:
+                if len(rawname_format_items) > 1 and 'task' == rawname_format_items[1]:
                     for subj in sorted(subjs):
                         for task in subjs_analyzed[subj]['tasks']:
                             str_list_sorted += [ f'{subj}_{task}' ]
@@ -4494,3 +4494,49 @@ def freqs2relevantBands(relevant_freqs, fband_names = None, bands_acc = 'crude')
             if t:
                 desired_fbands += [fbname]
     return desired_fbands
+
+def runFilePart(fullfname, runstr, startline=None,lastline=None, use_ipython=True):
+    # lastline IS included
+    # I save a new file and then run ipython -- it allows to debug
+    # fname in the way it should be passed to ipython magic
+    # all variables from ipython magic will be added to the runnign script, not
+    # to the locals here
+
+    if runstr.startswith('run') or runstr.startswith('%run'):
+        pyi = runstr.find('.py ')
+        runstr = runstr[pyi + 3:]
+        #raise ValueError('One needs runstr without run -i <filename>')
+
+    import os, pathlib
+    p = pathlib.Path(fullfname)
+    dirpath = p.parent
+    addstr = '_part_for_run'
+    newfname =  '.' + p.stem + addstr + p.suffix
+    new_fullfname = os.path.join(dirpath, newfname)
+
+    with open(fullfname,'r') as f:
+        lines = f.readlines()
+
+    if lastline is None:
+        endline = lastline
+    else:
+        endline = lastline+1
+    with open(new_fullfname,'w') as f:
+        sl = slice(startline,endline)
+        f.writelines(lines[sl])
+
+    if use_ipython:
+        from IPython import get_ipython
+        ipython = get_ipython()
+        ipython.magic( f'run -i {new_fullfname} {runstr}' )
+    else:
+        import sys
+        argv_backup = sys.argv
+
+        exec( '\n'.join(lines[sl])  )
+
+        sys.argv  = argv_backup
+
+    # would be useless for use_ipython  = True, but not otherwise
+    return locals()
+

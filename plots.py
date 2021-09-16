@@ -251,7 +251,7 @@ def plotFeatsAndRelDat(rawnames,featnames_sel, dat_pri,chnames_all_pri,
                       legend_loc = 'lower right', ww=6, hh=2, mainLFP_per_rawn = None, roi_labels=None,
                        srcgrouping_names_sorted = None, alpha=0.5, main_side_let = None,
                        legend_alpha=0.5, legend_alpha_artif=0.8, beh_states_to_shade=None,
-                      extdat_pri = None ):
+                      extdat_pri = None, xlim=None, main_color='purple', feat_comments=None ):
     from featlist import parseFeatNames
     r = parseFeatNames(featnames_sel)
     chnames_involved = [chn for chn in (r['ch1'] + r['ch2']) if chn is not None]
@@ -261,6 +261,9 @@ def plotFeatsAndRelDat(rawnames,featnames_sel, dat_pri,chnames_all_pri,
 
     for X,featns in zip(X_pri,featnames_all_pri):
         assert X.shape[1] == len(featns), ( X.shape[1] ,len(featns) )
+
+    if feat_comments is not None:
+        assert len(feat_comments) == len(featnames_sel)
 
     import utils
 
@@ -296,11 +299,13 @@ def plotFeatsAndRelDat(rawnames,featnames_sel, dat_pri,chnames_all_pri,
 
 
     nr = len(chnames_involved) + len(featnames_sel)
+    hratios = [0.75] * len(chnames_involved) + [1] * len(featnames_sel)
     if extdat_pri is not None:
+        hratios = [0.4] + hratios
         nr += 1
         #nr = dat_pri[0].shape[0]
     nc = len(rawnames)
-    fig,axs = plt.subplots(nr,nc,figsize=(nc*ww,nr*hh))
+    fig,axs = plt.subplots(nr,nc,figsize=(nc*ww,nr*hh), gridspec_kw={'height_ratios': hratios}  )
     axs = axs.reshape((nr,nc))
 
 
@@ -311,9 +316,15 @@ def plotFeatsAndRelDat(rawnames,featnames_sel, dat_pri,chnames_all_pri,
         for rawi,rawn in enumerate(rawnames):
             ax = axs[0, rawi]
             ts = times_pri[rawi]
-            exdat = exdat_pri[rawi]
-            for chni in range(exdat.shape[0]):
-                plot.plot(ts,exdat[chni,:] )
+            extdat = extdat_pri[rawi]
+            for chni in range(extdat.shape[0]):
+                ax.plot(ts,extdat[chni,:] )
+
+            ax.set_xlim(ts[0],ts[-1])
+            ax.set_title(f'{rawn} EMG')
+
+            if xlim is not None:
+                ax.set_xlim(xlim)
 
         #for extdat_type,ed in extdat_dict:
         #    nr = 0
@@ -353,11 +364,14 @@ def plotFeatsAndRelDat(rawnames,featnames_sel, dat_pri,chnames_all_pri,
 
 
             if chn.startswith('LFP') and dat_hires_pri is not None:
-                ax.plot(times_hires_pri[rawi], dat_hires_pri[rawi][chnames_all_hires_pri[rawi].index(chn)], alpha=alpha )
+                ax.plot(times_hires_pri[rawi], dat_hires_pri[rawi][chnames_all_hires_pri[rawi].index(chn)], alpha=alpha, c=main_color )
                 ax.set_xlim( (times_hires_pri[rawi][0],times_hires_pri[rawi][-1] ) )
             else:
-                ax.plot(times_pri[rawi], dat_pri[rawi][orig_ind],  alpha=alpha)
+                ax.plot(times_pri[rawi], dat_pri[rawi][orig_ind],  alpha=alpha, c=main_color)
                 ax.set_xlim( (times_pri[rawi][0],times_pri[rawi][-1] ) )
+
+            if xlim is not None:
+                ax.set_xlim(xlim)
 
 
 
@@ -430,7 +444,7 @@ def plotFeatsAndRelDat(rawnames,featnames_sel, dat_pri,chnames_all_pri,
                 ts = times_pri[rawi][ts]
             #print(ts,ts.shape,wbd_pri[rawi].shape)
             feati_true = list(featnames_all_pri[rawi]).index(featn)
-            ax.plot(ts, X_pri[rawi] [:,feati_true],  alpha=alpha)
+            ax.plot(ts, X_pri[rawi] [:,feati_true],  alpha=alpha, c=main_color)
 
             descr_order = None
             if anndict_per_intcat_per_rawn is not None:
@@ -466,8 +480,15 @@ def plotFeatsAndRelDat(rawnames,featnames_sel, dat_pri,chnames_all_pri,
             if roi_labels is not None:
                 featn = utils.nicenFeatNames([featn],roi_labels,srcgrouping_names_sorted)
                 featn = featn[0]
-            ax.set_title(f'{rawn} : {featn}')
+            ttl = f'{rawn} : {featn}'
+            if feat_comments is not None and len(feat_comments[feati] ):
+                ttl += '\n' + feat_comments[feati]
+            ax.set_title(ttl)
+
             ax.set_xlim(0,ts[-1])
+            if xlim is not None:
+                ax.set_xlim(xlim)
+
             if descr_order is None:
                 ax.legend(loc=legend_loc)
             else:
@@ -809,7 +830,7 @@ def plotFeatsWithEverything(dat_pri, times_pri, X_pri, Xtimes_pri, dat_lfp_hires
 
         # select features related to these channels
         plotFeatsAndRelDat(rawnames, featnames_sel, dat_pri,subfeature_order_pri,
-                        X_pri,[feature_names_all]*3,times_pri,Xtimes_pri,
+                        X_pri,[feature_names_all]*len(rawnames),times_pri,Xtimes_pri,
                         subfeature_order_newsrcgrp_pri, wbd_H_pri,
                         dat_hires_pri=dat_lfp_hires_pri,
                         chnames_all_hires_pri = subfeature_order_lfp_hires_pri,
