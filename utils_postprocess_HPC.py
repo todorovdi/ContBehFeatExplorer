@@ -1606,7 +1606,7 @@ def plotFeatImpStats(feat_types_all, scores_stats, fign='', axs=None,
         sc = [ bias_cur ] + list(sc)
     names_cur_sum = names_cur
 
-    print('sum names = ',names_cur)
+    #print('sum names = ',names_cur)
 
     if bar:
         ax.barh(names_cur,np.array(sc), color=color_cur, alpha=alpha ); #ax.tick_params(axis='x', labelrotation=90 )
@@ -1621,7 +1621,8 @@ def plotFeatImpStats(feat_types_all, scores_stats, fign='', axs=None,
             add_args={'fmt':marker_mean, 'color':color_cur,
                       'alpha':alpha*0.9, 'markersize':markersize} )
     ax.set_title(stat_key)
-    ax.set_yticks([])
+    # TEMP, should be uncommented
+    #ax.set_yticks([])
 
     #####################################
 
@@ -2037,7 +2038,7 @@ def plotFeatSignifSHAP(pdf,featsel_per_method, fshs, featnames_list,
 def plotFeatSignifSHAP_list(pdf, outputs_grouped, fshs=['XGB_Shapley'],
                        figname_prefix='',
                        n_individ_feats_show=4, roi_labels = None,
-                       chnames_LFP = None, body_side='L', hh=8,
+                       chnames_LFP = None, body_side='L', hh=8, ww = None,
                        separate_by_band = False, suptitle = None, suptitle_fontsize=20,
                       tickfontsize = 10, show_bias=False,
                             use_best_LFP=False, markersize=10, show_max = True,
@@ -2105,15 +2106,18 @@ def plotFeatSignifSHAP_list(pdf, outputs_grouped, fshs=['XGB_Shapley'],
     nscores = len(scores_per_class_def)
 
     nr = nscores;
-    ww = 2 + 3 + 5;
+    if ww is None:
+        ww = 2 + 3 + 5;
     if show_abs_plots:
         nc = 2 + 2 + 1 + 1; #nc= len(scores_stats) - 2;
         if axs is None:
-            fig,axs = plt.subplots(nr,nc, figsize = (nc*ww,nr*hh), gridspec_kw={'width_ratios': [1,1,1,1,0.4,3]} );
+            fig,axs = plt.subplots(nr,nc, figsize = (nc*ww,nr*hh),
+                                   gridspec_kw={'width_ratios': [1,1,1,1,0.4,3]} );
     else:
         nc = 2 + 1 + 1;
         if axs is None:
-            fig,axs = plt.subplots(nr,nc, figsize = (nc*ww,nr*hh), gridspec_kw={'width_ratios': [1,1,0.4,3]} );
+            fig,axs = plt.subplots(nr,nc, figsize = (nc*ww,nr*hh),
+                                   gridspec_kw={'width_ratios': [1,1,0.4,3]} );
     if axs is None:
         plt.subplots_adjust(top=1-0.02)
     else:
@@ -2503,8 +2507,6 @@ def plotFeatSignifSHAP_list(pdf, outputs_grouped, fshs=['XGB_Shapley'],
 
                 ####################################
                 subaxs = axs[lblind,:]
-                subaxs[1].set_yticklabels([])
-                #subaxs[2].set_yticklabels([])
 
                 if not show_bias:
                     bias = None
@@ -2529,7 +2531,7 @@ def plotFeatSignifSHAP_list(pdf, outputs_grouped, fshs=['XGB_Shapley'],
                                     markersize=markersize, show_max = show_max,
                                     show_std = show_std, alpha=alpha,plot_signed=False,
                                      marker_mean= marker_mean, marker_max = marker_max)
-                    subaxs[2].set_yticks([])
+                    #subaxs[2].set_yticks([])
                     subaxs[2].set_title( f'{subaxs[2].get_title()}  {label_str}' )
 
 
