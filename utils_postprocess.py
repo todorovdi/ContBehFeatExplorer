@@ -625,7 +625,8 @@ def extractLightInfo(f):
 
     return removeLargeItems(res_cur)
 
-def removeLargeItems(res_cur, keep_featsel=['XGB_Shapley','XGB_Shapley2'], remove_full_scores=True, verbose=0):
+def removeLargeItems(res_cur, keep_featsel=['XGB_Shapley','XGB_Shapley2','interpret_EBM'],
+                     remove_full_scores=True, verbose=0):
     featsel_methods = list(res_cur['featsel_per_method'] )
     for fsh in featsel_methods:
         if fsh in keep_featsel:
@@ -636,7 +637,7 @@ def removeLargeItems(res_cur, keep_featsel=['XGB_Shapley','XGB_Shapley2'], remov
                 lab_enc = preprocessing.LabelEncoder()
                 # just skipped class_labels_good
                 fspm_cur = res_cur['featsel_per_method'][fsh]
-                if 'scores' in fspm_cur:
+                if 'scores' in fspm_cur and fsh != 'interpret_EBM':
                     if 'scores_av' not in fspm_cur:
                         scores = fspm_cur['scores']
 
@@ -652,6 +653,14 @@ def removeLargeItems(res_cur, keep_featsel=['XGB_Shapley','XGB_Shapley2'], remov
 
                         res_cur['featsel_per_method'][fsh]['scores_bias_av'] = bias
                     del res_cur['featsel_per_method'][fsh]['scores']
+
+                if 'explainer' in res_cur['featsel_per_method'][fsh]:
+                    del res_cur['featsel_per_method'][fsh]['explainer']
+                info_per_cp = res_cur['featsel_per_method'][fsh].get('info_per_cp',None)
+                if info_per_cp is not None:
+                    for info_cur in info_per_cp.values():
+                        if 'explainer' in info_cur:
+                            del info_cur['explainer']
         else:
             del res_cur['featsel_per_method'][fsh]
 

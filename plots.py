@@ -711,8 +711,59 @@ def plotTFRlike(dat_pri, dat_hires_pri,  tfrres_pri, tfrres_HFO_pri, csd_pri,
     plt.tight_layout()
     return locals()
 
+def plotErrorBarStrings(ax,xs,ys,xerr, add_args={},merge_bias=True):
+    from collections.abc import Iterable
+    xs = xs[:]  # copy
+    assert len(xs) == len(ys),  ( len(xs), len(ys)  )
+    if xerr is not None:
+        assert len(xerr) == len(xs)
 
-def plotErrorBarStrings(ax,xs,ys,xerr, add_args={}):
+    labs = [a.get_text() for a in ax.get_yticklabels() ]
+    lens = [len(s) for s in labs]
+    maxlen = 0
+    if len(lens):
+        maxlen = max(lens )
+    #print(maxlen)
+
+    slabs = set(labs)   # exiting labels
+    sxs = set(xs)
+    if slabs != sxs and maxlen > 0:
+        diff1,diff2 = slabs-sxs,sxs-slabs
+        if len(diff1) == len(diff2) and list(diff1)[0].startswith('bias') \
+                and list(diff2)[0].startswith('bias') and merge_bias:
+            #print(xs)
+            #print(xs[0] )
+            xs[ xs.index(list(diff2)[0] ) ] = list(diff1)[0]
+            #print(xs)
+            print('xs[0] after corr = ',xs[0] )
+
+            if np.sum( np.array(list(xs[0])) == '/' ) == 2:
+                import pdb; pdb.set_trace()
+
+            assert tuple(sxs) == tuple(slabs)
+        else:
+            print('Warning, different label sets! ', (len(set(labs)), len(set(xs))), diff1,diff2  )
+            raise ValueError('bad')
+
+
+    if not isinstance(xs[0], str):
+        xs = [ str(x) for x in xs]
+    color = add_args.get('color',None)
+    if color is not None and isinstance(color,Iterable):
+        del add_args['color']
+        if xerr is None:
+            xerr = [0] * len(ys)
+        #olids,xs_cur,ys_cur = zip(*inds)
+        for y,x,xe,c in zip( ys,xs,xerr, color ):
+        #for y,x,xe,c in zip( np.array(ys)[inds],np.array(xs)[inds],xerr, color ):
+            assert len(c) < 5
+            ax.errorbar([y],[x],xerr=[xe],color=c,**add_args)
+    else:
+        #olids,xs_cur,ys_cur = zip(*inds)
+        ax.errorbar(ys,xs,xerr=xerr,**add_args)
+
+def plotErrorBarStrings_old(ax,xs,ys,xerr, add_args={},merge_bias=True):
+    # too complex and works better without my weird sorting
     from collections.abc import Iterable
 
     labs = [a.get_text() for a in ax.get_yticklabels() ]
@@ -723,13 +774,16 @@ def plotErrorBarStrings(ax,xs,ys,xerr, add_args={}):
         maxlen = max(lens )
     inds_list = []
     if maxlen > 0:
-        slabs = set(labs)
+        slabs = set(labs)   # exiting labels
         sxs = set(xs)
         if slabs != sxs:
             #print(sxs,slabs)
-            print('Warning, different label sizes! ', (len(set(labs)), len(set(xs))), slabs-sxs,sxs-slabs )
+            diff1,diff2 = slabs-sxs,sxs-slabs
+            print('Warning, different label sets! ', (len(set(labs)), len(set(xs))), diff1,diff2  )
+            raise ValueError('achtung!')
             union = slabs | sxs
             intersect = slabs & sxs
+            # indices of intersection
             inds = [ (labs.index(x),x,  ys[xs.index(x)] ) for x in intersect]
             inds_list = [inds]
 

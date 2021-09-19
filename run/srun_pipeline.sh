@@ -197,7 +197,7 @@ fi
 PREFIXES_CROSS_BPCORR_SUBMOD=0
 PREFIXES_CROSS_BPCORR_SUBMOD_ORDBAND=0
 PREFIXES_CROSS_BPCORR_SUBMOD_ORDBAND2=0
-PREFIXES_CROSS_BPCORR_SUBMOD_ORDBAND3=1  # subset of ORDBAND2
+PREFIXES_CROSS_BPCORR_SUBMOD_ORDBAND3=0  # subset of ORDBAND2
 PREFIXES_CROSS_RBCORR_SUBMOD=0
             PREFIXES_AUX_SRC=1
                 PREFIXES_AUX=0
@@ -226,7 +226,8 @@ GROUPINGS_TO_USE="merge_movements"
 #INT_SETS_TO_USE="basic trem_vs_quiet"
 #INT_SETS_TO_USE="basic"
 #INT_SETS_TO_USE="trem_vs_hold&move"
-INT_SETS_TO_USE="basic"
+INT_SETS_TO_USE="basic trem_vs_hold&move"
+#INT_SETS_TO_USE="trem_vs_quiet"
 
 if [ $USE_AUX_IVAL_GROUPINGS -gt 0 ]; then
   GROUPINGS_TO_USE="$GROUPINGS_TO_USE merge_within_subj merge_within_medcond merge_within_task"
@@ -294,10 +295,12 @@ if [[ $BANDS_TYPE == "fine" ]]; then
   BANDS_BETA=low_beta,high_beta                  
   BANDS_GAMMA=low_gamma,high_gamma                   
   BANDS_HFO=HFO1,HFO2,HFO3                   
+  BANDS_TREMOR=tremor                   
 else
   BANDS_BETA=beta                  
   BANDS_GAMMA=gamma                   
   BANDS_HFO=HFO                   
+  BANDS_TREMOR=tremor                   
 fi
 
 if [ $do_genfeats -gt 0 ]; then
@@ -364,6 +367,10 @@ if [ $do_ML -gt 0 ]; then
       RUNSTRING_CUR=' $RS --mods msrc                              --prefix modSrc               '              
       RUNSTRINGS+=("$RUNSTRING_CUR")
       RUNSTRING_CUR=' $RS --fbands $BANDS_BETA                     --prefix allb_beta            '
+      RUNSTRINGS+=("$RUNSTRING_CUR")
+      RUNSTRING_CUR=' $RS --fbands $BANDS_GAMMA                     --prefix allb_gamma           '
+      RUNSTRINGS+=("$RUNSTRING_CUR")
+      RUNSTRING_CUR=' $RS --fbands $BANDS_TREMOR                     --prefix allb_tremor          '
       RUNSTRINGS+=("$RUNSTRING_CUR")
       RUNSTRING_CUR=' $RS --LFP_related_only 1 --cross_couplings_only 1   --prefix LFPrel_noself '       
       RUNSTRINGS+=("$RUNSTRING_CUR")

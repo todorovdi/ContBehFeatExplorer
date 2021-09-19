@@ -268,6 +268,8 @@ params_read.update(params_cmd)
 pars = params_read
 
 for opt,arg in pars.items():
+    if arg.startswith('--'):
+        raise ValueError('WRONG VALUE STRING!, argument starts with --')
     if opt == "n_channels":
         n_channels = int(arg)
     elif opt == "SLURM_job_id":
@@ -1365,6 +1367,12 @@ if do_Classif:
             #C_subset = C[indlist,:][:,indlist]
             #orig_inds = indlist[nonsyn_feat_inds]
 
+            if exit_after == 'corr_matrix':
+                print(f'Got exit_after={exit_after}, exiting!')
+                #if show_plots:
+                #    pdf.close()
+                sys.exit(0)
+
 
 
             if calc_MI:
@@ -1387,25 +1395,32 @@ if do_Classif:
             colinds_bad_VIFsel,colinds_good_VIFsel,vfs_list = None,None,None
             if calc_VIF:
                 VIF_reversed_order = 1
-                revinds = np.arange(Xconcat_good_cur.shape[1] )[::-1]
+                #revinds = np.arange(Xconcat_good_cur.shape[1] )[::-1]
                 X_for_VIF = Xconcat_good_cur[::subskip_fit,:]
                 featnames_VIF = featnames_nice
-                if VIF_reversed_order:
-                    X_for_VIF = X_for_VIF[:,revinds]
-                    featnames_VIF = list( np.array(featnames_VIF)[revinds] )
+                #if VIF_reversed_order:
+                #    X_for_VIF = X_for_VIF[:,revinds]
+                #    featnames_VIF = list( np.array(featnames_VIF)[revinds] )
 
-                print(f'starting VIF for X_for_VIF.shape={X_for_VIF.shape}')
-                colinds_bad_VIFsel_unrev,colinds_good_VIFsel_unrev,VIFs_list, \
+                print(f'starting VIF for X_for_VIF.shape={X_for_VIF.shape}, rev={VIF_reversed_order}')
+                #colinds_bad_VIFsel_unrev,colinds_good_VIFsel_unrev,VIFs_list, \
+                #    VIFsel_featsets_list,VIFsel_linreg_objs,exogs_list  = \
+                #    utsne.findBadColumnsVIF(X_for_VIF, VIF_thr=VIF_thr,n_jobs=n_jobs,
+                #                            search_worst=VIF_search_worst,
+                #                            featnames = featnames_VIF, rev=VIF_reversed_order )
+                colinds_bad_VIFsel,colinds_good_VIFsel,VIFs_list, \
                     VIFsel_featsets_list,VIFsel_linreg_objs,exogs_list  = \
                     utsne.findBadColumnsVIF(X_for_VIF, VIF_thr=VIF_thr,n_jobs=n_jobs,
-                                            search_worst=VIF_search_worst, featnames = featnames_VIF )
+                                            search_worst=VIF_search_worst,
+                                            featnames = featnames_VIF, rev=VIF_reversed_order )
 
-                colinds_bad_VIFsel   =  revinds[colinds_bad_VIFsel_unrev]
-                colinds_good_VIFsel  =  revinds[colinds_good_VIFsel_unrev]
+                #colinds_bad_VIFsel   =  revinds[colinds_bad_VIFsel_unrev]
+                #colinds_good_VIFsel  =  revinds[colinds_good_VIFsel_unrev]
+                #print('VIF-selected bad features are ',np.array(featnames_VIF)[colinds_bad_VIFsel_unrev] )
 
                 print(f'VIF truncation found {len(colinds_bad_VIFsel)}' +\
                       f'bad indices of total {Xconcat_good_cur.shape[1]}')
-                print('VIF-selected bad features are ',np.array(featnames_VIF)[colinds_bad_VIFsel_unrev] )
+                print('VIF-selected bad features are ',np.array(featnames_VIF)[colinds_bad_VIFsel] )
                 gc.collect()
 
                 VIF_truncation = {}
@@ -1415,10 +1430,12 @@ if do_Classif:
                 VIF_truncation['X_for_VIF_shape'] = X_for_VIF.shape
                 VIF_truncation[ 'colinds_bad_VIFsel'] = colinds_bad_VIFsel
                 VIF_truncation[ 'colinds_good_VIFsel'] = colinds_good_VIFsel
-                VIF_truncation[ 'colinds_bad_VIFsel_unrev'] = colinds_bad_VIFsel_unrev
-                VIF_truncation[ 'colinds_good_VIFsel_unrev'] = colinds_good_VIFsel_unrev
+                VIF_truncation[ 'VIFsel_featsets_list'] = VIFsel_featsets_list
                 VIF_truncation[ 'VIFs_list'] = VIFs_list
-                VIF_truncation['reversed_order'] = 1
+                VIF_truncation['VIFsel_linreg_objs'] = VIFsel_linreg_objs
+                VIF_truncation['reversed_order'] = VIF_reversed_order
+                #VIF_truncation[ 'colinds_bad_VIFsel_unrev'] = colinds_bad_VIFsel_unrev
+                #VIF_truncation[ 'colinds_good_VIFsel_unrev'] = colinds_good_VIFsel_unrev
                 results_cur['VIF_truncation'] = VIF_truncation
 
                 saveResToFolder(results_cur, 'VIF_truncation' )
@@ -2097,8 +2114,7 @@ if do_Classif:
             #'ldaobj_avCV':LDA_analysis_versions['all_present_features']['CV_aver']['ldaobj'],
             #'ldaobjs_CV':LDA_analysis_versions['all_present_features']['CV']['ldaobjs'],
             # 'ldaobj':LDA_analysis_versions['all_present_features']['fit_to_all_data']['ldaobj'],
-            d =   {
-                        'labels_good':class_labels_good,
+            d =   { 'labels_good':class_labels_good,
                             'class_labels':class_labels,
                            'highest_meaningful_thri':highest_meaningful_thri,
                            'feat_variance_q_thr':feat_variance_q_thr,
@@ -2147,8 +2163,8 @@ if do_Classif:
             filename_to_save =  utils.genMLresFn(rawnames,sources_type, src_file_grouping_ind, src_grouping,
                     prefix, n_channels, Xconcat_imputed.shape[1],
                     pcapts.shape[1], skip, windowsz, use_main_LFP_chan, grouping_key,int_types_key,
-                                         rawname_format = savefile_rawname_format,
-                                                 custom_rawname_str=custom_rawname_str)
+                                        rawname_format = savefile_rawname_format,
+                                        custom_rawname_str=custom_rawname_str)
 
             fname_ML_full_intermed = pjoin( gv.data_dir, output_subdir, filename_to_save)
 
@@ -2351,19 +2367,23 @@ if do_Classif:
                                 info_cur['explainer'] = global_exp
                                 info_cur['perf'] = sens,spec, F1, confmat
                                 info_cur['confmat_normalized'] = confmat_normalized
+                                # I want a duplicate becasue I might delete
+                                # explainer since it is too large
+                                info_cur['feature_names']= names
 
                                 info_per_cp[indpair_names ] = info_cur
 
                             featsel_info['info_per_cp'] = info_per_cp
                         else:
-                            print(f'Starting computing EBM for all classes')
+                            print('Starting computing EBM for all classes')
 
                             # filter classes
-                            X = Xconcat_good_cur[:, featis]
+                            X = Xconcat_good_cur[::subskip_fit, featis]
                             y = class_labels_for_heavy
 
                             from sklearn.model_selection import train_test_split
-                            X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.20, random_state=0, shuffle=True)
+                            X_train, X_test, y_train, y_test = \
+                                train_test_split(X, y, test_size=0.20, random_state=0, shuffle=True)
 
                             ebm = ExplainableBoostingClassifier(random_state=EBM_seed,
                                     feature_names=np.array(featnames_nice)[featis], n_jobs=n_jobs)
@@ -2388,6 +2408,7 @@ if do_Classif:
                             info_cur['explainer'] = global_exp
                             info_cur['perf'] = sens,spec, F1, confmat
                             info_cur['confmat_normalized'] = confmat_normalized
+                            info_cur['feature_names']= names
                             featsel_info.update(info_cur)
 
                         usage = getMemUsed();
@@ -2639,11 +2660,12 @@ if do_Classif:
 
                 print('Saving ext intermediate result to {}'.format(fname_ML_full_intermed) )
                 # updated results
-                savedict['results_cur'] =results_cur
-                np.savez(fname_ML_full_intermed, **savedict )
-
                 results_cur['class_labels_good'] = class_labels_good
                 results_cur['pars'] = savedict['pars']
+                savedict['results_cur'] =results_cur
+
+                np.savez(fname_ML_full_intermed, **savedict )
+
                 results_cur_cleaned = pp.removeLargeItems(results_cur)
 
                 fname_ML_full_intermed_light = pjoin( gv.data_dir,

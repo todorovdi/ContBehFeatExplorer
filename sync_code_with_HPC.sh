@@ -62,10 +62,11 @@ $SLEEP
 subdir=run
 echo "  rsync run files (excluding sh, only py)"
 #rsync $FLAGS $SSH_FLAG --exclude="*HPC.sh" --exclude="sbatch*" --exclude=srun_pipeline.sh --exclude=srun_exec_runstr.sh $ZBOOK_DIR/$subdir/*.{py,sh}  $JUSUF/$subdir/
-rsync $FLAGS $SSH_FLAG $ZBOOK_DIR/$subdir/*.py  $JUSUF/$subdir/
+rsync $FLAGS $SSH_FLAG $ZBOOK_DIR/$subdir/*.py --exclude=indtool.py  $JUSUF/$subdir/
 $SLEEP
 echo "  rev rsync run files (excluding sh, only py)"
 rsync $FLAGS $SSH_FLAG  $JUSUF/$subdir/*.sh  $ZBOOK_DIR/$subdir/
+rsync $FLAGS $SSH_FLAG  $JUSUF/$subdir/indtool.py  $ZBOOK_DIR/$subdir/
 $SLEEP
 echo "  rsync params"
 rsync $FLAGS $SSH_FLAG --exclude="*HPC*.ini" $ZBOOK_DIR/params/*.ini $JUSUF/params/

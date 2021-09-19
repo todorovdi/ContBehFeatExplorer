@@ -248,7 +248,13 @@ def collectPerformanceInfo3(rawnames, prefixes, ndays_before = None,
 
                 from utils_postprocess import removeLargeItems
                 if not use_light_files:
+                    res_cur['class_labels_good'] = f['class_labels_good']
                     res_cur = removeLargeItems(res_cur)
+
+                    if remove_large_items:
+                        fname_light = pjoin( dir_to_use, '_!' + fnf)
+                        print('resaving LIGHT file ',fname_light)
+                        np.savez(fname_light, results_light=res_cur)
 
                 ######################
 
@@ -1050,9 +1056,14 @@ def prepTableInfo3(output_per_raw, prefixes=None, perf_to_use_list = [('perfs_XG
                     perfs = None
                     perfs_red = None
                     num,num_red,num_red2 = None, None, None
+                    perfs_add_CV=None
+                    perfs_red_CV_recalc,perfs_CV_recalc=None,None
+                    perf_add = None
                     if r is None:
                         print(f'  Warning: no prefix {prefix} for {rn}')
+                        prefix_missing = True
                     else:
+                        prefix_missing = False
                         mult_clf_results = r[it_grp][it_set]
                         if mult_clf_results is not None:
                             class_label_names = mult_clf_results.get('class_label_names_ordered',None)
@@ -1593,6 +1604,9 @@ def plotFeatImpStats(feat_types_all, scores_stats, fign='', axs=None,
 
         names_cur = [nm] + names
         sc = [ bias_cur ] + list(sc)
+    names_cur_sum = names_cur
+
+    print('sum names = ',names_cur)
 
     if bar:
         ax.barh(names_cur,np.array(sc), color=color_cur, alpha=alpha ); #ax.tick_params(axis='x', labelrotation=90 )
@@ -1600,6 +1614,8 @@ def plotFeatImpStats(feat_types_all, scores_stats, fign='', axs=None,
         #print('skip')
         #ax.plot(np.array(sc),names_cur, color=color_cur, alpha=alpha, lw=0,
         #        marker='o'); #ax.tick_params(axis='x', labelrotation=90 )
+        if np.sum( np.array(list(names_cur[0])) == '/' ) == 2:
+            import pdb; pdb.set_trace()
 
         plotErrorBarStrings(ax,names_cur,sc,xerr=None,
             add_args={'fmt':marker_mean, 'color':color_cur,
@@ -1613,19 +1629,21 @@ def plotFeatImpStats(feat_types_all, scores_stats, fign='', axs=None,
     stat_key = stat_keys['max']
     sc = scores_stats[stat_key]
 
-    if bias is not None:
-        bias_cur = np.max(bias)
-        mx = np.max(sc)
-        if bias_cur > mx:
-            div = 2 * bias_cur / mx
-            bias_cur = mx / 2
-            nm = nm + f'/{div:.4f}'
+    #if bias is not None:
+    #    bias_cur = np.max(bias)
+    #    mx = np.max(sc)
+    #    if bias_cur > mx:
+    #        div = 2 * bias_cur / mx
+    #        bias_cur = mx / 2
+    #        nm = nm + f'/{div:.4f}'
 
     names_cur =  names
     sc =  list(sc)
     if bias is not None:
         names_cur = [nm] + names
-        sc = [ bias_cur ] + list(sc)
+        sc = [ np.nan ] + list(sc)
+
+    names_cur_max = names_cur
     if show_max:
         if bar:
             ax.barh(names_cur,np.array(sc), color=color_cur, alpha=alpha ); #ax.tick_params(axis='x', labelrotation=90 )
@@ -1638,15 +1656,22 @@ def plotFeatImpStats(feat_types_all, scores_stats, fign='', axs=None,
                     'color':color_cur, 'alpha':alpha*0.9,
                     'markersize':markersize * 1.2} )
 
+    ################################
+
     stat_key = stat_keys['mean']
     stat_key_std = stat_keys['std']
     sc = scores_stats[stat_key]
     names_cur = names
     if bias is not None:
-        nm = 'bias'
+        #nm = 'bias'
         names_cur = [nm] + names
-        sc = [ 0 ] + list(sc)
+        sc = [ bias_cur ] + list(sc)
 
+    names_cur_mean = names_cur
+    assert tuple(names_cur_mean) == tuple(names_cur_sum), (names_cur_mean,names_cur_sum)
+    assert tuple(names_cur_max) == tuple(names_cur_sum), (names_cur_max,names_cur_sum)
+
+    #print('before plotting mean')
     ax = axs[0]
     xerr_to_show = None
     if show_std:
@@ -1684,7 +1709,8 @@ def plotFeatSignifSHAP(pdf,featsel_per_method, fshs, featnames_list,
                        n_individ_feats_show=20, roi_labels = None,
                        chnames_LFP = None, body_side='L', hh=8,
                        separate_by_band = False, suptitle = None, suptitle_fontsize=20,
-                      tickfontsize = 10  ):
+                      tickfontsize = 10,
+                       marker_mean = 'o', marker_max = 'x', axs=None):
     '''
     fshs -- names of featsel method to use
     '''
@@ -1710,16 +1736,19 @@ def plotFeatSignifSHAP(pdf,featsel_per_method, fshs, featnames_list,
     fspm_def = featsel_per_method[ fshs[0]  ]
     scores = fspm_def.get('scores',None)
     if scores is None:
-        scores_pre_class_def = fspm_def.get('scores_av',None)
+        scores_per_class_def = fspm_def.get('scores_av',None)
     else:
         assert scores.shape[-1] - 1 == len(featnames_list[0]), (scores.shape[-1] , len(featnames_list[0]))
-        scores_pre_class_def = utsne.getScoresPerClass(class_labels_good_for_classif, scores)
-    nscores = len(scores_pre_class_def)
+        scores_per_class_def = utsne.getScoresPerClass(class_labels_good_for_classif, scores)
+    nscores = len(scores_per_class_def)
 
     nr = nscores; nc = 3; #nc= len(scores_stats) - 2;
     ww = 3 + 5;
-    fig,axs = plt.subplots(nr,nc, figsize = (nc*ww,nr*hh), gridspec_kw={'width_ratios': [1,1,3]} );
-    plt.subplots_adjust(top=1-0.02)
+    if axs is None:
+        fig,axs = plt.subplots(nr,nc, figsize = (nc*ww,nr*hh), gridspec_kw={'width_ratios': [1,1,3]} );
+        plt.subplots_adjust(top=1-0.02)
+    else:
+        assert axs.shape == (nr,nc)
 
 
     cmap = plt.cm.get_cmap('tab20', 20)
@@ -1731,24 +1760,24 @@ def plotFeatSignifSHAP(pdf,featsel_per_method, fshs, featnames_list,
         featnames = featnames_list[fshi]
         scores = fspm.get('scores',None)
         if scores is None:
-            scores_pre_class = fspm.get('scores_av',None)
+            scores_per_class = fspm.get('scores_av',None)
             bias = fspm.get('scores_bias_av',None)
 
         else:
             assert scores.shape[-1] - 1 == len(featnames), (scores.shape[-1] , len(featnames))
             # XGB doc: Note the final column is the bias term
-            scores_pre_class, bias = utsne.getScoresPerClass(class_labels_good_for_classif, scores, ret_bias=1)
+            scores_per_class, bias = utsne.getScoresPerClass(class_labels_good_for_classif, scores, ret_bias=1)
             print( fspm.keys(), scores.shape )
 
 
         # make plots for every class label
-        for lblind in range(scores_pre_class.shape[0] ):
+        for lblind in range(scores_per_class.shape[0] ):
             # select points where true class is like the current one
             #ptinds = np.where(class_labels_good_for_classif == lblind)[0]
             #classid_enconded = lblind
             #scores_cur = np.mean(scores[ptinds,lblind,0:-1], axis=0)
 
-            scores_cur = scores_pre_class[lblind]
+            scores_cur = scores_per_class[lblind]
             label_str = class_label_names[lblind]
 
             ###############################
@@ -1978,7 +2007,7 @@ def plotFeatSignifSHAP(pdf,featsel_per_method, fshs, featnames_list,
             #postp.plotFeatureImportance(ax, featnames, scores[ptinds,lblind,:], 'XGB_Shapley')
             sort_individ_feats = fshi == 0
             plotFeatureImportance(ax, featnames,
-                                        scores_pre_class[lblind,:],
+                                        scores_per_class[lblind,:],
                                         'labind_vs_score', color=colors_fsh[fshi],
                                         sort = sort_individ_feats, nshow=n_individ_feats_show)
             ax.set_title( f'{figname_prefix}: ' + ax.get_title() + f'_lblind = {label_str} (lblind={lblind}):  {fsh}' )
@@ -2012,9 +2041,14 @@ def plotFeatSignifSHAP_list(pdf, outputs_grouped, fshs=['XGB_Shapley'],
                        separate_by_band = False, suptitle = None, suptitle_fontsize=20,
                       tickfontsize = 10, show_bias=False,
                             use_best_LFP=False, markersize=10, show_max = True,
-                           merge_Hjorth = False, show_std = True, average_over_subjects = True,
+                           merge_Hjorth = False,
+                            Hjorth_diff_color=False,
+                            show_std = True, average_over_subjects = True,
                             alpha = 0.8, alpha_over_subj = 1., use_full_scores=False,
-                            featsel_on_VIF=True, show_abs_plots=False ):
+                            featsel_on_VIF=True, show_abs_plots=False,
+                            reconstruct_from_VIF = False,
+                            marker_mean = 'o', marker_max = 'x',
+                            axs=None, grand_average_per_feat_type=1):
     '''
     fshs -- names of featsel method to use
     '''
@@ -2044,7 +2078,8 @@ def plotFeatSignifSHAP_list(pdf, outputs_grouped, fshs=['XGB_Shapley'],
     #class_labels_good_for_classif  = mult_clf_output['class_labels_good']
     class_labels_good_for_classif  = mult_clf_output['class_labels_good_for_classif']
 
-    colinds_good_VIFsel  = mult_clf_output['VIF_truncation'].get('colinds_good_VIFsel',None)
+    VIF_truncation = mult_clf_output.get('VIF_truncation',None)
+    colinds_good_VIFsel  = VIF_truncation.get('colinds_good_VIFsel',None)
     if colinds_good_VIFsel is not None and featsel_on_VIF:
         featnames = np.array(featnames)[colinds_good_VIFsel]
 
@@ -2063,21 +2098,26 @@ def plotFeatSignifSHAP_list(pdf, outputs_grouped, fshs=['XGB_Shapley'],
     fspm_def = featsel_per_method[ fshs[0]  ]
     scores = fspm_def.get('scores',None)
     if scores is None:
-        scores_pre_class_def = fspm_def.get('scores_av',None)
+        scores_per_class_def = fspm_def.get('scores_av',None)
     else:
         assert scores.shape[-1] - 1 == len(featnames), (scores.shape[-1] , len(featnames))
-        scores_pre_class_def = utsne.getScoresPerClass(class_labels_good_for_classif, scores)
-    nscores = len(scores_pre_class_def)
+        scores_per_class_def = utsne.getScoresPerClass(class_labels_good_for_classif, scores)
+    nscores = len(scores_per_class_def)
 
     nr = nscores;
     ww = 2 + 3 + 5;
     if show_abs_plots:
         nc = 2 + 2 + 1 + 1; #nc= len(scores_stats) - 2;
-        fig,axs = plt.subplots(nr,nc, figsize = (nc*ww,nr*hh), gridspec_kw={'width_ratios': [1,1,1,1,0.4,3]} );
+        if axs is None:
+            fig,axs = plt.subplots(nr,nc, figsize = (nc*ww,nr*hh), gridspec_kw={'width_ratios': [1,1,1,1,0.4,3]} );
     else:
         nc = 2 + 1 + 1;
-        fig,axs = plt.subplots(nr,nc, figsize = (nc*ww,nr*hh), gridspec_kw={'width_ratios': [1,1,0.4,3]} );
-    plt.subplots_adjust(top=1-0.02)
+        if axs is None:
+            fig,axs = plt.subplots(nr,nc, figsize = (nc*ww,nr*hh), gridspec_kw={'width_ratios': [1,1,0.4,3]} );
+    if axs is None:
+        plt.subplots_adjust(top=1-0.02)
+    else:
+        assert axs.shape == (nr,nc)
 
 
     cmap = plt.cm.get_cmap('tab20', 20)
@@ -2094,10 +2134,15 @@ def plotFeatSignifSHAP_list(pdf, outputs_grouped, fshs=['XGB_Shapley'],
         featsel_per_method   = mult_clf_output['featsel_per_method']
         featnames            = mult_clf_output['feature_names_filtered'].copy()
         class_label_names    = mult_clf_output.get('class_label_names_ordered',None)
+
+        VIF_truncation = mult_clf_output.get('VIF_truncation',None)
         colinds_good_VIFsel  = mult_clf_output['VIF_truncation'].get('colinds_good_VIFsel',None)
         #print('colinds_good_VIFsel ',colinds_good_VIFsel)
 
         assert not ( (colinds_good_VIFsel is not None) and use_best_LFP), 'requires more thinking'
+
+
+
 
         if colinds_good_VIFsel is not None and featsel_on_VIF:
             featnames_sub = np.array(featnames)[colinds_good_VIFsel]
@@ -2143,6 +2188,13 @@ def plotFeatSignifSHAP_list(pdf, outputs_grouped, fshs=['XGB_Shapley'],
         else:
             chnames_LFP_cur = chnames_LFP
 
+        #####
+        exogs_list = VIF_truncation['exogs_list']
+        VIF_truncation['VIF_search_worst']
+        #VIF_truncation['X_for_VIF_shape'] = X_for_VIF.shape
+        colinds_bad         = VIF_truncation[ 'colinds_bad_VIFsel']
+        VIFsel_linreg_objs  = VIF_truncation['VIFsel_linreg_objs']
+        VIFsel_featsets_list  = VIF_truncation[ 'VIFsel_featsets_list']
 
 
         for fshi,fsh in enumerate(fshs):
@@ -2153,35 +2205,57 @@ def plotFeatSignifSHAP_list(pdf, outputs_grouped, fshs=['XGB_Shapley'],
             if scores is None:
                 if use_full_scores:
                     raise ValueError('we need full scores!')
-                scores_pre_class = fspm.get('scores_av',None)
+                scores_per_class = fspm.get('scores_av',None)
                 bias = fspm.get('scores_bias_av',None)
 
+                if reconstruct_from_VIF:
+                    scores_per_class_VIF = scores_per_class
+                    scores_per_class_reconstructed = utsne.reconstructFullScoresFromVIFScores(scores_per_class_VIF,
+                        len(featnames), colinds_bad,colinds_good_VIFsel,
+                        VIFsel_featsets_list, VIFsel_linreg_objs, exogs_list )
+
+                    featnames_sub = featnames
             else:
                 if use_full_scores:
                     if len(set(class_labels_good_for_classif) ) == 2:
                         scores = scores[:,None,:]
                         scores = np.concatenate( [scores,scores], axis=1)
                     assert scores.ndim == 3, scores.shape
+
+                    if reconstruct_from_VIF:
+                        scores_full_per_class_VIF = scores
+                        scores_full_reconstructed = utsne.reconstructFullScoresFromVIFScores(scores_full_per_class_VIF,
+                            len(featnames), colinds_bad,colinds_good_VIFsel,
+                            VIFsel_featsets_list, VIFsel_linreg_objs, exogs_list )
+
+                        scores = scores_full_reconstructed
+                        featnames_sub = featnames
+
                 assert scores.shape[-1] - 1 == len(featnames_sub), (scores.shape[-1] , len(featnames_sub))
                 # XGB doc: Note the final column is the bias term
-                scores_pre_class, bias = utsne.getScoresPerClass(class_labels_good_for_classif,
+                scores_per_class, bias = utsne.getScoresPerClass(class_labels_good_for_classif,
                                                                  scores, ret_bias=1)
+
+                #if reconstruct_from_VIF:
+                #    scores_per_class_VIF = scores_per_class
+                #    scores_per_class_reconstructed = utsne.reconstructFullScoresFromVIFScores(scores_per_class_VIF,
+                #        len(featnames), colinds_bad,colinds_good_VIFsel,
+                #        VIFsel_featsets_list, VIFsel_linreg_objs, exogs_list )
                 #print( fspm.keys(), scores.shape )
             print('scores.shape = ',scores.shape)
             #import pdb;pdb.set_trace()
 
-            assert scores_pre_class.shape[-1] == len(featnames_sub),  (scores_pre_class.shape[-1], len(featnames_sub))
+            assert scores_per_class.shape[-1] == len(featnames_sub),  (scores_per_class.shape[-1], len(featnames_sub))
 
-
-
+            ###############################################
             # make plots for every class label
-            for lblind in range(scores_pre_class.shape[0] ):
+            for lblind in range(scores_per_class.shape[0] ):
                 # select points where true class is like the current one
                 #ptinds = np.where(class_labels_good_for_classif == lblind)[0]
                 #classid_enconded = lblind
                 #scores_cur = np.mean(scores[ptinds,lblind,0:-1], axis=0)
 
-                scores_cur = scores_pre_class[lblind]
+                scores_cur = scores_per_class[lblind]
                 if use_full_scores:
                     scores_full_cur = scores[:,lblind,:]
                 label_str = class_label_names[lblind]
@@ -2194,11 +2268,11 @@ def plotFeatSignifSHAP_list(pdf, outputs_grouped, fshs=['XGB_Shapley'],
                 clrs = []
 
                 clri = 0
-                feat_groups_basic = [f'^{ft}_.*' for ft in ftype_info['ftypes']]
-                feat_groups_all+= feat_groups_basic
-                feature_groups_names += feat_groups_basic
-                clrs += [cmap(clri)] * len(feat_groups_basic)
-
+                if grand_average_per_feat_type:
+                    feat_groups_basic = [f'^{ft}_.*' for ft in ftype_info['ftypes']]
+                    feat_groups_all+= feat_groups_basic
+                    feature_groups_names += feat_groups_basic
+                    clrs += [cmap(clri)] * len(feat_groups_basic)
                 clri += 1
 
                 ft = 'bpcorr'
@@ -2261,6 +2335,8 @@ def plotFeatSignifSHAP_list(pdf, outputs_grouped, fshs=['XGB_Shapley'],
                         chn_templ = f'msrc(R|L)_9_({pas})_c[0-9]+'
 
                         if wasH:
+                            if Hjorth_diff_color:
+                                clri += 1
                             ft_templ = f'({"|".join(gv.noband_feat_types) })'
                             a = [f'^{ft_templ}_{chn_templ}']
                             feat_groups_all += a
@@ -2339,11 +2415,12 @@ def plotFeatSignifSHAP_list(pdf, outputs_grouped, fshs=['XGB_Shapley'],
                     fbpairs_dispnames = [('*','*')]
                     fbsolos_dispnames = ['*']
 
-                    clri += 1
+                    #clri += 1
                     if roi_labels is not None:
                         # main side (body)
                         # get parcel indices of
                         for grpn,parcel_list in gp.parcel_groupings_post.items():
+                            clri += 1
                             #feat_groups_cur = []
                             #print(parcel_list)
                             plws = utils.addSideToParcels(parcel_list, body_side)
@@ -2420,9 +2497,9 @@ def plotFeatSignifSHAP_list(pdf, outputs_grouped, fshs=['XGB_Shapley'],
                     rn_ = rn[0]
                 else:
                     rn_ = rn
-                #outs +=   [ (rn_,prefix,grp,int_type,fsh,scores_pre_class,bias)  ]
+                #outs +=   [ (rn_,prefix,grp,int_type,fsh,scores_per_class,bias)  ]
 
-                outs +=   [ (rn_,prefix,grp,int_type,fsh,featnames_nice_sub,label_str,scores_pre_class[lblind],feat_imp_stats )  ]
+                outs +=   [ (rn_,prefix,grp,int_type,fsh,featnames_nice_sub,label_str,scores_per_class[lblind],feat_imp_stats )  ]
 
                 ####################################
                 subaxs = axs[lblind,:]
@@ -2437,17 +2514,26 @@ def plotFeatSignifSHAP_list(pdf, outputs_grouped, fshs=['XGB_Shapley'],
                 plotFeatImpStats(feat_groups_all, feat_imp_stats, axs= subaxs[:2],
                                 bias=bias, color=colors_fsh[fshi], bar=False,
                                  markersize=markersize, show_max = show_max,
-                                 show_std = show_std, alpha=alpha, plot_signed=True)
+                                 show_std = show_std, alpha=alpha,
+                                 plot_signed=True,
+                                 marker_mean= marker_mean,
+                                 marker_max = marker_max)
                 subaxs[0].tick_params(axis='y', labelsize=  tickfontsize)
                 subaxs[0].set_title( f'{subaxs[0].get_title()}  {label_str}' )
+
+                #fig.canvas.draw() # needed to set yticks
 
                 if show_abs_plots:
                     plotFeatImpStats(feat_groups_all, feat_imp_stats, axs= subaxs[2:4],
                                     bias=bias, color=colors_fsh[fshi], bar=False,
                                     markersize=markersize, show_max = show_max,
-                                    show_std = show_std, alpha=alpha,plot_signed=False)
+                                    show_std = show_std, alpha=alpha,plot_signed=False,
+                                     marker_mean= marker_mean, marker_max = marker_max)
                     subaxs[2].set_yticks([])
                     subaxs[2].set_title( f'{subaxs[2].get_title()}  {label_str}' )
+
+
+                    #fig.canvas.draw() # needed to set yticks
 
                 #subaxs[0].tick_params(axis='y', labelsize=  tickfontsize)
                 #plt.tight_layout()
@@ -2461,7 +2547,7 @@ def plotFeatSignifSHAP_list(pdf, outputs_grouped, fshs=['XGB_Shapley'],
                 #postp.plotFeatureImportance(ax, featnames_sub, scores[ptinds,lblind,:], 'XGB_Shapley')
                 sort_individ_feats = fshi == 0
                 plotFeatureImportance(ax, featnames_nice_sub,
-                                            scores_pre_class[lblind,:],
+                                            scores_per_class[lblind,:],
                                             'labind_vs_score',
                                             color=colors_fsh[fshi],
                                             sort = sort_individ_feats,
@@ -2495,12 +2581,14 @@ def plotFeatSignifSHAP_list(pdf, outputs_grouped, fshs=['XGB_Shapley'],
                     perfs = pcm['perf_aver']
 
                 ax = subaxs[-2]
-                ax.set_xlim(-1,101)
+                ax.set_xlim(50,101)
                 ax.set_ylim(-1,101)
                 if lblind == 0:
-                    ax.scatter( [perfs[1] * 100], [ perfs[0] * 100 ], c='red' )
+                    ax.scatter( [perfs[1] * 100], [ perfs[0] * 100 ], c='red',
+                               marker = marker_mean, s=15 )
                 if perf_from_confmat is not None:
-                    ax.scatter( [perf_from_confmat[1] * 100], [ perf_from_confmat[0] * 100 ], c='green' )
+                    ax.scatter( [perf_from_confmat[1] * 100], [ perf_from_confmat[0] * 100 ], c='green',
+                               marker = marker_mean, s=15)
                 ax.set_xlabel('spec')
                 ax.set_ylabel('sens')
                 ax.set_title('performance')
@@ -2519,7 +2607,7 @@ def plotFeatSignifSHAP_list(pdf, outputs_grouped, fshs=['XGB_Shapley'],
     #stats['inds_lists'] = inds_lists
 
     # mutli-subjects on one? or across fshs?
-    #for lblind in range(scores_pre_class.shape[0] ):
+    #for lblind in range(scores_per_class.shape[0] ):
     ## assume same number of scores in all subjects
     #    for fshi,fsh in enumerate(fshs):
     #        stats = [ feat_imp_stats for (rn,fsh_,lblind_ , feat_imp_stats ) in stats_per_all \
@@ -2566,7 +2654,10 @@ def plotFeatSignifSHAP_list(pdf, outputs_grouped, fshs=['XGB_Shapley'],
 
 
 def plotTableInfos2(table_info_per_perf_type, perf_tuple,
-                      output_subdir='', alpha_bar = 0.7, use_recalc_perf = True):
+                      output_subdir='', alpha_bar = 0.7,
+                    use_recalc_perf = True, prefixes_sorted = None,
+                    crop_rawname=slice(None,None),
+                   sort_by_featnum = 0 ):
     import matplotlib.pyplot as plt
 
     info_per_rn_pref = table_info_per_perf_type[perf_tuple]
@@ -2623,15 +2714,18 @@ def plotTableInfos2(table_info_per_perf_type, perf_tuple,
     else:
         raise ValueError('wrong pveclen')
 
-    for rowname,rowinfo in info_per_rn_pref.items():
+    for rowid_tuple,rowinfo in info_per_rn_pref.items():
         xs, xs_red, xs_red2 = [],[],[]
         ys, ys_red, ys_add = [],[],[]
         nums_red = []
-        prefixes_sorted = list(sorted(rowinfo.keys()))
+        if prefixes_sorted is None:
+            prefixes_sorted = list(sorted(rowinfo.keys()))
         prefixes_wnums = []
         str_per_pref = {}
         for prefix in prefixes_sorted:
             prefinfo = rowinfo[prefix]
+            if np.isnan(prefinfo['sens']):
+                continue
 
 
             num = prefinfo.get('num',-1)
@@ -2655,8 +2749,8 @@ def plotTableInfos2(table_info_per_perf_type, perf_tuple,
                 #print(pvec_red)
             else:
                 pvec = [prefinfo[os] for os in order]
-                pvec_red = [prefinfo[os + '_red' ] for os in order]
-                pvec_add = [prefinfo[os + '_add' ] for os in order]
+                pvec_red = [prefinfo.get(os + '_red' , np.nan) for os in order]
+                pvec_add = [prefinfo.get(os + '_add' , np.nan) for os in order]
             pvec = pvec[:pveclen]
             pvec_red = pvec_red[:pveclen]
             #pvec_red = [prefinfo['sens_red'], prefinfo['spec_red'] , prefinfo['F1_red']]
@@ -2691,26 +2785,32 @@ def plotTableInfos2(table_info_per_perf_type, perf_tuple,
             ys_red += [p_red]
             ys_add += [p_add]
 
+        print( prefixes_wnums )
+
         #print(ys_red)
-        str_per_pref_per_rowname[rowname] = str_per_pref
+        str_per_pref_per_rowname[rowid_tuple] = str_per_pref
 
 
         rowind_scatter_numnum = 0
         rowind_scatter = 1
         rowind_bars = 2
 
+        rowid_tuple_to_show = ( rowid_tuple[0][crop_rawname],*rowid_tuple[1:] )
 
         ax = axs[axind,rowind_scatter_numnum]
-        ax.set_title(rowname )
+        ax.set_title(rowid_tuple_to_show )
 
         ax.scatter(xs,xs_red, c = color_full)
         ax.set_xlabel('Number of features, full')
         ax.set_ylabel('Number of features, reduced')
-        ax.plot([0, np.max(xs)], [0, np.max(xs)], ls='--')
-        ax.set_ylim(0,np.max(xs_red)*1.1 )
+        if len(xs):
+            ax.plot([0, np.max(xs)], [0, np.max(xs)], ls='--')
+        if len(xs_red):
+            ax.set_ylim(0,np.max(xs_red)*1.1 )
 
-        if np.max(xs_red2) > 0 :
-            ax.plot([0, np.max(xs)], [0, np.max(xs_red2)], ls='--', c=color_red2)
+            if np.max(xs_red2) > 0 :
+                ax.plot([0, np.max(xs)], [0, np.max(xs_red2)],
+                        ls='--', c=color_red2)
 
 
         #ax.plot([0, 1], [0, 1], transform=ax.transAxes, ls='--')
@@ -2718,10 +2818,10 @@ def plotTableInfos2(table_info_per_perf_type, perf_tuple,
         ####################################
 
         ax = axs[axind,rowind_scatter]
-        ax.set_title(rowname)
+        ax.set_title(rowid_tuple_to_show)
         ax.scatter(xs,ys, c = color_full)
         ax.scatter(xs_red,ys_red, c = color_red)
-        if np.max(xs_red2) > 0 :
+        if len(xs_red2) and np.max(xs_red2) > 0 :
             ax.plot([0, np.max(xs_red2)], [0, np.max(ys_red)], ls='--', c=color_red2)
         ax.set_ylabel(perftype)
         ax.set_xlabel('Number of features')
@@ -2729,9 +2829,13 @@ def plotTableInfos2(table_info_per_perf_type, perf_tuple,
         #ax.set_xlabel('total feature number')
         ####################################
         ax = axs[axind,rowind_bars]
-        ax.set_title(str(rowname)  + ';  order=' + ','.join(order[:pveclen] ) )
+        if len(xs):
+            ax.set_title(str(rowid_tuple_to_show)  + ';  order=' + ','.join(order[:pveclen] ) )
         ax.yaxis.tick_right()
-        sis = np.argsort(xs)
+        if sort_by_featnum:
+            sis = np.argsort(xs)
+        else:
+            sis = np.arange(len(prefixes_wnums) )
         ax.barh(np.array(prefixes_wnums)[sis], np.array(ys)[sis], color = color_full,    alpha=alpha_bar)
         ax.barh(np.array(prefixes_wnums)[sis], np.array(ys_red)[sis], color = color_red, alpha=alpha_bar)
         ax.barh(np.array(prefixes_wnums)[sis], np.array(ys_add)[sis], color = color_red, alpha=alpha_bar)
@@ -3415,4 +3519,48 @@ def plotFeatHists(rawnames,featnames,featis,X_pri,Xconcat, bindict_per_rawn,
         plt.savefig(pjoin(gv.dir_fig, figname))
         plt.close()
 
+def loadFullScores(outputs_grouped, crop_fname='auto'):
+    # adds full scores to the outputs
+    from pathlib import Path
+    import gc
+    import os
 
+    for rn,a in outputs_grouped.items():
+        (prefix,grp,int_type), mult_clf_output = a
+        #tpl_cur = tpll[0]
+        #mult_clf_output = tpl_cur[-1]
+        scores = mult_clf_output['featsel_per_method']['XGB_Shapley'].get('scores',None)
+        # temp
+#         if scores is not None:
+#             del mult_clf_output['featsel_per_method']['XGB_Shapley']['scores']
+#             scores = None
+
+        if scores is None:
+            filename_fullsize = mult_clf_output['filename_full']
+            pfsz = Path(filename_fullsize)
+            if crop_fname == 'yes':
+                do_crop = 1
+            elif crop_fname == 'no':
+                do_crop = 0
+            elif crop_fname == 'auto':
+                do_crop = pfsz.name.startswith('_!')
+
+            if do_crop:
+                filename_fullsize = pjoin(pfsz.parents[0], pfsz.name[2:])
+            else:
+                filename_fullsize = pjoin(pfsz.parents[0], pfsz.name)
+
+            if not os.path.exists(filename_fullsize):
+                print(f'!!!! {filename_fullsize} does not exist')
+                return
+
+            finfo = os.stat( filename_fullsize )
+            print(finfo.st_size / (1024**2))
+            f = np.load(filename_fullsize,allow_pickle=True)
+            results_cur = f['results_cur'][()]
+            scores = results_cur['featsel_per_method']['XGB_Shapley']['scores']
+
+            mult_clf_output['featsel_per_method']['XGB_Shapley']['scores'] = scores
+            del f
+            gc.collect()
+        print(scores.shape)

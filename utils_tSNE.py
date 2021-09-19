@@ -2708,19 +2708,46 @@ def sklearn_VIF(X, exogs,n_jobs, VIF_thr=10, search_worst=True,
     return vif_dict,tolerance_dict,linreg_dict
 
 def findBadColumnsVIF(X,VIF_thr=10,n_jobs=-1, search_worst=False, featnames=None,
-                      printLog=1):
+                      printLog=1, rev=False):
     # finds iteratively what to get rid of
     #for coi,col_ind in enumerate(col_ordering):
     # search_worst -- whether we throw away worst or just first bad
     # order in colinds_bad, vfs_list and lingreg_obj is the same
     # colind_bad is the index in global numbering
+
+
     if featnames is not None:
         assert len(featnames) == X.shape[1]
     import gc;
     colinds_all = np.arange(X.shape[1])
 
-    if len(colinds_all) <= 2:
+    if len(colinds_all) < 2:
         return [],colinds_all,[],[],[],[]
+
+    if rev:
+        revinds = np.arange(X.shape[1])[::-1]
+        r = findBadColumnsVIF(X[:,revinds],VIF_thr,n_jobs,search_worst,
+                              np.array(featnames)[revinds],printLog,rev=0)
+        colinds_bad,cols_good, vfs_list, featsets_list, linreg_objs, exogs_list = r
+
+        colinds_bad = revinds[colinds_bad]
+        if len(colinds_bad) == 0:
+            cols_good = colinds_all
+        else:
+            cols_good = np.setdiff1d(colinds_all,colinds_bad)
+
+        for i in range(len(featsets_list)) :
+            fs = featsets_list[i]
+            if i < len(exogs_list):
+                exogs = exogs_list[i]
+                fs_rev = revinds[ fs[exogs] ] # elements of colinds_good
+            featsets_list[i] = revinds[fs][::-1]
+            if i < len(exogs_list):
+                exogs_list[i] = [list(featsets_list[i]).index(e) for e in fs_rev][::-1]
+            linreg_objs[i].coef_ = linreg_objs[i].coef_[::-1]
+
+        return colinds_bad,cols_good, vfs_list, featsets_list, linreg_objs, exogs_list
+
 
     colinds_bad = []
     vfs_list = []
@@ -2729,7 +2756,8 @@ def findBadColumnsVIF(X,VIF_thr=10,n_jobs=-1, search_worst=False, featnames=None
     exogs_list = []
     for iter_num in colinds_all:
         colinds_good = np.setdiff1d(colinds_all,colinds_bad)  # inds in orig
-        featsets_list += [colinds_good]
+        if len(colinds_good) <= 1:  # then we could not select not_exog
+            break
         Xcur = X[:,colinds_good]
 
         if len(colinds_bad) >= 2:  # assert we have increasing order
@@ -2774,9 +2802,10 @@ def findBadColumnsVIF(X,VIF_thr=10,n_jobs=-1, search_worst=False, featnames=None
             raise ValueError('not implemented')
         linreg_obj = linreg_dict[exog_outs[mi] ]
         linreg_objs += [linreg_obj]
-        exogs_list += [exogs]  # indices of elements of good_inds
+        exogs_list += [exogs]  # indices of elements of colinds_good
 
         colind_bad = colinds_good [ exog_outs[mi] ]
+        featsets_list += [colinds_good]
 
         featname_info = ''
         if featnames is not None:
@@ -2785,9 +2814,9 @@ def findBadColumnsVIF(X,VIF_thr=10,n_jobs=-1, search_worst=False, featnames=None
             print(f'findBadColumnsVF: iter_num={iter_num} '
                 f'len(colinds_bad)={len(colinds_bad)}/{len(colinds_all)} '
                   f'worst(-ish) VIF is {vf_worst:.2f}, badind={colind_bad}{featname_info} (search_worst={int(search_worst)})', flush=True)
-            print(f'linreg shape {linreg_obj.coef_.shape}, '
-                  f'colinds_good{exogs}={colinds_good[exogs]}, '
-                  f'colinds_good={colinds_good}, exog_outs={exog_outs}, {values}' )
+            #print(f'linreg shape {linreg_obj.coef_.shape}, '
+            #      f'colinds_good[exogs={exogs}]={colinds_good[exogs]}, '
+            #      f'colinds_good={colinds_good}, exog_outs={exog_outs}, {values}' )
         if vf_worst >= VIF_thr:
             colinds_bad += [colind_bad]
         else:
@@ -2801,6 +2830,7 @@ def findBadColumnsVIF(X,VIF_thr=10,n_jobs=-1, search_worst=False, featnames=None
         cols_good = np.setdiff1d(colinds_all,colinds_bad)
     return colinds_bad,cols_good, vfs_list, featsets_list, linreg_objs, exogs_list
 
+
 def reconstructFullScoresFromVIFScores(scores_per_class_VIF, nfeats_total,
                                       colinds_bad,cols_good, featsets_list, linreg_objs, exogs_list,
                                        printLog=0, ):
@@ -2808,10 +2838,18 @@ def reconstructFullScoresFromVIFScores(scores_per_class_VIF, nfeats_total,
     if len(colinds_bad) == 0:
         return scores_per_class_VIF
     #scores_reconstructed = scores_per_class.copy() * np.nan # I only need shape
-    scores_reconstructed = np.ones( (scores_per_class_VIF.shape[0] , nfeats_total)  ) *np.nan
     #exogs_glob_inds = featsets_list[-1][exogs_list[-1]]
     #actual_exogs = np.setdiff1d(exogs_glob_inds, [colinds_bad[-1]])
-    scores_reconstructed[:,cols_good] = scores_per_class_VIF
+    if scores_per_class_VIF.ndim == 2:
+        scores_reconstructed = np.ones( (scores_per_class_VIF.shape[0] , nfeats_total)  ) *np.nan
+        scores_reconstructed[:,cols_good] = scores_per_class_VIF
+    elif scores_per_class_VIF.ndim == 3:
+        scores_reconstructed = np.ones( (scores_per_class_VIF.shape[0],
+                                         scores_per_class_VIF.shape[1] , nfeats_total + 1)  ) *np.nan
+        assert np.max(cols_good) < nfeats_total
+        # bias should go to the end separately
+        scores_reconstructed[:,:,cols_good] = scores_per_class_VIF[:,:,:-1]
+        scores_reconstructed[:,:,-1] = scores_per_class_VIF[:,:,-1]
 
     for i,badind in list(enumerate(colinds_bad) )[::-1]:
         linreg_coef = linreg_objs[i].coef_
@@ -2827,10 +2865,18 @@ def reconstructFullScoresFromVIFScores(scores_per_class_VIF, nfeats_total,
 
         assert len(inds_regressed_from) == len(linreg_coef)
         #reconstracted_perf = sc[]
-        val = np.dot( scores_reconstructed[:,inds_regressed_from], linreg_coef)
+        if scores_per_class_VIF.ndim == 2:
+            val = np.dot( scores_reconstructed[:,inds_regressed_from], linreg_coef)
+            scores_reconstructed[:,badind] = val
+        elif scores_per_class_VIF.ndim == 3:
+            val = np.dot( scores_reconstructed[:,:,inds_regressed_from], linreg_coef)
+            scores_reconstructed[:,:,badind] = val
         if printLog:
             print(val)
-        scores_reconstructed[:,badind] = val
+
+
+    #if scores_per_class_VIF.ndim == 3:
+    #    scores_reconstructed
 
     return scores_reconstructed
 
