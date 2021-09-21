@@ -45,19 +45,10 @@ else
   SLEEP=""
 fi
 
-echo "  rsync req"
-rsync $FLAGS $SSH_FLAG "$ZBOOK_DIR/requirements.txt" $JUSUF/
-$SLEEP
 #FNS=`ls -L *.{py,sh}`
 #rsync $FLAGS --progress $SSH_FLAG $FNS jusuf:data_proc_code/
 echo "  rsync souce code"
 rsync $FLAGS $SSH_FLAG --exclude="*HPC.py" --exclude="sync*HPC.sh"  $ZBOOK_DIR/*.{py,sh,m}  $JUSUF/
-
-echo "  rev rsync souce code"
-rsync $FLAGS $SSH_FLAG --exclude="sync*HPC.sh" $JUSUF/*HPC.py $ZBOOK_DIR/
-$SLEEP
-echo "  rsync json"
-rsync $FLAGS $SSH_FLAG --exclude="*HPC" $ZBOOK_DIR/*.json  $JUSUF/
 $SLEEP
 subdir=run
 echo "  rsync run files (excluding sh, only py)"
@@ -68,6 +59,12 @@ echo "  rev rsync run files (excluding sh, only py)"
 rsync $FLAGS $SSH_FLAG  $JUSUF/$subdir/*.sh  $ZBOOK_DIR/$subdir/
 rsync $FLAGS $SSH_FLAG  $JUSUF/$subdir/indtool.py  $ZBOOK_DIR/$subdir/
 $SLEEP
+echo "  rev rsync souce code"
+rsync $FLAGS $SSH_FLAG --exclude="sync*HPC.sh" $JUSUF/*HPC.py $ZBOOK_DIR/
+$SLEEP
+echo "  rsync json"
+rsync $FLAGS $SSH_FLAG --exclude="*HPC" $ZBOOK_DIR/*.json  $JUSUF/
+$SLEEP
 echo "  rsync params"
 rsync $FLAGS $SSH_FLAG --exclude="*HPC*.ini" $ZBOOK_DIR/params/*.ini $JUSUF/params/
 echo "  rev rsync params"
@@ -76,3 +73,12 @@ echo "  rsync test data"
 rsync $FLAGS $SSH_FLAG $ZBOOK_DIR/test_data/*.py $JUSUF/test_data/
 echo "  rev rsync helper_scripts"
 rsync $FLAGS $SSH_FLAG $JUSUF/helper_scripts/*.sh $ZBOOK_DIR/helper_scripts/ 
+
+
+# save current code version and make it transferable to HPC (we don't have git there)
+git tag | tail -1 > last_code_ver_synced_with_HPC.txt
+
+echo "  rsync req"
+rsync $FLAGS $SSH_FLAG "$ZBOOK_DIR/requirements.txt" $JUSUF/
+rsync $FLAGS $SSH_FLAG "$ZBOOK_DIR/last_code_ver_synced_with_HPC.txt" $JUSUF/
+$SLEEP

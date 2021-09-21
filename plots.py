@@ -711,7 +711,7 @@ def plotTFRlike(dat_pri, dat_hires_pri,  tfrres_pri, tfrres_HFO_pri, csd_pri,
     plt.tight_layout()
     return locals()
 
-def plotErrorBarStrings(ax,xs,ys,xerr, add_args={},merge_bias=True):
+def plotErrorBarStrings(ax,xs,ys,xerr, add_args={},merge_bias=True, same_sets_only=1):
     from collections.abc import Iterable
     xs = xs[:]  # copy
     assert len(xs) == len(ys),  ( len(xs), len(ys)  )
@@ -740,10 +740,12 @@ def plotErrorBarStrings(ax,xs,ys,xerr, add_args={},merge_bias=True):
             if np.sum( np.array(list(xs[0])) == '/' ) == 2:
                 import pdb; pdb.set_trace()
 
-            assert tuple(sxs) == tuple(slabs)
-        else:
+        elif same_sets_only:
             print('Warning, different label sets! ', (len(set(labs)), len(set(xs))), diff1,diff2  )
             raise ValueError('bad')
+
+    if maxlen > 0 and same_sets_only:
+        assert tuple(xs) == tuple(labs)
 
 
     if not isinstance(xs[0], str):
@@ -751,16 +753,31 @@ def plotErrorBarStrings(ax,xs,ys,xerr, add_args={},merge_bias=True):
     color = add_args.get('color',None)
     if color is not None and isinstance(color,Iterable):
         del add_args['color']
+        xerr_orig = xerr
         if xerr is None:
             xerr = [0] * len(ys)
         #olids,xs_cur,ys_cur = zip(*inds)
         for y,x,xe,c in zip( ys,xs,xerr, color ):
         #for y,x,xe,c in zip( np.array(ys)[inds],np.array(xs)[inds],xerr, color ):
             assert len(c) < 5
-            ax.errorbar([y],[x],xerr=[xe],color=c,**add_args)
+            if xerr_orig is not None:
+                ax.errorbar([y],[x],xerr=[xe],color=c,**add_args)
+            else:
+                fmt = add_args.get('fmt',None)
+                if fmt is not None:
+                    del add_args['fmt']
+                    add_args['marker'] = fmt
+                ax.plot([y],[x],color=c,**add_args)
     else:
         #olids,xs_cur,ys_cur = zip(*inds)
-        ax.errorbar(ys,xs,xerr=xerr,**add_args)
+        if xerr is not None:
+            ax.errorbar(ys,xs,xerr=xerr,**add_args)
+        else:
+            fmt = add_args.get('fmt',None)
+            if fmt is not None:
+                del add_args['fmt']
+                add_args['marker'] = fmt
+            ax.plot(ys,xs,**add_args)
 
 def plotErrorBarStrings_old(ax,xs,ys,xerr, add_args={},merge_bias=True):
     # too complex and works better without my weird sorting

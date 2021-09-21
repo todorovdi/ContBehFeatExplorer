@@ -33,7 +33,8 @@
 #SBATCH --mail-user=todorovdi@gmail.com
 
 ##SBATCH --array=0,3
-#SBATCH --array=6,21,36,51
+##SBATCH --array=166  modLFP for S03
+#SBATCH --array=0-89
 
 # *** start of job script ***
 ##source set_oscabagdis_env_vars.sh

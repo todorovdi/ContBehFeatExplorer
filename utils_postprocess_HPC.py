@@ -68,7 +68,12 @@ def collectPerformanceInfo3(rawnames, prefixes, ndays_before = None,
     if rawname_regex_full:
         rawname_regexs = [ '([a-zS,_0-9]+)' ]
     else:
-        raise ValueError('in the version of the function it is not allowed')
+        #raise ValueError('in the version of the function it is not allowed')
+        #rnstr= ','.join(rawnames)
+        #letters = ''.join(list(set(list(rnstr))))
+        prelet = 'S0123456789_,onoffholdmoverest'
+        letters = ''.join(sorted(list(set(list(prelet))) ))
+        rawname_regexs = [ r'([' + letters + r']+)']
 
     #S99_on_move_parcel_aal_grp10-0_test_PCA_nr4_7chs_nfeats1128_pcadim29_skip32_wsz256.npz
 
@@ -410,7 +415,8 @@ def collectPerformanceInfo2(rawnames, prefixes, ndays_before = None,
                 src_grouping=group_ind, prefix=prefix_expr, n_channels='[0-9]+',
                 nfeats_used = regex_nfeats, pcadim='[0-9]+',
                 skip='[0-9]+', windowsz='[0-9]+', use_main_LFP_chan=use_main_LFP_chan,
-                                    grouping_key='(\w+)',int_types_key='(\w+)',
+                                grouping_key=r'([a-zA-Z0-9_&]+)',
+                              int_types_key=r'([a-zA-Z0-9_&]+)',
                                     nr=nraws_used, regex_mode=1)
 
         if use_light_files:
@@ -534,10 +540,14 @@ def collectPerformanceInfo2(rawnames, prefixes, ndays_before = None,
                     t0 = time()
                     f = np.load(fname_full, allow_pickle=1)
 
-                    if use_light_files:
-                        res_cur = f['results_light'][()]
-                    else:
-                        res_cur = f['results_cur'][()]
+                    try:
+                        if use_light_files:
+                            res_cur = f['results_light'][()]
+                        else:
+                            res_cur = f['results_cur'][()]
+                    except KeyError as e:
+                        print(f'!!! Got error {e} for {fnf}, skiping')
+                        break
                     res_cur['filename_full'] = fname_full
 
                     if 'featsel_shap_res' in f and 'featsel_shap_res' not in res_cur:
@@ -1058,7 +1068,7 @@ def prepTableInfo3(output_per_raw, prefixes=None, perf_to_use_list = [('perfs_XG
                     num,num_red,num_red2 = None, None, None
                     perfs_add_CV=None
                     perfs_red_CV_recalc,perfs_CV_recalc=None,None
-                    perf_add = None
+                    perf_add_cur = perf_add
                     if r is None:
                         print(f'  Warning: no prefix {prefix} for {rn}')
                         prefix_missing = True
@@ -1092,10 +1102,18 @@ def prepTableInfo3(output_per_raw, prefixes=None, perf_to_use_list = [('perfs_XG
                                     if perf_add is not None:
                                         if perf_add == 'across_subj':
                                             pdict = anver_cur['across']['subj']
-                                            perfs_add_CV = pdict['perf_aver']
-                                            perfs_add_noCV = pdict['perf_nocv']
-                                            ps = pdict['perfs_CV']
-                                            perfs_add_CV_recalc = recalcPerfFromCV(ps,lblind_trem)
+                                            if pdict is not None:
+                                                perfs_add_CV = pdict['perf_aver']
+                                                perfs_add_noCV = pdict['perf_nocv']
+                                                ps = pdict['perfs_CV']
+                                                perfs_add_CV_recalc = recalcPerfFromCV(ps,lblind_trem)
+                                        elif perf_add == 'across_medcond':
+                                            pdict = anver_cur['across']['medcond']
+                                            if pdict is not None:
+                                                perfs_add_CV = pdict['perf_aver']
+                                                perfs_add_noCV = pdict['perf_nocv']
+                                                ps = pdict['perfs_CV']
+                                                perfs_add_CV_recalc = recalcPerfFromCV(ps,lblind_trem)
                                 else:
                                     print(f'perf_to_use (={perf_to_use}): None!')
 
@@ -1222,12 +1240,13 @@ def prepTableInfo3(output_per_raw, prefixes=None, perf_to_use_list = [('perfs_XG
                     else:
                         info_cur['sens_red_recalc'] = np.nan
                         info_cur['spec_red_recalc'] = np.nan
-                    if perf_add is not None:
+                    if perf_add is not None and perfs_add_CV is not None:
                         info_cur['sens_add'] = perfs_add_CV[0]
                         info_cur['spec_add'] = perfs_add_CV[1]
                         info_cur['F1_add'] = perfs_add_CV[2]
                         info_cur['sens_add_recalc'] = perfs_add_CV_recalc[0]
                         info_cur['spec_add_recalc'] = perfs_add_CV_recalc[1]
+                    #print('sens_add',info_cur.get('sens_add',None))
                         #info_cur['F1_add_recalc']  = perfs_add_CV_recalc[2]
 
 
@@ -1389,13 +1408,13 @@ def mergeScores(scores,feature_names,collect_groups,
     stats['aux'] = aux_res
     stats['names_display'] = names_display
     stats['mean'] = mean_scores
-    stats['sum']  = sum_scores
-    stats['std']  = std_scores
-    stats['max']  = max_scores
-    stats['mean_signed'] = mean_signed_scores
-    stats['sum_signed']  = sum_signed_scores
-    stats['std_signed']  = std_signed_scores
-    stats['max_signed']  = max_signed_scores
+    stats['sum_abs']  = sum_scores
+    stats['std_abs']  = std_scores
+    stats['max_abs']  = max_scores
+    stats['mean'] = mean_signed_scores
+    stats['sum']  = sum_signed_scores
+    stats['std']  = std_signed_scores
+    stats['max']  = max_signed_scores
     stats['inds_lists'] = inds_lists
     #return mean_scores,std_scores,max_scores
     return stats
@@ -1529,13 +1548,16 @@ def mergeScores2(scores,class_labels,lblind,
 
 def plotFeatImpStats(feat_types_all, scores_stats, fign='', axs=None,
                      bias=None, color=None, alpha=0.8, bar=True,
-                     markersize = 10, show_max = True,
+                     markersize = 10, show_max = True, show_sum=True,
                      show_std = True, marker_mean = 'o', marker_max = 'x',
-                     plot_signed = True):
+                     plot_signed = True, skip_ax_inds = [],
+                     same_sets_only = True):
     import matplotlib.pyplot as plt
     from plots import plotErrorBarStrings
     assert isinstance(scores_stats, dict)
     nr = 1; nc= 2;   # normally == len(scores_stats) - 2;
+    if not show_sum:
+        nc = 1
     ww = 3; hh = 5;
     if axs is None:
         fig,axs = plt.subplots(nr,nc, sharey='row', figsize = (nc*ww,nr*hh));
@@ -1587,12 +1609,14 @@ def plotFeatImpStats(feat_types_all, scores_stats, fign='', axs=None,
 
     #print('color_cur =', color_cur)
 
-    ax = axs[1]
+    if show_sum:
+        ax = axs[1]
     stat_key = stat_keys['sum']
     sc = scores_stats[stat_key]
 
     names_cur =  names
     sc =  list(sc)
+    max_sum = np.max(sc)
     if bias is not None:
         nm = 'bias'
         bias_cur = np.sum(bias)
@@ -1608,19 +1632,24 @@ def plotFeatImpStats(feat_types_all, scores_stats, fign='', axs=None,
 
     #print('sum names = ',names_cur)
 
-    if bar:
-        ax.barh(names_cur,np.array(sc), color=color_cur, alpha=alpha ); #ax.tick_params(axis='x', labelrotation=90 )
-    else:
-        #print('skip')
-        #ax.plot(np.array(sc),names_cur, color=color_cur, alpha=alpha, lw=0,
-        #        marker='o'); #ax.tick_params(axis='x', labelrotation=90 )
-        if np.sum( np.array(list(names_cur[0])) == '/' ) == 2:
-            import pdb; pdb.set_trace()
+    if show_sum:
+        if bar:
+            ax.barh(names_cur,np.array(sc), color=color_cur, alpha=alpha ); #ax.tick_params(axis='x', labelrotation=90 )
+        else:
+            #print('skip')
+            #ax.plot(np.array(sc),names_cur, color=color_cur, alpha=alpha, lw=0,
+            #        marker='o'); #ax.tick_params(axis='x', labelrotation=90 )
+            if np.sum( np.array(list(names_cur[0])) == '/' ) == 2:
+                import pdb; pdb.set_trace()
 
-        plotErrorBarStrings(ax,names_cur,sc,xerr=None,
-            add_args={'fmt':marker_mean, 'color':color_cur,
-                      'alpha':alpha*0.9, 'markersize':markersize} )
-    ax.set_title(stat_key)
+            #plotErrorBarStrings(ax,names_cur,sc,xerr=None,
+            #    add_args={'fmt':marker_mean, 'color':color_cur,
+            #              'alpha':alpha*0.9, 'markersize':markersize} )
+            plotErrorBarStrings(ax,names_cur,sc,xerr=None,
+                same_sets_only = same_sets_only,
+                add_args={'marker':marker_mean, 'color':color_cur,
+                        'alpha':alpha*0.9, 'markersize':markersize} )
+        ax.set_title(stat_key)
     # TEMP, should be uncommented
     #ax.set_yticks([])
 
@@ -1630,19 +1659,21 @@ def plotFeatImpStats(feat_types_all, scores_stats, fign='', axs=None,
     stat_key = stat_keys['max']
     sc = scores_stats[stat_key]
 
-    #if bias is not None:
-    #    bias_cur = np.max(bias)
-    #    mx = np.max(sc)
-    #    if bias_cur > mx:
-    #        div = 2 * bias_cur / mx
-    #        bias_cur = mx / 2
-    #        nm = nm + f'/{div:.4f}'
+    if bias is not None:
+        nm = 'bias'
+        bias_cur = np.max(bias)
+        mx = np.max(sc)
+        if bias_cur > mx:
+            div = 2 * bias_cur / mx
+            bias_cur = mx / 2
+            nm = nm + f'/{div:.4f}'
 
     names_cur =  names
     sc =  list(sc)
     if bias is not None:
         names_cur = [nm] + names
         sc = [ np.nan ] + list(sc)
+    max_max = np.max(sc)
 
     names_cur_max = names_cur
     if show_max:
@@ -1653,7 +1684,9 @@ def plotFeatImpStats(feat_types_all, scores_stats, fign='', axs=None,
             #ax.plot(np.array(sc), names_cur, color=color_cur, alpha=alpha,
             #        lw=0, marker='o'); #ax.tick_params(axis='x', labelrotation=90 )
 
-            plotErrorBarStrings(ax,names_cur,sc,xerr=None, add_args={'fmt':marker_max,
+            plotErrorBarStrings(ax,names_cur,sc,xerr=None,
+                        same_sets_only = same_sets_only,
+                                add_args={'marker':marker_max,
                     'color':color_cur, 'alpha':alpha*0.9,
                     'markersize':markersize * 1.2} )
 
@@ -1662,15 +1695,22 @@ def plotFeatImpStats(feat_types_all, scores_stats, fign='', axs=None,
     stat_key = stat_keys['mean']
     stat_key_std = stat_keys['std']
     sc = scores_stats[stat_key]
+    max_mean = np.max(sc)
     names_cur = names
     if bias is not None:
-        #nm = 'bias'
+        nm = 'bias'
+        bias_cur = np.max(bias)
+        mx = np.max(sc)
+        if bias_cur > mx:
+            div = 2 * bias_cur / mx
+            bias_cur = mx / 2
+            nm = nm + f'/{div:.4f}'
         names_cur = [nm] + names
         sc = [ bias_cur ] + list(sc)
 
     names_cur_mean = names_cur
-    assert tuple(names_cur_mean) == tuple(names_cur_sum), (names_cur_mean,names_cur_sum)
-    assert tuple(names_cur_max) == tuple(names_cur_sum), (names_cur_max,names_cur_sum)
+    assert tuple(names_cur_mean[1:]) == tuple(names_cur_sum[1:]), (names_cur_mean,names_cur_sum)
+    assert tuple(names_cur_max[1:]) == tuple(names_cur_sum[1:]), (names_cur_max,names_cur_sum)
 
     #print('before plotting mean')
     ax = axs[0]
@@ -1683,6 +1723,7 @@ def plotFeatImpStats(feat_types_all, scores_stats, fign='', axs=None,
         #ax.tick_params(axis='x', labelrotation=90 )
     else:
         plotErrorBarStrings(ax,names_cur,sc,xerr=xerr_to_show,
+                same_sets_only = same_sets_only,
                 add_args={'fmt':marker_mean, 'color':color_cur,
                 'alpha':alpha*0.9, 'markersize':markersize} )
         #ax.errorbar(names_cur,np.array(sc), color=color_cur, alpha=alpha*0.9, xerr= [0] + list(scores_stats['std'] ), fmt='o' ); #ax.tick_params(axis='x', labelrotation=90 )
@@ -1695,6 +1736,12 @@ def plotFeatImpStats(feat_types_all, scores_stats, fign='', axs=None,
 
     ax.set_title(keystr)
 
+    for axi,ax in enumerate(axs):
+        if axi not in skip_ax_inds :
+            ax.grid()
+
+    return max_mean, max_max, max_sum
+
     #sc = scores_stats['std']
     #ax = axs[0]
     #xerr = sc
@@ -1703,329 +1750,329 @@ def plotFeatImpStats(feat_types_all, scores_stats, fign='', axs=None,
     #ax.barh(names_cur,np.array(sc), color=color_cur, alpha=1., xerr=xerr ); #ax.tick_params(axis='x', labelrotation=90 )
 
 
-def plotFeatSignifSHAP(pdf,featsel_per_method, fshs, featnames_list,
-                       class_labels_good_for_classif,
-                       class_label_names,
-                       featnames_subset = None, figname_prefix='',
-                       n_individ_feats_show=20, roi_labels = None,
-                       chnames_LFP = None, body_side='L', hh=8,
-                       separate_by_band = False, suptitle = None, suptitle_fontsize=20,
-                      tickfontsize = 10,
-                       marker_mean = 'o', marker_max = 'x', axs=None):
-    '''
-    fshs -- names of featsel method to use
-    '''
-    import utils_postprocess_HPC as postp
-    import matplotlib.pyplot as plt
-
-    if isinstance(fshs , str):
-        fshs = [fshs]
-
-    from collections.abc import Iterable
-    if isinstance(featnames_list, Iterable) and \
-            (isinstance(featnames_list[0], str) ):
-        featnames_list = [featnames_list]
-
-    assert len(featnames_list) == len(fshs)
-
-    #fsh = 'XGB_Shapley'
-    if len(fshs) == 1:
-        colors_fsh = len(fshs) * [None]
-    else:
-        colors_fsh = ['blue','red','green', 'purple']
-
-    fspm_def = featsel_per_method[ fshs[0]  ]
-    scores = fspm_def.get('scores',None)
-    if scores is None:
-        scores_per_class_def = fspm_def.get('scores_av',None)
-    else:
-        assert scores.shape[-1] - 1 == len(featnames_list[0]), (scores.shape[-1] , len(featnames_list[0]))
-        scores_per_class_def = utsne.getScoresPerClass(class_labels_good_for_classif, scores)
-    nscores = len(scores_per_class_def)
-
-    nr = nscores; nc = 3; #nc= len(scores_stats) - 2;
-    ww = 3 + 5;
-    if axs is None:
-        fig,axs = plt.subplots(nr,nc, figsize = (nc*ww,nr*hh), gridspec_kw={'width_ratios': [1,1,3]} );
-        plt.subplots_adjust(top=1-0.02)
-    else:
-        assert axs.shape == (nr,nc)
-
-
-    cmap = plt.cm.get_cmap('tab20', 20)
-    #cmap( (ri0 + i*ri1) % 20)
-
-
-    for fshi,fsh in enumerate(fshs):
-        fspm = featsel_per_method[fsh]
-        featnames = featnames_list[fshi]
-        scores = fspm.get('scores',None)
-        if scores is None:
-            scores_per_class = fspm.get('scores_av',None)
-            bias = fspm.get('scores_bias_av',None)
-
-        else:
-            assert scores.shape[-1] - 1 == len(featnames), (scores.shape[-1] , len(featnames))
-            # XGB doc: Note the final column is the bias term
-            scores_per_class, bias = utsne.getScoresPerClass(class_labels_good_for_classif, scores, ret_bias=1)
-            print( fspm.keys(), scores.shape )
-
-
-        # make plots for every class label
-        for lblind in range(scores_per_class.shape[0] ):
-            # select points where true class is like the current one
-            #ptinds = np.where(class_labels_good_for_classif == lblind)[0]
-            #classid_enconded = lblind
-            #scores_cur = np.mean(scores[ptinds,lblind,0:-1], axis=0)
-
-            scores_cur = scores_per_class[lblind]
-            label_str = class_label_names[lblind]
-
-            ###############################
-            ftype_info = utils.collectFeatTypeInfo(featnames)
-
-            feat_groups_all = []
-            feature_groups_names = []
-            clrs = []
-
-            clri = 0
-            feat_groups_basic = [f'^{ft}_.*' for ft in ftype_info['ftypes']]
-            feat_groups_all+= feat_groups_basic
-            feature_groups_names += feat_groups_basic
-            clrs += [cmap(clri)] * len(feat_groups_basic)
-
-            clri += 1
-
-            ft = 'bpcorr'
-            if 'bpcorr' in ftype_info['ftypes']:
-                feat_groups_two_bands = [f'^{ft}_{fb1}_.*,{fb2}_.*' for fb1,fb2 in ftype_info['fband_pairs']]
-            #     feat_groups_two_bands = ['^bpcorr_gamma.*,tremor.*','^bpcorr_gamma.*,beta.*','^bpcorr_gamma.*,HFO.*',
-            #                                 '^bpcorr_beta.*,tremor.*','^bpcorr_beta.*,gamma.*','^bpcorr_beta.*,HFO.*',
-            #                                 '^bpcorr_tremor.*,beta.*','^bpcorr_tremor.*,gamma.*','^bpcorr_tremor.*,HFO.*']
-                feat_groups_all += feat_groups_two_bands
-                feature_groups_names += feat_groups_two_bands
-                clrs += [cmap(clri)] * len(feat_groups_two_bands)
-
-            for ft in ['rbcorr', 'con']:
-                if ft in ftype_info['ftypes']:
-                    #feat_groups_rbcorr_band = ['^rbcorr_tremor.*', '^rbcorr_beta.*',  '^rbcorr_gamma.*']
-                    feat_groups_one_band = [ f'^{ft}_{fb}_.*' for fb in ftype_info['fband_per_ftype'][ft] ]
-                    feat_groups_all += feat_groups_one_band
-                    feature_groups_names += feat_groups_one_band
-                    clrs += [cmap(clri)] * len(feat_groups_one_band)
-            #feat_groups_all
-
-            # allow HFO2 and high_beta  (allow numbers and one underscore in
-            # the middle
-            bnpattern = '[a-zA-Z0-9]+_?[a-zA-Z0-9]*'
-
-
-            wasH = 0
-            for ft in gv.noband_feat_types:
-                if ft in ftype_info['ftypes']:
-                    wasH = True
-
-            if wasH:
-                ft_templ = f'({"|".join(gv.noband_feat_types) })'
-                a = [f'^{ft_templ}_LFP.*']
-                feat_groups_all += a
-                feature_groups_names += [  '^Hjorth_LFP'  ]
-                clrs += [cmap(clri)] * len(a)
-
-
-            clri += 1
-            from globvars import gp
-            if roi_labels is not None:
-                # main side (body)
-                # get parcel indices of
-                for grpn,parcel_list in gp.parcel_groupings_post.items():
-                    #feat_groups_cur = []
-                    #print(parcel_list)
-                    plws = utils.addSideToParcels(parcel_list, body_side)
-                    parcel_inds = [ roi_labels.index(parcel) for parcel in plws ]
-
-                    pas = '|'.join(map(str,parcel_inds) )
-                    chn_templ = f'msrc(R|L)_9_({pas})_c[0-9]+'
-
-                    if wasH:
-                        ft_templ = f'({"|".join(gv.noband_feat_types) })'
-                        a = [f'^{ft_templ}_{chn_templ}']
-                        feat_groups_all += a
-                        feature_groups_names += [  f'^Hjorth_{grpn}'  ]
-                        clrs += [cmap(clri)] * len(a)
-                        #clri += 1
-
-
-            if chnames_LFP is None:
-                chnames_LFP = ['.*']
-            for lfpchn in chnames_LFP:
-
-
-                clri += 1
-                separate_by_band2 = True
-                # now group per LFPch but with free source
-                chn_templ = 'msrc(R|L)_9_[0-9]+_c[0-9]+'
-                grpn = 'msrc*'
-
-                ft = 'bpcorr'
-                if 'bpcorr' in ftype_info['ftypes']:
-
-                    if separate_by_band2:
-                        fbpairs = ftype_info['fband_pairs']
-                        fbpairs_dispnames = fbpairs
-                    # !! This assume LFP is always in the second place
-                    #if chnames_LFP is not None:
-                    #    for lfpchn in chnames_LFP:
-                    a = [f'^{ft}_{fb1}_{chn_templ},{fb2}_{lfpchn}' for fb1,fb2 in fbpairs]
-                    feat_groups_all += a
-                    feature_groups_names += [f'^{ft}_{fb1}_{grpn},{fb2}_{lfpchn}' for fb1,fb2 in fbpairs_dispnames]
-                    clrs += [cmap(clri)] * len(a)
-                    #else:
-                    #    feat_groups_all += [f'^{ft}_{fb1}_{chn_templ},{fb2}_.*' for fb1,fb2 in ftype_info['fband_pairs']]
-                    #    feature_groups_names += [f'^{ft}_{fb1}_{grpn},{fb2}_.*' for fb1,fb2 in ftype_info['fband_pairs']]
-                ft = 'rbcorr'
-                # !! This assume LFP is always in the second place
-                if ft in ftype_info['ftypes']:
-                    if separate_by_band2:
-                        fbsolos = ftype_info['fband_per_ftype'][ft]
-                        fbsolos_dispnames = fbsolos
-                    #if chnames_LFP is not None:
-                    #    for lfpchn in chnames_LFP:
-                    a = [ f'^{ft}_{fb}_{chn_templ},{fb}_{lfpchn}' for fb in fbsolos ]
-                    feat_groups_all += a
-                    feature_groups_names += [ f'^{ft}_{fb}_{grpn},{fb}_{lfpchn}' for fb in fbsolos_dispnames ]
-                    clrs += [cmap(clri)] * len(a)
-                    #else:
-                    #    feat_groups_all += [ f'^{ft}_{fb}_{chn_templ},.*' for fb in ftype_info['fband_per_ftype'][ft] ]
-                    #    feature_groups_names += [ f'^{ft}_{fb}_{grpn},.*' for fb in ftype_info['fband_per_ftype'][ft] ]
-                ft = 'con'
-                # !! This assume LFP is always in the first place
-                if ft in ftype_info['ftypes']:
-                    if separate_by_band2:
-                        fbsolos = ftype_info['fband_per_ftype'][ft]
-                        fbsolos_dispnames = fbsolos
-                    #if chnames_LFP is not None:
-                    #    for lfpchn in chnames_LFP:
-                    a = [ f'^{ft}_{fb}_{lfpchn},{chn_templ}' for fb in fbsolos ]
-                    feat_groups_all += a
-                    feature_groups_names += [ f'^{ft}_{fb}_{lfpchn},{grpn}' for fb in fbsolos_dispnames ]
-                    clrs += [cmap(clri)] * len(a)
-
-                #############################################
-
-                fbpairs = [(bnpattern,bnpattern)]
-                fbsolos = [bnpattern]
-                fbpairs_dispnames = [('*','*')]
-                fbsolos_dispnames = ['*']
-
-                clri += 1
-                if roi_labels is not None:
-                    # main side (body)
-                    # get parcel indices of
-                    for grpn,parcel_list in gp.parcel_groupings_post.items():
-                        #feat_groups_cur = []
-                        #print(parcel_list)
-                        plws = utils.addSideToParcels(parcel_list, body_side)
-                        parcel_inds = [ roi_labels.index(parcel) for parcel in plws ]
-
-                        pas = '|'.join(map(str,parcel_inds) )
-                        chn_templ = f'msrc(R|L)_9_({pas})_c[0-9]+'
-
-                        ft = 'bpcorr'
-                        if 'bpcorr' in ftype_info['ftypes']:
-                            if separate_by_band:
-                                fbpairs = ftype_info['fband_pairs']
-                                fbpairs_dispnames = fbpairs
-                            # !! This assume LFP is always in the second place
-                            #if chnames_LFP is not None:
-                            #    for lfpchn in chnames_LFP:
-                            a = [f'^{ft}_{fb1}_{chn_templ},{fb2}_{lfpchn}' for fb1,fb2 in fbpairs]
-                            feat_groups_all += a
-                            feature_groups_names += [f'^{ft}_{fb1}_{grpn},{fb2}_{lfpchn}' for fb1,fb2 in fbpairs_dispnames]
-                            clrs += [cmap(clri)] * len(a)
-                            #else:
-                            #    feat_groups_all += [f'^{ft}_{fb1}_{chn_templ},{fb2}_.*' for fb1,fb2 in ftype_info['fband_pairs']]
-                            #    feature_groups_names += [f'^{ft}_{fb1}_{grpn},{fb2}_.*' for fb1,fb2 in ftype_info['fband_pairs']]
-                        ft = 'rbcorr'
-                        # !! This assume LFP is always in the second place
-                        if ft in ftype_info['ftypes']:
-                            if separate_by_band:
-                                fbsolos = ftype_info['fband_per_ftype'][ft]
-                                fbsolos_dispnames = fbsolos
-                            #if chnames_LFP is not None:
-                            #    for lfpchn in chnames_LFP:
-                            a = [ f'^{ft}_{fb}_{chn_templ},{fb}_{lfpchn}' for fb in fbsolos ]
-                            feat_groups_all += a
-                            feature_groups_names += [ f'^{ft}_{fb}_{grpn},{fb}_{lfpchn}' for fb in fbsolos_dispnames ]
-                            clrs += [cmap(clri)] * len(a)
-                            #else:
-                            #    feat_groups_all += [ f'^{ft}_{fb}_{chn_templ},.*' for fb in ftype_info['fband_per_ftype'][ft] ]
-                            #    feature_groups_names += [ f'^{ft}_{fb}_{grpn},.*' for fb in ftype_info['fband_per_ftype'][ft] ]
-                        ft = 'con'
-                        # !! This assume LFP is always in the first place
-                        if ft in ftype_info['ftypes']:
-                            if separate_by_band:
-                                fbsolos = ftype_info['fband_per_ftype'][ft]
-                                fbsolos_dispnames = fbsolos
-                            #if chnames_LFP is not None:
-                            #    for lfpchn in chnames_LFP:
-                            a = [ f'^{ft}_{fb}_{lfpchn},{chn_templ}' for fb in fbsolos ]
-                            feat_groups_all += a
-                            feature_groups_names += [ f'^{ft}_{fb}_{lfpchn},{grpn}' for fb in fbsolos_dispnames ]
-                            clrs += [cmap(clri)] * len(a)
-                        #else:
-                        #    feat_groups_all += [ f'^{ft}_{fb}_.*,{chn_templ}' for fb in ftype_info['fband_per_ftype'][ft] ]
-                        #    feature_groups_names += [ f'^{ft}_{fb}_.*,{grpn}' for fb in ftype_info['fband_per_ftype'][ft] ]
-
-                #display(feat_groups_all)
-
-
-            #display(feat_groups_all)
-            feat_imp_stats = mergeScores(scores_cur, featnames,
-                                         feat_groups_all,
-                                         feature_names_subset=featnames_subset,
-                                         feature_groups_names=feature_groups_names, aux=clrs)
-            ####################################
-
-
-            ####################################
-            subaxs = axs[lblind,:]
-            subaxs[1].set_yticklabels([])
-            #subaxs[2].set_yticklabels([])
-
-            plotFeatImpStats(feat_groups_all, feat_imp_stats, axs= subaxs[:2],
-                             bias=bias, color=colors_fsh[fshi] )
-            subaxs[0].tick_params(axis='y', labelsize=  tickfontsize)
-            #subaxs[0].tick_params(axis='y', labelsize=  tickfontsize)
-            #plt.tight_layout()
-            #ax.set_title(  )
-            #pdf.savefig()
-
-
-            #plt.figure(figsize = (12,10))
-            #ax = plt.gca()
-            ax = subaxs[-1]
-            #postp.plotFeatureImportance(ax, featnames, scores[ptinds,lblind,:], 'XGB_Shapley')
-            sort_individ_feats = fshi == 0
-            plotFeatureImportance(ax, featnames,
-                                        scores_per_class[lblind,:],
-                                        'labind_vs_score', color=colors_fsh[fshi],
-                                        sort = sort_individ_feats, nshow=n_individ_feats_show)
-            ax.set_title( f'{figname_prefix}: ' + ax.get_title() + f'_lblind = {label_str} (lblind={lblind}):  {fsh}' )
-            ax.tick_params(axis="x",direction="in", pad=-300)
-
-
-            #plt.gcf().suptitle(f'{prefix}: lblind = {label_str} (lblind={lblind})')
-            #pdf.savefig()
-            #plt.close()
-
-    plt.tight_layout()
-
-    if suptitle is not None:
-        plt.suptitle(suptitle, fontsize=suptitle_fontsize)
-    if pdf is not None:
-        pdf.savefig()
-        plt.close()
+#def plotFeatSignifSHAP(pdf,featsel_per_method, fshs, featnames_list,
+#                       class_labels_good_for_classif,
+#                       class_label_names,
+#                       featnames_subset = None, figname_prefix='',
+#                       n_individ_feats_show=20, roi_labels = None,
+#                       chnames_LFP = None, body_side='L', hh=8,
+#                       separate_by_band = False, suptitle = None, suptitle_fontsize=20,
+#                      tickfontsize = 10,
+#                       marker_mean = 'o', marker_max = 'x', axs=None):
+#    '''
+#    fshs -- names of featsel method to use
+#    '''
+#    import utils_postprocess_HPC as postp
+#    import matplotlib.pyplot as plt
+#
+#    if isinstance(fshs , str):
+#        fshs = [fshs]
+#
+#    from collections.abc import Iterable
+#    if isinstance(featnames_list, Iterable) and \
+#            (isinstance(featnames_list[0], str) ):
+#        featnames_list = [featnames_list]
+#
+#    assert len(featnames_list) == len(fshs)
+#
+#    #fsh = 'XGB_Shapley'
+#    if len(fshs) == 1:
+#        colors_fsh = len(fshs) * [None]
+#    else:
+#        colors_fsh = ['blue','red','green', 'purple']
+#
+#    fspm_def = featsel_per_method[ fshs[0]  ]
+#    scores = fspm_def.get('scores',None)
+#    if scores is None:
+#        scores_per_class_def = fspm_def.get('scores_av',None)
+#    else:
+#        assert scores.shape[-1] - 1 == len(featnames_list[0]), (scores.shape[-1] , len(featnames_list[0]))
+#        scores_per_class_def = utsne.getScoresPerClass(class_labels_good_for_classif, scores)
+#    nscores = len(scores_per_class_def)
+#
+#    nr = nscores; nc = 3; #nc= len(scores_stats) - 2;
+#    ww = 3 + 5;
+#    if axs is None:
+#        fig,axs = plt.subplots(nr,nc, figsize = (nc*ww,nr*hh), gridspec_kw={'width_ratios': [1,1,3]} );
+#        plt.subplots_adjust(top=1-0.02)
+#    else:
+#        assert axs.shape == (nr,nc)
+#
+#
+#    cmap = plt.cm.get_cmap('tab20', 20)
+#    #cmap( (ri0 + i*ri1) % 20)
+#
+#
+#    for fshi,fsh in enumerate(fshs):
+#        fspm = featsel_per_method[fsh]
+#        featnames = featnames_list[fshi]
+#        scores = fspm.get('scores',None)
+#        if scores is None:
+#            scores_per_class = fspm.get('scores_av',None)
+#            bias = fspm.get('scores_bias_av',None)
+#
+#        else:
+#            assert scores.shape[-1] - 1 == len(featnames), (scores.shape[-1] , len(featnames))
+#            # XGB doc: Note the final column is the bias term
+#            scores_per_class, bias = utsne.getScoresPerClass(class_labels_good_for_classif, scores, ret_bias=1)
+#            print( fspm.keys(), scores.shape )
+#
+#
+#        # make plots for every class label
+#        for lblind in range(scores_per_class.shape[0] ):
+#            # select points where true class is like the current one
+#            #ptinds = np.where(class_labels_good_for_classif == lblind)[0]
+#            #classid_enconded = lblind
+#            #scores_cur = np.mean(scores[ptinds,lblind,0:-1], axis=0)
+#
+#            scores_cur = scores_per_class[lblind]
+#            label_str = class_label_names[lblind]
+#
+#            ###############################
+#            ftype_info = utils.collectFeatTypeInfo(featnames)
+#
+#            feat_groups_all = []
+#            feature_groups_names = []
+#            clrs = []
+#
+#            clri = 0
+#            feat_groups_basic = [f'^{ft}_.*' for ft in ftype_info['ftypes']]
+#            feat_groups_all+= feat_groups_basic
+#            feature_groups_names += feat_groups_basic
+#            clrs += [cmap(clri)] * len(feat_groups_basic)
+#
+#            clri += 1
+#
+#            ft = 'bpcorr'
+#            if 'bpcorr' in ftype_info['ftypes']:
+#                feat_groups_two_bands = [f'^{ft}_{fb1}_.*,{fb2}_.*' for fb1,fb2 in ftype_info['fband_pairs']]
+#            #     feat_groups_two_bands = ['^bpcorr_gamma.*,tremor.*','^bpcorr_gamma.*,beta.*','^bpcorr_gamma.*,HFO.*',
+#            #                                 '^bpcorr_beta.*,tremor.*','^bpcorr_beta.*,gamma.*','^bpcorr_beta.*,HFO.*',
+#            #                                 '^bpcorr_tremor.*,beta.*','^bpcorr_tremor.*,gamma.*','^bpcorr_tremor.*,HFO.*']
+#                feat_groups_all += feat_groups_two_bands
+#                feature_groups_names += feat_groups_two_bands
+#                clrs += [cmap(clri)] * len(feat_groups_two_bands)
+#
+#            for ft in ['rbcorr', 'con']:
+#                if ft in ftype_info['ftypes']:
+#                    #feat_groups_rbcorr_band = ['^rbcorr_tremor.*', '^rbcorr_beta.*',  '^rbcorr_gamma.*']
+#                    feat_groups_one_band = [ f'^{ft}_{fb}_.*' for fb in ftype_info['fband_per_ftype'][ft] ]
+#                    feat_groups_all += feat_groups_one_band
+#                    feature_groups_names += feat_groups_one_band
+#                    clrs += [cmap(clri)] * len(feat_groups_one_band)
+#            #feat_groups_all
+#
+#            # allow HFO2 and high_beta  (allow numbers and one underscore in
+#            # the middle
+#            bnpattern = '[a-zA-Z0-9]+_?[a-zA-Z0-9]*'
+#
+#
+#            wasH = 0
+#            for ft in gv.noband_feat_types:
+#                if ft in ftype_info['ftypes']:
+#                    wasH = True
+#
+#            if wasH:
+#                ft_templ = f'({"|".join(gv.noband_feat_types) })'
+#                a = [f'^{ft_templ}_LFP.*']
+#                feat_groups_all += a
+#                feature_groups_names += [  '^Hjorth_LFP'  ]
+#                clrs += [cmap(clri)] * len(a)
+#
+#
+#            clri += 1
+#            from globvars import gp
+#            if roi_labels is not None:
+#                # main side (body)
+#                # get parcel indices of
+#                for grpn,parcel_list in gp.parcel_groupings_post.items():
+#                    #feat_groups_cur = []
+#                    #print(parcel_list)
+#                    plws = utils.addSideToParcels(parcel_list, body_side)
+#                    parcel_inds = [ roi_labels.index(parcel) for parcel in plws ]
+#
+#                    pas = '|'.join(map(str,parcel_inds) )
+#                    chn_templ = f'msrc(R|L)_9_({pas})_c[0-9]+'
+#
+#                    if wasH:
+#                        ft_templ = f'({"|".join(gv.noband_feat_types) })'
+#                        a = [f'^{ft_templ}_{chn_templ}']
+#                        feat_groups_all += a
+#                        feature_groups_names += [  f'^Hjorth_{grpn}'  ]
+#                        clrs += [cmap(clri)] * len(a)
+#                        #clri += 1
+#
+#
+#            if chnames_LFP is None:
+#                chnames_LFP = ['.*']
+#            for lfpchn in chnames_LFP:
+#
+#
+#                clri += 1
+#                separate_by_band2 = True
+#                # now group per LFPch but with free source
+#                chn_templ = 'msrc(R|L)_9_[0-9]+_c[0-9]+'
+#                grpn = 'msrc*'
+#
+#                ft = 'bpcorr'
+#                if 'bpcorr' in ftype_info['ftypes']:
+#
+#                    if separate_by_band2:
+#                        fbpairs = ftype_info['fband_pairs']
+#                        fbpairs_dispnames = fbpairs
+#                    # !! This assume LFP is always in the second place
+#                    #if chnames_LFP is not None:
+#                    #    for lfpchn in chnames_LFP:
+#                    a = [f'^{ft}_{fb1}_{chn_templ},{fb2}_{lfpchn}' for fb1,fb2 in fbpairs]
+#                    feat_groups_all += a
+#                    feature_groups_names += [f'^{ft}_{fb1}_{grpn},{fb2}_{lfpchn}' for fb1,fb2 in fbpairs_dispnames]
+#                    clrs += [cmap(clri)] * len(a)
+#                    #else:
+#                    #    feat_groups_all += [f'^{ft}_{fb1}_{chn_templ},{fb2}_.*' for fb1,fb2 in ftype_info['fband_pairs']]
+#                    #    feature_groups_names += [f'^{ft}_{fb1}_{grpn},{fb2}_.*' for fb1,fb2 in ftype_info['fband_pairs']]
+#                ft = 'rbcorr'
+#                # !! This assume LFP is always in the second place
+#                if ft in ftype_info['ftypes']:
+#                    if separate_by_band2:
+#                        fbsolos = ftype_info['fband_per_ftype'][ft]
+#                        fbsolos_dispnames = fbsolos
+#                    #if chnames_LFP is not None:
+#                    #    for lfpchn in chnames_LFP:
+#                    a = [ f'^{ft}_{fb}_{chn_templ},{fb}_{lfpchn}' for fb in fbsolos ]
+#                    feat_groups_all += a
+#                    feature_groups_names += [ f'^{ft}_{fb}_{grpn},{fb}_{lfpchn}' for fb in fbsolos_dispnames ]
+#                    clrs += [cmap(clri)] * len(a)
+#                    #else:
+#                    #    feat_groups_all += [ f'^{ft}_{fb}_{chn_templ},.*' for fb in ftype_info['fband_per_ftype'][ft] ]
+#                    #    feature_groups_names += [ f'^{ft}_{fb}_{grpn},.*' for fb in ftype_info['fband_per_ftype'][ft] ]
+#                ft = 'con'
+#                # !! This assume LFP is always in the first place
+#                if ft in ftype_info['ftypes']:
+#                    if separate_by_band2:
+#                        fbsolos = ftype_info['fband_per_ftype'][ft]
+#                        fbsolos_dispnames = fbsolos
+#                    #if chnames_LFP is not None:
+#                    #    for lfpchn in chnames_LFP:
+#                    a = [ f'^{ft}_{fb}_{lfpchn},{chn_templ}' for fb in fbsolos ]
+#                    feat_groups_all += a
+#                    feature_groups_names += [ f'^{ft}_{fb}_{lfpchn},{grpn}' for fb in fbsolos_dispnames ]
+#                    clrs += [cmap(clri)] * len(a)
+#
+#                #############################################
+#
+#                fbpairs = [(bnpattern,bnpattern)]
+#                fbsolos = [bnpattern]
+#                fbpairs_dispnames = [('*','*')]
+#                fbsolos_dispnames = ['*']
+#
+#                clri += 1
+#                if roi_labels is not None:
+#                    # main side (body)
+#                    # get parcel indices of
+#                    for grpn,parcel_list in gp.parcel_groupings_post.items():
+#                        #feat_groups_cur = []
+#                        #print(parcel_list)
+#                        plws = utils.addSideToParcels(parcel_list, body_side)
+#                        parcel_inds = [ roi_labels.index(parcel) for parcel in plws ]
+#
+#                        pas = '|'.join(map(str,parcel_inds) )
+#                        chn_templ = f'msrc(R|L)_9_({pas})_c[0-9]+'
+#
+#                        ft = 'bpcorr'
+#                        if 'bpcorr' in ftype_info['ftypes']:
+#                            if separate_by_band:
+#                                fbpairs = ftype_info['fband_pairs']
+#                                fbpairs_dispnames = fbpairs
+#                            # !! This assume LFP is always in the second place
+#                            #if chnames_LFP is not None:
+#                            #    for lfpchn in chnames_LFP:
+#                            a = [f'^{ft}_{fb1}_{chn_templ},{fb2}_{lfpchn}' for fb1,fb2 in fbpairs]
+#                            feat_groups_all += a
+#                            feature_groups_names += [f'^{ft}_{fb1}_{grpn},{fb2}_{lfpchn}' for fb1,fb2 in fbpairs_dispnames]
+#                            clrs += [cmap(clri)] * len(a)
+#                            #else:
+#                            #    feat_groups_all += [f'^{ft}_{fb1}_{chn_templ},{fb2}_.*' for fb1,fb2 in ftype_info['fband_pairs']]
+#                            #    feature_groups_names += [f'^{ft}_{fb1}_{grpn},{fb2}_.*' for fb1,fb2 in ftype_info['fband_pairs']]
+#                        ft = 'rbcorr'
+#                        # !! This assume LFP is always in the second place
+#                        if ft in ftype_info['ftypes']:
+#                            if separate_by_band:
+#                                fbsolos = ftype_info['fband_per_ftype'][ft]
+#                                fbsolos_dispnames = fbsolos
+#                            #if chnames_LFP is not None:
+#                            #    for lfpchn in chnames_LFP:
+#                            a = [ f'^{ft}_{fb}_{chn_templ},{fb}_{lfpchn}' for fb in fbsolos ]
+#                            feat_groups_all += a
+#                            feature_groups_names += [ f'^{ft}_{fb}_{grpn},{fb}_{lfpchn}' for fb in fbsolos_dispnames ]
+#                            clrs += [cmap(clri)] * len(a)
+#                            #else:
+#                            #    feat_groups_all += [ f'^{ft}_{fb}_{chn_templ},.*' for fb in ftype_info['fband_per_ftype'][ft] ]
+#                            #    feature_groups_names += [ f'^{ft}_{fb}_{grpn},.*' for fb in ftype_info['fband_per_ftype'][ft] ]
+#                        ft = 'con'
+#                        # !! This assume LFP is always in the first place
+#                        if ft in ftype_info['ftypes']:
+#                            if separate_by_band:
+#                                fbsolos = ftype_info['fband_per_ftype'][ft]
+#                                fbsolos_dispnames = fbsolos
+#                            #if chnames_LFP is not None:
+#                            #    for lfpchn in chnames_LFP:
+#                            a = [ f'^{ft}_{fb}_{lfpchn},{chn_templ}' for fb in fbsolos ]
+#                            feat_groups_all += a
+#                            feature_groups_names += [ f'^{ft}_{fb}_{lfpchn},{grpn}' for fb in fbsolos_dispnames ]
+#                            clrs += [cmap(clri)] * len(a)
+#                        #else:
+#                        #    feat_groups_all += [ f'^{ft}_{fb}_.*,{chn_templ}' for fb in ftype_info['fband_per_ftype'][ft] ]
+#                        #    feature_groups_names += [ f'^{ft}_{fb}_.*,{grpn}' for fb in ftype_info['fband_per_ftype'][ft] ]
+#
+#                #display(feat_groups_all)
+#
+#
+#            #display(feat_groups_all)
+#            feat_imp_stats = mergeScores(scores_cur, featnames,
+#                                         feat_groups_all,
+#                                         feature_names_subset=featnames_subset,
+#                                         feature_groups_names=feature_groups_names, aux=clrs)
+#            ####################################
+#
+#
+#            ####################################
+#            subaxs = axs[lblind,:]
+#            subaxs[1].set_yticklabels([])
+#            #subaxs[2].set_yticklabels([])
+#
+#            plotFeatImpStats(feat_groups_all, feat_imp_stats, axs= subaxs[:2],
+#                             bias=bias, color=colors_fsh[fshi] )
+#            subaxs[0].tick_params(axis='y', labelsize=  tickfontsize)
+#            #subaxs[0].tick_params(axis='y', labelsize=  tickfontsize)
+#            #plt.tight_layout()
+#            #ax.set_title(  )
+#            #pdf.savefig()
+#
+#
+#            #plt.figure(figsize = (12,10))
+#            #ax = plt.gca()
+#            ax = subaxs[-1]
+#            #postp.plotFeatureImportance(ax, featnames, scores[ptinds,lblind,:], 'XGB_Shapley')
+#            sort_individ_feats = fshi == 0
+#            plotFeatureImportance(ax, featnames,
+#                                        scores_per_class[lblind,:],
+#                                        'labind_vs_score', color=colors_fsh[fshi],
+#                                        sort = sort_individ_feats, nshow=n_individ_feats_show)
+#            ax.set_title( f'{figname_prefix}: ' + ax.get_title() + f'_lblind = {label_str} (lblind={lblind}):  {fsh}' )
+#            ax.tick_params(axis="x",direction="in", pad=-300)
+#
+#
+#            #plt.gcf().suptitle(f'{prefix}: lblind = {label_str} (lblind={lblind})')
+#            #pdf.savefig()
+#            #plt.close()
+#
+#    plt.tight_layout()
+#
+#    if suptitle is not None:
+#        plt.suptitle(suptitle, fontsize=suptitle_fontsize)
+#    if pdf is not None:
+#        pdf.savefig()
+#        plt.close()
 
 
 
@@ -2049,7 +2096,8 @@ def plotFeatSignifSHAP_list(pdf, outputs_grouped, fshs=['XGB_Shapley'],
                             featsel_on_VIF=True, show_abs_plots=False,
                             reconstruct_from_VIF = False,
                             marker_mean = 'o', marker_max = 'x',
-                            axs=None, grand_average_per_feat_type=1):
+                            axs=None, grand_average_per_feat_type=1,
+                            perf_marker_size = 25  ):
     '''
     fshs -- names of featsel method to use
     '''
@@ -2105,20 +2153,22 @@ def plotFeatSignifSHAP_list(pdf, outputs_grouped, fshs=['XGB_Shapley'],
         scores_per_class_def = utsne.getScoresPerClass(class_labels_good_for_classif, scores)
     nscores = len(scores_per_class_def)
 
+    #if isinstance(hh,str) and hh == 'auto':
+    #    hh = len(featnames) / 200
+
     nr = nscores;
     if ww is None:
         ww = 2 + 3 + 5;
     if show_abs_plots:
         nc = 2 + 2 + 1 + 1; #nc= len(scores_stats) - 2;
-        if axs is None:
-            fig,axs = plt.subplots(nr,nc, figsize = (nc*ww,nr*hh),
-                                   gridspec_kw={'width_ratios': [1,1,1,1,0.4,3]} );
+        width_ratios = [1,1,1,1,0.4,3]
     else:
         nc = 2 + 1 + 1;
-        if axs is None:
-            fig,axs = plt.subplots(nr,nc, figsize = (nc*ww,nr*hh),
-                                   gridspec_kw={'width_ratios': [1,1,0.4,3]} );
+        width_ratios = [1,1,0.4,3]
+
     if axs is None:
+        fig,axs = plt.subplots(nr,nc, figsize = (nc*ww,nr*hh),
+                                gridspec_kw={'width_ratios': width_ratios} );
         plt.subplots_adjust(top=1-0.02)
     else:
         assert axs.shape == (nr,nc)
@@ -2130,10 +2180,14 @@ def plotFeatSignifSHAP_list(pdf, outputs_grouped, fshs=['XGB_Shapley'],
     from featlist import getFeatIndsRelToOnlyOneLFPchan
     from featlist import getChnamesFromFeatlist
 
+    #biases = {}
+    #maxs_list = {}
     outs = []
 
+    outs_mb = []
+
     stats_per_all = []
-    for rn,a in outputs_grouped.items():
+    for rni,(rn,a) in enumerate(outputs_grouped.items() ):
         (prefix,grp,int_type), mult_clf_output = a
         featsel_per_method   = mult_clf_output['featsel_per_method']
         featnames            = mult_clf_output['feature_names_filtered'].copy()
@@ -2508,33 +2562,46 @@ def plotFeatSignifSHAP_list(pdf, outputs_grouped, fshs=['XGB_Shapley'],
                 ####################################
                 subaxs = axs[lblind,:]
 
-                if not show_bias:
-                    bias = None
+                #if not show_bias:
+                bias_to_plot = None
+                #else:
+                #    bias_to_plot = bias[lblind]
 
+                maxs = []
                 print( f'len(feat_groups_all) = {len(feat_groups_all)}, len(featnames_sub) = {len(featnames_sub)}')
                 #import pdb;pdb.set_trace()
-                plotFeatImpStats(feat_groups_all, feat_imp_stats, axs= subaxs[:2],
-                                bias=bias, color=colors_fsh[fshi], bar=False,
+                #same_sets_only should be zero when I run giving axes with some stuff on them already,
+                # especially if I use biases
+                max0,max00,max1 = plotFeatImpStats(feat_groups_all, feat_imp_stats, axs= subaxs[:2],
+                                bias=bias_to_plot, color=colors_fsh[fshi], bar=False,
                                  markersize=markersize, show_max = show_max,
                                  show_std = show_std, alpha=alpha,
                                  plot_signed=True,
+                                 same_sets_only = 0,
                                  marker_mean= marker_mean,
                                  marker_max = marker_max)
+                maxs +=  [max0,max00,max1]
                 subaxs[0].tick_params(axis='y', labelsize=  tickfontsize)
                 subaxs[0].set_title( f'{subaxs[0].get_title()}  {label_str}' )
 
                 #fig.canvas.draw() # needed to set yticks
 
                 if show_abs_plots:
-                    plotFeatImpStats(feat_groups_all, feat_imp_stats, axs= subaxs[2:4],
-                                    bias=bias, color=colors_fsh[fshi], bar=False,
+                    max2,max22,max3 = plotFeatImpStats(feat_groups_all, feat_imp_stats, axs= subaxs[2:4],
+                                    bias=bias_to_plot, color=colors_fsh[fshi], bar=False,
                                     markersize=markersize, show_max = show_max,
                                     show_std = show_std, alpha=alpha,plot_signed=False,
+                                    same_sets_only = 0,
                                      marker_mean= marker_mean, marker_max = marker_max)
                     #subaxs[2].set_yticks([])
                     subaxs[2].set_title( f'{subaxs[2].get_title()}  {label_str}' )
+                    maxs +=  [max2,max22,max3]
 
 
+                rny = rn
+                if isinstance(rn,tuple):
+                    rny = rn[0]
+                outs_mb += [(rni,rny,fsh,lblind,bias[lblind],maxs)]
                     #fig.canvas.draw() # needed to set yticks
 
                 #subaxs[0].tick_params(axis='y', labelsize=  tickfontsize)
@@ -2587,10 +2654,10 @@ def plotFeatSignifSHAP_list(pdf, outputs_grouped, fshs=['XGB_Shapley'],
                 ax.set_ylim(-1,101)
                 if lblind == 0:
                     ax.scatter( [perfs[1] * 100], [ perfs[0] * 100 ], c='red',
-                               marker = marker_mean, s=15 )
+                               marker = marker_mean, s=perf_marker_size )
                 if perf_from_confmat is not None:
                     ax.scatter( [perf_from_confmat[1] * 100], [ perf_from_confmat[0] * 100 ], c='green',
-                               marker = marker_mean, s=15)
+                               marker = marker_mean, s=perf_marker_size)
                 ax.set_xlabel('spec')
                 ax.set_ylabel('sens')
                 ax.set_title('performance')
@@ -2598,6 +2665,60 @@ def plotFeatSignifSHAP_list(pdf, outputs_grouped, fshs=['XGB_Shapley'],
                 #plt.gcf().suptitle(f'{prefix}: lblind = {label_str} (lblind={lblind})')
                 #pdf.savefig()
                 #plt.close()
+
+    assert len(fshs) == 1
+    #for rn,a in outputs_grouped.items():
+    #    for lblind in range(scores_per_class.shape[0] ):
+    rni_,rn_,fsh_,lblind_,bias_,maxs_ = zip(*outs_mb)
+    maxs_a = np.array(maxs_)
+    biases_a = np.array(bias_)
+
+    from plots import plotErrorBarStrings
+    print(outs_mb)
+
+    for  i,(rni,rn,fsh,lblind,bias,maxs) in enumerate(outs_mb):
+        if show_abs_plots:
+            lm = 4
+        else:
+            lm = 2
+        inds = np.where( (np.array(lblind_) == lblind) )[0]
+        #\ & (np.array(rn_) == rn) )[0]
+        assert len(inds) == len(outputs_grouped)
+        biases_cur = biases_a[inds]
+        print('rnis ',np.array(rni_)[inds] )
+        bm = np.max( biases_cur )
+        mm = np.max( maxs_a[inds,:] )
+        biasname = 'bias'
+        if bm > mm:
+            coef = mm / bm
+            biases_cur = np.array(biases_cur) * coef
+            biasname += f'/{coef:.3f}'
+            print('bias correction to with coef',coef)
+
+        for axi,ax in enumerate(axs[lblind,:lm] ):
+
+            # this way the label will be indeed accurate for all columns
+            #if axi == 0:
+            #    if show_max:
+            #        mm = np.max( maxs_a[inds,:2] )
+            #    else:
+            #        mm = np.max( maxs_a[inds,0] )
+            #elif axi == 1:
+            #    mm = np.max( maxs_a[inds,2] )
+            #elif axi == 2:
+            #    if show_max:
+            #        mm = np.max( maxs_a[inds,2:4] )
+            #    else:
+            #        mm = np.max( maxs_a[inds,2] )
+            #elif axi == 3:
+            #    mm = np.max( maxs_a[inds,5] )
+
+            bias_cur = biases_cur[rni]
+            print(biasname, bias_cur)
+            plotErrorBarStrings(ax,[biasname],[bias_cur],xerr=None,
+                same_sets_only = 0,
+                add_args={'marker':marker_mean, 'color':'black',
+                        'alpha':alpha*0.9, 'markersize':markersize} )
 
     #stats['names'] = names
     #stats['aux'] = aux_res
@@ -2654,6 +2775,576 @@ def plotFeatSignifSHAP_list(pdf, outputs_grouped, fshs=['XGB_Shapley'],
 
     return axs, outs
 
+def plotFeatSignifSHAP_list2_test(pdf, outputs_grouped, fshs=['interpret_EBM'],
+                       figname_prefix='',
+                       n_individ_feats_show=4, roi_labels = None,
+                       chnames_LFP = None, body_side='L', hh=8, ww = None,
+                       separate_by_band = False, suptitle = None, suptitle_fontsize=20,
+                      tickfontsize = 10, show_bias=False,
+                            use_best_LFP=False, markersize=10, show_max = True,
+                           merge_Hjorth = False,
+                            Hjorth_diff_color=False,
+                            show_std = True, average_over_subjects = True,
+                            alpha = 0.8, alpha_over_subj = 1., use_full_scores=False,
+                            featsel_on_VIF=True, show_abs_plots=False,
+                            reconstruct_from_VIF = False,
+                            marker_mean = 'o', marker_max = 'x',
+                            allow_dif_feat_group_sets = 0,
+                            axs=None, grand_average_per_feat_type=1,
+                            featsel_feat_subset_name='all', perf_marker_size = 25):
+    '''
+    fshs -- names of featsel method to use
+    '''
+    if isinstance(fshs , str):
+        fshs = [fshs]
+
+    #fsh = 'XGB_Shapley'
+    if len(fshs) == 1:
+        colors_fsh = len(fshs) * [None]
+        print('Setting empty main color')
+    else:
+        colors_fsh = ['blue','red','green', 'purple']
+
+
+    import utils_postprocess_HPC as postp
+    import matplotlib.pyplot as plt
+
+
+    from collections.abc import Iterable
+
+    assert not reconstruct_from_VIF
+    assert not use_full_scores
+
+    #for rn,a in outputs_grouped:
+    a = list(outputs_grouped.values())[0]
+    (prefix,grp,int_type), mult_clf_output = a
+    featsel_per_method             = mult_clf_output['featsel_per_method']
+    featnames                      = mult_clf_output['feature_names_filtered']
+    #class_labels_good_for_classif  = mult_clf_output['class_labels_good']
+    class_labels_good_for_classif  = mult_clf_output['class_labels_good_for_classif']
+
+    VIF_truncation = mult_clf_output.get('VIF_truncation',None)
+    colinds_good_VIFsel  = VIF_truncation.get('colinds_good_VIFsel',None)
+    if colinds_good_VIFsel is not None and featsel_on_VIF:
+        featnames = np.array(featnames)[colinds_good_VIFsel]
+
+    subskip_fit = mult_clf_output['pars'].get('subskip_fit',1)
+    subskip_fit = int(subskip_fit)
+    assert subskip_fit is not None
+
+
+    #assert len(featnames_list) == len(fshs)
+    #if isinstance(featnames_list, Iterable) and \
+    #        (isinstance(featnames_list[0], str) ):
+    #    featnames_list = [featnames_list]
+
+    nscores = 1
+
+    #if isinstance(hh,str) and hh == 'auto':
+    #    hh = len(featnames) / 200
+
+    nr = nscores;
+    if ww is None:
+        ww = 2 + 3 + 5;
+    nc = 1 + 1 + 1;
+    width_ratios = [1,0.4,3]
+
+    if axs is None:
+        fig,axs = plt.subplots(nr,nc, figsize = (nc*ww,nr*hh),
+                                gridspec_kw={'width_ratios': width_ratios} );
+        plt.subplots_adjust(top=1-0.02)
+        axs = axs.reshape((nr,nc))
+    else:
+        assert axs.shape == (nr,nc),  ( axs.shape, (nr,nc)   )
+
+
+    cmap = plt.cm.get_cmap('tab20', 20)
+    #cmap( (ri0 + i*ri1) % 20)
+
+    from featlist import getFeatIndsRelToOnlyOneLFPchan
+    from featlist import getChnamesFromFeatlist
+
+    outs = []
+    biases = []
+
+    stats_per_all = []
+    for rn,a in outputs_grouped.items():
+        (prefix,grp,int_type), mult_clf_output = a
+        featsel_per_method   = mult_clf_output['featsel_per_method']
+        featnames            = mult_clf_output['feature_names_filtered'].copy()
+        class_label_names    = mult_clf_output.get('class_label_names_ordered',None)
+
+        VIF_truncation = mult_clf_output.get('VIF_truncation',None)
+        colinds_good_VIFsel  = mult_clf_output['VIF_truncation'].get('colinds_good_VIFsel',None)
+        #print('colinds_good_VIFsel ',colinds_good_VIFsel)
+
+        assert not ( (colinds_good_VIFsel is not None) and use_best_LFP), 'requires more thinking'
+
+
+        if colinds_good_VIFsel is not None and featsel_on_VIF:
+            featnames_sub = np.array(featnames)[colinds_good_VIFsel]
+        else:
+            featnames_sub = featnames
+
+
+        featnames_nice_sub = utils.nicenFeatNames(featnames_sub, {'kk':roi_labels},['kk'])
+
+        class_labels_good_for_classif  = mult_clf_output['class_labels_good_for_classif']
+        if class_label_names is None:
+            class_labels_good  = mult_clf_output['class_labels_good']
+            revdict = mult_clf_output['revdict']
+
+            from sklearn import preprocessing
+            lab_enc = preprocessing.LabelEncoder()
+            # just skipped class_labels_good
+            lab_enc.fit(class_labels_good)
+            class_labels_good_for_classif = lab_enc.transform(class_labels_good)
+            class_label_ids = lab_enc.inverse_transform( np.arange( len(set(class_labels_good_for_classif)) ) )
+            class_label_names = [revdict[cli] for cli in class_label_ids]
+            #print(class_label_names)
+
+        if chnames_LFP is None:
+            chnames_LFP = getChnamesFromFeatlist(featnames_sub, mod='LFP')
+
+
+        if use_best_LFP:
+            chn_LFP = mult_clf_output['best_LFP']['XGB']['winning_chan']
+            new_channel_name_templ='LFP007'
+            #print(chn_LFP)
+            feat_inds_curLFP, feat_inds_except_curLFP = \
+                getFeatIndsRelToOnlyOneLFPchan(featnames,
+                    chnpart=chn_LFP, chnames_LFP=chnames_LFP,
+                           new_channel_name_templ=new_channel_name_templ,
+                            mainLFPchan=chn_LFP)
+            if colinds_good_VIFsel is not None:
+                print('Intersecting VIF and curLFP inds')
+                feat_inds_curLFP = np.intersect1d(feat_inds_curLFP,colinds_good_VIFsel)
+            featnames_sub = np.array(featnames)[feat_inds_curLFP]
+            chnames_LFP_cur = [new_channel_name_templ]
+            #print(rn,chn_LFP, len(featnames) )
+        else:
+            chnames_LFP_cur = chnames_LFP
+
+        #####
+        exogs_list = VIF_truncation['exogs_list']
+        VIF_truncation['VIF_search_worst']
+        #VIF_truncation['X_for_VIF_shape'] = X_for_VIF.shape
+        colinds_bad         = VIF_truncation[ 'colinds_bad_VIFsel']
+        VIFsel_linreg_objs  = VIF_truncation['VIFsel_linreg_objs']
+        VIFsel_featsets_list  = VIF_truncation[ 'VIFsel_featsets_list']
+
+
+        for fshi,fsh in enumerate(fshs):
+            fspm = featsel_per_method[fsh][featsel_feat_subset_name]
+            #featnames = featnames_list[fshi]
+
+            featnames_EBM = fspm['feature_names']
+            non_interact_featis = np.where( [featnames_EBM[ind].find(' x ') < 0 \
+                                for ind in range(len(featnames_EBM)) ])[0]
+            featnaems_EBM_non_interact = np.array(featnames_EBM)[non_interact_featis]
+
+
+            sortinds = None
+            if featsel_feat_subset_name == 'VIFsel':
+                assert set(featnaems_EBM_non_interact) == set(featnames_nice_sub), (featnames_nice_sub, featnaems_EBM_non_interact)
+                sortinds = [featnames_nice_sub.index(featn)  for featn in featnaems_EBM_non_interact ]
+                featnaems_EBM_non_interact = np.array(featnaems_EBM_non_interact)[sortinds]
+                assert tuple(featnaems_EBM_non_interact) == tuple(featnames_nice_sub), (featnames_nice_sub, featnaems_EBM_non_interact)
+                featnaems_EBM_non_interact_notnice = featnames_sub
+            elif featsel_feat_subset_name == 'all':
+                featnames_nice_all = utils.nicenFeatNames(featnames, {'kk':roi_labels},['kk'])
+                assert set(featnaems_EBM_non_interact) == set(featnames_nice_all), (featnames_nice_all, featnaems_EBM_non_interact)
+                sortinds = [featnames_nice_all.index(featn)  for featn in featnaems_EBM_non_interact ]
+                featnaems_EBM_non_interact = np.array(featnaems_EBM_non_interact)[sortinds]
+                assert tuple(featnaems_EBM_non_interact) == tuple(featnames_nice_all), (featnames_nice_all, featnaems_EBM_non_interact)
+                featnaems_EBM_non_interact_notnice = featnames
+
+            scores = fspm.get('scores',None)
+            assert scores is not None
+            scores = np.array(scores)[sortinds]
+            scores_per_class = scores[None,:]
+
+                #if reconstruct_from_VIF:
+                #    scores_per_class_VIF = scores_per_class
+                #    scores_per_class_reconstructed = utsne.reconstructFullScoresFromVIFScores(scores_per_class_VIF,
+                #        len(featnames), colinds_bad,colinds_good_VIFsel,
+                #        VIFsel_featsets_list, VIFsel_linreg_objs, exogs_list )
+                #print( fspm.keys(), scores.shape )
+            print('scores.shape = ',scores.shape)
+            #import pdb;pdb.set_trace()
+
+            ###############################################
+            # make plots for every class label
+            for lblind in range(scores_per_class.shape[0] ):
+                # select points where true class is like the current one
+                #ptinds = np.where(class_labels_good_for_classif == lblind)[0]
+                #classid_enconded = lblind
+                #scores_cur = np.mean(scores[ptinds,lblind,0:-1], axis=0)
+
+                scores_cur = scores_per_class[lblind]
+                if use_full_scores:
+                    scores_full_cur = scores[:,lblind,:]
+                label_str = class_label_names[lblind]
+
+                ###############################
+                separate_by_band2 = True
+
+                    #display(feat_groups_all)
+                clrs,feature_groups_names,feat_groups_all  = \
+                    prepareFeatGroups(featnaems_EBM_non_interact,body_side,
+                                      roi_labels,cmap,
+                                      chnames_LFP, separate_by_band,
+                                      separate_by_band2,
+                                      merge_Hjorth,
+                                      Hjorth_diff_color,
+                                      grand_average_per_feat_type )
+
+
+                #display(feat_groups_all)
+                feat_imp_stats = mergeScores(scores_cur,
+                    featnaems_EBM_non_interact_notnice,
+                    feat_groups_all,
+                    feature_names_subset=None,
+                    feature_groups_names=feature_groups_names, aux=clrs)
+                stats_per_all += [ (rn,fsh,lblind , feat_imp_stats ) ]
+                ####################################
+
+                if isinstance(rn,tuple):
+                    rn_ = rn[0]
+                else:
+                    rn_ = rn
+                #outs +=   [ (rn_,prefix,grp,int_type,fsh,scores_per_class,bias)  ]
+
+                outs +=   [ (rn_,prefix,grp,int_type,fsh,
+                             featnaems_EBM_non_interact,label_str,
+                             scores_per_class[lblind],feat_imp_stats )  ]
+                biases += [bias]
+
+                ####################################
+                subaxs = axs[lblind,:]
+                #subaxs = axs[0,:]
+
+                if not show_bias:
+                    bias = None
+
+                print( f'len(feat_groups_all) = {len(feat_groups_all)}, len(featnames_sub) = {len(featnames_sub)}')
+                #import pdb;pdb.set_trace()
+                plotFeatImpStats(feat_groups_all, feat_imp_stats, axs= subaxs[:2],
+                                bias=None, color=colors_fsh[fshi], bar=False,
+                                 markersize=markersize, show_max = show_max,
+                                 show_std = show_std, alpha=alpha,
+                                 show_sum=0,
+                                 plot_signed=True,
+                                 marker_mean= marker_mean,
+                                 marker_max = marker_max,
+                                 skip_ax_inds=[1],
+                                 same_sets_only= not allow_dif_feat_group_sets)
+                subaxs[0].tick_params(axis='y', labelsize=  tickfontsize)
+                subaxs[0].set_title( f'{subaxs[0].get_title()}  {label_str}' )
+
+                #fig.canvas.draw() # needed to set yticks
+
+                    #fig.canvas.draw() # needed to set yticks
+
+                #subaxs[0].tick_params(axis='y', labelsize=  tickfontsize)
+                #plt.tight_layout()
+                #ax.set_title(  )
+                #pdf.savefig()
+
+
+                #plt.figure(figsize = (12,10))
+                #ax = plt.gca()
+                ax = subaxs[-1]
+                #postp.plotFeatureImportance(ax, featnames_sub, scores[ptinds,lblind,:], 'XGB_Shapley')
+                sort_individ_feats = fshi == 0
+                plotFeatureImportance(ax, featnaems_EBM_non_interact,
+                                            scores_per_class[lblind,:],
+                                            'labind_vs_score',
+                                            color=colors_fsh[fshi],
+                                            sort = sort_individ_feats,
+                                            nshow=n_individ_feats_show)
+                ax.set_title( f'{figname_prefix}: ' + ax.get_title() + f'_lblind = {label_str} (lblind={lblind}):  {fsh}' )
+                ax.tick_params(axis="x",direction="in", pad=-300, labelsize=tickfontsize)
+
+                ###############3
+                assert not use_best_LFP
+
+                perf_from_confmat = None
+                if use_best_LFP:
+                    #chn_LFP = mult_clf_output['best_LFP']['XGB']['winning_chan']
+                    pcm = mult_clf_output['XGB_analysis_versions'][f'all_present_features_only_{chn_LFP}']['perf_dict']
+                    perfs = pcm['perf_aver']
+
+
+                    #confmat = pcm.get('confmat', None)
+                    ##print(pcm.keys())
+                    #if confmat is None:
+                    #    confmat = pcm.get('confmat_aver', None)
+                    #    #print('using confmat_aver')
+                    #perf_from_confmat = perfFromConfmat(confmat,lblind)
+
+                    ps = pcm.get('perfs_CV', None)
+                    perf_from_confmat = recalcPerfFromCV(ps,lblind)
+                    #confmats = [p[-1] for p in ps]
+                    #perf_from_confmat = perfFromConfmat(confmats,lblind)
+
+                else:
+                    pcm = mult_clf_output['XGB_analysis_versions']['all_present_features']['perf_dict']
+                    perfs = pcm['perf_aver']
+
+                ax = subaxs[-2]
+                ax.set_xlim(50,101)
+                #ax.set_ylim(-1,101)
+                ax.set_ylim(30,101)
+                if lblind == 0:
+                    ax.scatter( [perfs[1] * 100], [ perfs[0] * 100 ], c='red',
+                               marker = marker_mean, s=perf_marker_size,
+                               label='XGB_perf_recalc')
+                if perf_from_confmat is not None:
+                    ax.scatter( [perf_from_confmat[1] * 100], [ perf_from_confmat[0] * 100 ], c='green',
+                               marker = marker_mean, s=perf_marker_size,
+                               label='XGB_perf_recalc')
+
+                perfs_actual = fspm['perf']
+                ax.scatter( [perfs_actual[1] * 100],
+                           [ perfs_actual[0] * 100 ], c='purple',
+                            marker = marker_mean, s=perf_marker_size,
+                           label='EMB_perf')
+                ax.legend(loc='lower right')
+
+                ax.set_xlabel('spec')
+                ax.set_ylabel('sens')
+                ax.set_title('performance')
+
+    plt.tight_layout()
+
+    if suptitle is not None:
+        plt.suptitle(suptitle, fontsize=suptitle_fontsize)
+    if pdf is not None:
+        pdf.savefig()
+        plt.close()
+
+    return axs, outs
+
+
+def prepareFeatGroups(featnames_sub,body_side, roi_labels,cmap, chnames_LFP=None,
+                      separate_by_band=True, separate_by_band2=True,
+                     merge_Hjorth=True, Hjorth_diff_color=True,
+                     grand_average_per_feat_type=False ):
+    import globvars as gv
+    ftype_info = utils.collectFeatTypeInfo(featnames_sub)
+
+    feat_groups_all = []
+    feature_groups_names = []
+    clrs = []
+
+    clri = 0
+    if grand_average_per_feat_type:
+        feat_groups_basic = [f'^{ft}_.*' for ft in ftype_info['ftypes']]
+        feat_groups_all+= feat_groups_basic
+        feature_groups_names += feat_groups_basic
+        clrs += [cmap(clri)] * len(feat_groups_basic)
+    clri += 1
+
+    ft = 'bpcorr'
+    if 'bpcorr' in ftype_info['ftypes']:
+        feat_groups_two_bands = [f'^{ft}_{fb1}_.*,{fb2}_.*' for fb1,fb2 in ftype_info['fband_pairs']]
+    #     feat_groups_two_bands = ['^bpcorr_gamma.*,tremor.*','^bpcorr_gamma.*,beta.*','^bpcorr_gamma.*,HFO.*',
+    #                                 '^bpcorr_beta.*,tremor.*','^bpcorr_beta.*,gamma.*','^bpcorr_beta.*,HFO.*',
+    #                                 '^bpcorr_tremor.*,beta.*','^bpcorr_tremor.*,gamma.*','^bpcorr_tremor.*,HFO.*']
+        feat_groups_all += feat_groups_two_bands
+        feature_groups_names += feat_groups_two_bands
+        clrs += [cmap(clri)] * len(feat_groups_two_bands)
+
+    for ft in ['rbcorr', 'con']:
+        if ft in ftype_info['ftypes']:
+            #feat_groups_rbcorr_band = ['^rbcorr_tremor.*', '^rbcorr_beta.*',  '^rbcorr_gamma.*']
+            feat_groups_one_band = [ f'^{ft}_{fb}_.*' for fb in ftype_info['fband_per_ftype'][ft] ]
+            feat_groups_all += feat_groups_one_band
+            feature_groups_names += feat_groups_one_band
+            clrs += [cmap(clri)] * len(feat_groups_one_band)
+    #feat_groups_all
+
+    # allow HFO2 and high_beta  (allow numbers and one underscore in
+    # the middle
+    bnpattern = '[a-zA-Z0-9]+_?[a-zA-Z0-9]*'
+
+
+    wasH = 0
+    for ft in gv.noband_feat_types:
+        if ft in ftype_info['ftypes']:
+            wasH = True
+
+    if wasH:
+        ft_templ = f'({"|".join(gv.noband_feat_types) })'
+        a = [f'^{ft_templ}_LFP.*']
+        feat_groups_all += a
+        feature_groups_names += [  '^Hjorth_LFP'  ]
+        clrs += [cmap(clri)] * len(a)
+
+    if wasH and not merge_Hjorth:
+        for noband_type in gv.noband_feat_types:
+        #ft_templ = f'({"|".join(gv.noband_feat_types) })'
+            a = [f'^{noband_type}_LFP.*']
+            feat_groups_all += a
+            feature_groups_names += [  f'^{noband_type}_LFP'  ]
+            clrs += [cmap(clri)] * len(a)
+
+
+    clri += 1
+    from globvars import gp
+    if roi_labels is not None:
+        # main side (body)
+        # get parcel indices of
+        for grpn,parcel_list in gp.parcel_groupings_post.items():
+            #feat_groups_cur = []
+            #print(parcel_list)
+            plws = utils.addSideToParcels(parcel_list, body_side)
+            parcel_inds = [ roi_labels.index(parcel) for parcel in plws ]
+
+            pas = '|'.join(map(str,parcel_inds) )
+            chn_templ = f'msrc(R|L)_9_({pas})_c[0-9]+'
+
+            if wasH:
+                if Hjorth_diff_color:
+                    clri += 1
+                ft_templ = f'({"|".join(gv.noband_feat_types) })'
+                a = [f'^{ft_templ}_{chn_templ}']
+                feat_groups_all += a
+                feature_groups_names += [  f'^Hjorth_{grpn}'  ]
+                clrs += [cmap(clri)] * len(a)
+                #clri += 1
+
+            if wasH and not merge_Hjorth:
+                #ft_templ = f'({"|".join(gv.noband_feat_types) })'
+                for noband_type in gv.noband_feat_types:
+                    a = [f'^{noband_type}_{chn_templ}']
+                    feat_groups_all += a
+                    feature_groups_names += [  f'^{noband_type}_{grpn}'  ]
+                    clrs += [cmap(clri)] * len(a)
+
+
+    for lfpchn in chnames_LFP:
+
+
+        clri += 1
+        # now group per LFPch but with free source
+        chn_templ = 'msrc(R|L)_9_[0-9]+_c[0-9]+'
+        grpn = 'msrc*'
+
+        ft = 'bpcorr'
+        if 'bpcorr' in ftype_info['ftypes']:
+
+            if separate_by_band2:
+                fbpairs = ftype_info['fband_pairs']
+                fbpairs_dispnames = fbpairs
+            # !! This assume LFP is always in the second place
+            #if chnames_LFP is not None:
+            #    for lfpchn in chnames_LFP:
+            a = [f'^{ft}_{fb1}_{chn_templ},{fb2}_{lfpchn}' for fb1,fb2 in fbpairs]
+            feat_groups_all += a
+            feature_groups_names += [f'^{ft}_{fb1}_{grpn},{fb2}_{lfpchn}' for fb1,fb2 in fbpairs_dispnames]
+            clrs += [cmap(clri)] * len(a)
+            #else:
+            #    feat_groups_all += [f'^{ft}_{fb1}_{chn_templ},{fb2}_.*' for fb1,fb2 in ftype_info['fband_pairs']]
+            #    feature_groups_names += [f'^{ft}_{fb1}_{grpn},{fb2}_.*' for fb1,fb2 in ftype_info['fband_pairs']]
+        ft = 'rbcorr'
+        # !! This assume LFP is always in the second place
+        if ft in ftype_info['ftypes']:
+            if separate_by_band2:
+                fbsolos = ftype_info['fband_per_ftype'][ft]
+                fbsolos_dispnames = fbsolos
+            #if chnames_LFP is not None:
+            #    for lfpchn in chnames_LFP:
+            a = [ f'^{ft}_{fb}_{chn_templ},{fb}_{lfpchn}' for fb in fbsolos ]
+            feat_groups_all += a
+            feature_groups_names += [ f'^{ft}_{fb}_{grpn},{fb}_{lfpchn}' for fb in fbsolos_dispnames ]
+            clrs += [cmap(clri)] * len(a)
+            #else:
+            #    feat_groups_all += [ f'^{ft}_{fb}_{chn_templ},.*' for fb in ftype_info['fband_per_ftype'][ft] ]
+            #    feature_groups_names += [ f'^{ft}_{fb}_{grpn},.*' for fb in ftype_info['fband_per_ftype'][ft] ]
+        ft = 'con'
+        # !! This assume LFP is always in the first place
+        if ft in ftype_info['ftypes']:
+            if separate_by_band2:
+                fbsolos = ftype_info['fband_per_ftype'][ft]
+                fbsolos_dispnames = fbsolos
+            #if chnames_LFP is not None:
+            #    for lfpchn in chnames_LFP:
+            a = [ f'^{ft}_{fb}_{lfpchn},{chn_templ}' for fb in fbsolos ]
+            feat_groups_all += a
+            feature_groups_names += [ f'^{ft}_{fb}_{lfpchn},{grpn}' for fb in fbsolos_dispnames ]
+            clrs += [cmap(clri)] * len(a)
+
+        #############################################
+
+        fbpairs = [(bnpattern,bnpattern)]
+        fbsolos = [bnpattern]
+        fbpairs_dispnames = [('*','*')]
+        fbsolos_dispnames = ['*']
+
+        #clri += 1
+        if roi_labels is not None:
+            # main side (body)
+            # get parcel indices of
+            for grpn,parcel_list in gp.parcel_groupings_post.items():
+                clri += 1
+                #feat_groups_cur = []
+                #print(parcel_list)
+                plws = utils.addSideToParcels(parcel_list, body_side)
+                parcel_inds = [ roi_labels.index(parcel) for parcel in plws ]
+
+                pas = '|'.join(map(str,parcel_inds) )
+                chn_templ = f'msrc(R|L)_9_({pas})_c[0-9]+'
+
+                ft = 'bpcorr'
+                if 'bpcorr' in ftype_info['ftypes']:
+                    if separate_by_band:
+                        fbpairs = ftype_info['fband_pairs']
+                        fbpairs_dispnames = fbpairs
+                    # !! This assume LFP is always in the second place
+                    #if chnames_LFP is not None:
+                    #    for lfpchn in chnames_LFP:
+                    a = [f'^{ft}_{fb1}_{chn_templ},{fb2}_{lfpchn}' for fb1,fb2 in fbpairs]
+                    feat_groups_all += a
+                    feature_groups_names += [f'^{ft}_{fb1}_{grpn},{fb2}_{lfpchn}' for fb1,fb2 in fbpairs_dispnames]
+                    clrs += [cmap(clri)] * len(a)
+                    #else:
+                    #    feat_groups_all += [f'^{ft}_{fb1}_{chn_templ},{fb2}_.*' for fb1,fb2 in ftype_info['fband_pairs']]
+                    #    feature_groups_names += [f'^{ft}_{fb1}_{grpn},{fb2}_.*' for fb1,fb2 in ftype_info['fband_pairs']]
+                ft = 'rbcorr'
+                # !! This assume LFP is always in the second place
+                if ft in ftype_info['ftypes']:
+                    if separate_by_band:
+                        fbsolos = ftype_info['fband_per_ftype'][ft]
+                        fbsolos_dispnames = fbsolos
+                    #if chnames_LFP is not None:
+                    #    for lfpchn in chnames_LFP:
+                    a = [ f'^{ft}_{fb}_{chn_templ},{fb}_{lfpchn}' for fb in fbsolos ]
+                    feat_groups_all += a
+                    feature_groups_names += [ f'^{ft}_{fb}_{grpn},{fb}_{lfpchn}' for fb in fbsolos_dispnames ]
+                    clrs += [cmap(clri)] * len(a)
+                    #else:
+                    #    feat_groups_all += [ f'^{ft}_{fb}_{chn_templ},.*' for fb in ftype_info['fband_per_ftype'][ft] ]
+                    #    feature_groups_names += [ f'^{ft}_{fb}_{grpn},.*' for fb in ftype_info['fband_per_ftype'][ft] ]
+                ft = 'con'
+                # !! This assume LFP is always in the first place
+                if ft in ftype_info['ftypes']:
+                    if separate_by_band:
+                        fbsolos = ftype_info['fband_per_ftype'][ft]
+                        fbsolos_dispnames = fbsolos
+                    #if chnames_LFP is not None:
+                    #    for lfpchn in chnames_LFP:
+                    a = [ f'^{ft}_{fb}_{lfpchn},{chn_templ}' for fb in fbsolos ]
+                    feat_groups_all += a
+                    feature_groups_names += [ f'^{ft}_{fb}_{lfpchn},{grpn}' for fb in fbsolos_dispnames ]
+                    clrs += [cmap(clri)] * len(a)
+                #else:
+                #    feat_groups_all += [ f'^{ft}_{fb}_.*,{chn_templ}' for fb in ftype_info['fband_per_ftype'][ft] ]
+                #    feature_groups_names += [ f'^{ft}_{fb}_.*,{grpn}' for fb in ftype_info['fband_per_ftype'][ft] ]
+
+    return clrs,feature_groups_names,feat_groups_all
+
 
 def plotTableInfos2(table_info_per_perf_type, perf_tuple,
                       output_subdir='', alpha_bar = 0.7,
@@ -2673,10 +3364,11 @@ def plotTableInfos2(table_info_per_perf_type, perf_tuple,
     axs = axs.reshape((nr,nc))
 
     pveclen = 2
-    colors = ['blue', 'red', 'purple']
+    colors = ['blue', 'red', 'purple', 'green']
     color_full = colors[0]
     color_red = colors[1]
     color_red2 = colors[2]
+    color_add = colors[3]
     str_per_pref_per_rowname_per_clftype = {}
 
     main_keys = [perf_tuple[1]]
@@ -2755,6 +3447,7 @@ def plotTableInfos2(table_info_per_perf_type, perf_tuple,
                 pvec_add = [prefinfo.get(os + '_add' , np.nan) for os in order]
             pvec = pvec[:pveclen]
             pvec_red = pvec_red[:pveclen]
+            pvec_add = pvec_add[:pveclen]
             #pvec_red = [prefinfo['sens_red'], prefinfo['spec_red'] , prefinfo['F1_red']]
             assert pveclen in [2,3]
             str_to_put_ = utsne.sprintfPerfs(pvec)
@@ -2786,6 +3479,8 @@ def plotTableInfos2(table_info_per_perf_type, perf_tuple,
             ys += [p]
             ys_red += [p_red]
             ys_add += [p_add]
+
+            #print(ys_add)
 
         print( prefixes_wnums )
 
@@ -2839,8 +3534,10 @@ def plotTableInfos2(table_info_per_perf_type, perf_tuple,
         else:
             sis = np.arange(len(prefixes_wnums) )
         ax.barh(np.array(prefixes_wnums)[sis], np.array(ys)[sis], color = color_full,    alpha=alpha_bar)
-        ax.barh(np.array(prefixes_wnums)[sis], np.array(ys_red)[sis], color = color_red, alpha=alpha_bar)
-        ax.barh(np.array(prefixes_wnums)[sis], np.array(ys_add)[sis], color = color_red, alpha=alpha_bar)
+        ax.barh(np.array(prefixes_wnums)[sis], np.array(ys_red)[sis],
+                color = color_red, alpha=alpha_bar)
+        ax.barh(np.array(prefixes_wnums)[sis], np.array(ys_add)[sis],
+                color = color_add, alpha=alpha_bar)
         ax.set_xlabel(perftype)
         ax.set_xlim(0,1)
         #ax.tick_params(axs=)
@@ -2855,6 +3552,9 @@ def plotTableInfos2(table_info_per_perf_type, perf_tuple,
     plt.tight_layout()
     #keystr = ','.join(keys)
     figfname = f'Performances_perf_tuple={perf_tuple}_pveclen={pveclen}.pdf'
+    dirfig = pjoin(gv.dir_fig, output_subdir)
+    if not os.path.exists(dirfig):
+        os.mkdir(dirfig)
     plt.savefig(pjoin(gv.dir_fig, output_subdir,figfname))
 
 def plotFeatNum2Perf(output_per_raw, perflists, prefixes=None, balance_level = 0.75, skip_plot=False, xlim=None ):
@@ -3566,3 +4266,42 @@ def loadFullScores(outputs_grouped, crop_fname='auto'):
             del f
             gc.collect()
         print(scores.shape)
+
+
+
+def loadEBMExplainer(outputs_grouped, fs ):
+    for rn,a in outputs_grouped.items():
+        (prefix,grp,int_type), mult_clf_output = a
+        loadEBMExplainer_(mult_clf_output, fs )
+
+def loadEBMExplainer_(mult_clf_output, fs ):
+    if 'explainer' in mult_clf_output['featsel_per_method']['interpret_EBM'] [fs]:
+        return
+    filename_fullsize = mult_clf_output['filename_full']
+    from pathlib import Path
+    pfsz = Path(filename_fullsize)
+    filename_fullsize = pjoin(pfsz.parents[0], pfsz.name[2:])
+    #    finfo = os.stat( filename_fullsize )
+    #    print(finfo.st_size / (1024**2))
+    f = np.load(filename_fullsize,allow_pickle=True)
+
+    results_cur =  f['results_cur'][()]
+
+    #results_cur.keys()
+
+    EBM = results_cur['featsel_per_method']['interpret_EBM']
+    #scores
+
+    #clf_dict = EBM['info_per_cp'][('trem_L', 'hold_L&move_L')]
+    clf_dict = EBM[fs]
+    scores = clf_dict['scores'];
+    #print(len(results_cur['feature_names_filtered']), len(EBM['feature_indices_used']) )
+    #print('len(scores) = ',len(scores) )
+    explainer = clf_dict['explainer']
+    mult_clf_output['featsel_per_method']['interpret_EBM'] [fs]['explainer'] = explainer
+
+    #print((rn,grp,int_type), utsne.sprintfPerfs(clf_dict['perf'] ) )
+
+    del f
+    del results_cur
+

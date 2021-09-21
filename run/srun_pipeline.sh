@@ -219,15 +219,15 @@ fi
 # but otherwise it does not work on jusuf -- it has too old bash..
 #GROUPINGS_TO_USE="merge_all_not_trem merge_movements merge_nothing"
 #GROUPINGS_TO_USE="merge_nothing merge_all_not_trem"
-#GROUPINGS_TO_USE="merge_nothing"
-GROUPINGS_TO_USE="merge_movements"
+GROUPINGS_TO_USE="merge_nothing"
+#GROUPINGS_TO_USE="merge_movements"
 
 #int_types_to_use = gp.int_types_to_include
 #INT_SETS_TO_USE="basic trem_vs_quiet"
 #INT_SETS_TO_USE="basic"
 #INT_SETS_TO_USE="trem_vs_hold&move"
-INT_SETS_TO_USE="basic trem_vs_hold&move"
-#INT_SETS_TO_USE="trem_vs_quiet"
+#INT_SETS_TO_USE="basic trem_vs_hold&move"
+INT_SETS_TO_USE="trem_vs_quiet"
 
 if [ $USE_AUX_IVAL_GROUPINGS -gt 0 ]; then
   GROUPINGS_TO_USE="$GROUPINGS_TO_USE merge_within_subj merge_within_medcond merge_within_task"

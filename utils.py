@@ -4300,17 +4300,20 @@ def genMLresFn(rawnames, sources_type, src_file_grouping_ind, src_grouping,
             rawname_format_items = rawname_format.split(',')
             #print(rawname_format_items,subjs)
             if 'subj' in rawname_format_items:
+                if len(rawname_format_items) == 1:
+                    str_list_sorted = subjs
                 if 'medcond' in rawname_format_items:
                     if 'task' in rawname_format_items:
                         str_list_sorted = rawnames
                     else:
+                        assert len(rawname_format_items) == 2
                         for subj in sorted(subjs):
                             #print(subjs_analyzed[subj])
                             for mc in subjs_analyzed[subj]['medconds']:
                                 str_list_sorted += [ f'{subj}_{mc}' ]
                 if 'medcond_glob' in rawname_format_items:
+                    assert len(rawname_format_items) == 2
                     str_list_sorted = [','.join(subjs) + '_' + ','.join(medconds)]
-
 
                 if len(rawname_format_items) > 1 and 'task' == rawname_format_items[1]:
                     for subj in sorted(subjs):
@@ -4329,6 +4332,8 @@ def genMLresFn(rawnames, sources_type, src_file_grouping_ind, src_grouping,
         sind_join_str = ','.join(str_list_sorted )
     else:
         sind_join_str = custom_rawname_str
+
+    assert len(sind_join_str) > 0
     out_name_templ = '_{}_grp{}-{}_{}ML_nr{}_{}chs_nfeats{}_pcadim{}_skip{}_wsz{}'
     out_name = (out_name_templ ).\
         format(sources_type, src_file_grouping_ind, src_grouping,

@@ -183,6 +183,7 @@ VIF_thr = 10
 VIF_search_worst = False
 
 EBM_compute_pairwise = 1
+EBM_featsel_feats = ['VIFsel']  # 'all','best_LFP', 'heavy' are also possible
 featsel_on_VIF = 1
 
 use_smoothened = 0
@@ -241,7 +242,7 @@ opts, args = getopt.getopt(effargv,"hr:n:s:w:p:",
          "selMinFeatSet_after_featsel=", "n_jobs=", "label_groups_to_use=",
          "SLURM_job_id=", "featsel_only_best_LFP=",
          "XGB_max_depth=", "XGB_min_child_weight=", "XGB_tune_param=",
-         "EBM_compute_pairwise=", "featsel_on_VIF=", "custom_rawname_str=",
+         "EBM_compute_pairwise=", "EBM_featsel_feats=", "featsel_on_VIF=", "custom_rawname_str=",
          "do_cleanup=", "VIF_thr=", "VIF_search_worst="])
 print(sys.argv)
 print('Argv str = ',' '.join(sys.argv ) )
@@ -309,6 +310,8 @@ for opt,arg in pars.items():
         n_samples_SHAP = int(arg)
     elif opt == "EBM_compute_pairwise":
         EBM_compute_pairwise = int(arg)
+    elif opt == "EBM_featsel_feats":
+        EBM_featsel_feats = arg.split(',')
     elif opt == "calc_MI":
         calc_MI = int(arg)
     elif opt == "XGB_max_depth":
@@ -1010,6 +1013,7 @@ Xsubset_to_fit = Xconcat_to_fit[bininds_noartif_nounlab]
 pca.fit(Xsubset_to_fit )   # fit to not-outlier data
 pcapts = pca.transform(Xconcat_imputed)  # transform outliers as well
 
+
 print('Output PCA dimension {}, total explained variance proportion {:.4f}'.
       format( pcapts.shape[1] , np.sum(pca.explained_variance_ratio_) ) )
 print('PCA First several var ratios ',pca.explained_variance_ratio_[:5])
@@ -1098,6 +1102,14 @@ if do_Classif:
 
             print('---------------------------------------------')
             print('Start classif (grp {}, its {})'.format(grouping_key, int_types_key))
+
+            filename_to_save =  utils.genMLresFn(rawnames,sources_type, src_file_grouping_ind, src_grouping,
+                    prefix, n_channels, Xconcat_imputed.shape[1],
+                    pcapts.shape[1], skip, windowsz, use_main_LFP_chan, grouping_key,int_types_key,
+                    rawname_format = savefile_rawname_format,
+                    custom_rawname_str=custom_rawname_str)
+            if save_output:
+                print(f'later we will be saving to {filename_to_save}')
 
             group_labels_dict = {}
             revdict_per_dataset_int_type = {}
@@ -1329,6 +1341,12 @@ if do_Classif:
             usage = getMemUsed();
 
             results_cur = {}
+            verfn = 'last_code_ver_synced_with_HPC.txt'
+            verstr = 'unk'
+            if os.path.exists(verfn):
+                with open(verfn ) as f:
+                    verstr = f.readlines()[0]
+            results_cur['code_ver'] = verstr
             results_cur['group_labels_dict'] = group_labels_dict
             results_cur['feature_names_filtered'] = featnames #=feature_names_pri[0]
             results_cur['feature_names_nice'] = featnames_nice #=feature_names_pri[0]
@@ -2160,11 +2178,6 @@ if do_Classif:
             #fname_ML_full_intermed = pjoin( gv.data_dir, output_subdir,
             #                                       '_{}{}.npz'.format(sind_join_str,out_name))
 
-            filename_to_save =  utils.genMLresFn(rawnames,sources_type, src_file_grouping_ind, src_grouping,
-                    prefix, n_channels, Xconcat_imputed.shape[1],
-                    pcapts.shape[1], skip, windowsz, use_main_LFP_chan, grouping_key,int_types_key,
-                                        rawname_format = savefile_rawname_format,
-                                        custom_rawname_str=custom_rawname_str)
 
             fname_ML_full_intermed = pjoin( gv.data_dir, output_subdir, filename_to_save)
 
@@ -2301,65 +2314,127 @@ if do_Classif:
                         # since EBM only works for binary, I treat each pair of classes separately
                         EBM_seed = 0
 
-                        if featsel_only_best_LFP and 'LFP' in data_modalities \
-                                and 'XGB' in search_best_LFP and len(chnames_LFP) > 1:
-                            featis, featis_bad = getFeatIndsRelToOnlyOneLFPchan(featnames,
-                                    chn=results_cur['best_LFP']['XGB']['winning_chan'])
-                        else:
+                        for featsel_feat_subset_name in EBM_featsel_feats:
+                            print(f'Starting {fsh} for featsel_feat_subset_name = {featsel_feat_subset_name}')
                             featis = np.arange(Xconcat_good_cur.shape[-1])
+                            if featsel_feat_subset_name == 'all':
+                                featis = np.arange(Xconcat_good_cur.shape[-1])
+                            elif featsel_feat_subset_name == 'heavy':
+                                featis = feat_inds_for_heavy
+                            elif featsel_feat_subset_name == 'best_LFP':
+                                if featsel_only_best_LFP and 'LFP' in data_modalities \
+                                        and 'XGB' in search_best_LFP and len(chnames_LFP) > 1:
+                                    featis, featis_bad = getFeatIndsRelToOnlyOneLFPchan(featnames,
+                                            chn=results_cur['best_LFP']['XGB']['winning_chan'])
+                                else:
+                                    print(f'{fsh} for best_LFP -- additional conditions not satisfied, skipping')
+                                    continue
+                            elif (featsel_feat_subset_name == 'VIFsel' or featsel_on_VIF):
+                                if colinds_good_VIFsel is not None:
+                                    featis = np.intersect1d(featis,colinds_good_VIFsel)
+                                else:
+                                    print(f'{fsh} for VIFsel -- additional conditions not satisfied, skipping')
+                                    continue
+                            else:
+                                raise ValueError(f'unknown feat subset name {featsel_feat_subset_name}')
 
-                        if featsel_on_VIF and colinds_good_VIFsel is not None:
-                            featis = np.intersect1d(featis,colinds_good_VIFsel)
+                            if EBM_compute_pairwise:
+                                featsel_info[featsel_feat_subset_name] = {}
 
-                        if EBM_compute_pairwise:
-                            EBM_result_per_cp= {}
-                            indpairs_names = []
+                                EBM_result_per_cp= {}
+                                indpairs_names = []
 
-                            X = Xconcat_good_cur[::subskip_fit, featis]
-                            y = class_labels_for_heavy
+                                X = Xconcat_good_cur[::subskip_fit, featis]
+                                y = class_labels_for_heavy
 
-                            uls = list(set(class_labels_for_heavy))
-                            class_pairs = list(itertools.combinations(uls, 2))
-                            print(class_pairs)
+                                uls = list(set(class_labels_for_heavy))
+                                class_pairs = list(itertools.combinations(uls, 2))
+                                print(class_pairs)
 
-                            info_per_cp = {}
-                            #cpi = 0
-                            for cpi,(c1,c2) in enumerate(class_pairs):
-                                inds1 = np.where(class_labels_for_heavy == c1)[0]
-                                inds2 = np.where(class_labels_for_heavy == c2)[0]
+                                info_per_cp = {}
+                                #cpi = 0
+                                for cpi,(c1,c2) in enumerate(class_pairs):
+                                    inds1 = np.where(class_labels_for_heavy == c1)[0]
+                                    inds2 = np.where(class_labels_for_heavy == c2)[0]
 
-                                inds = np.hstack((inds1,inds2))
-                                indpair_names = revdict[c1],revdict[c2]
+                                    inds = np.hstack((inds1,inds2))
+                                    indpair_names = revdict[c1],revdict[c2]
 
-                                print(f'Starting computing EBM for class pair {indpair_names}, in total {len(inds)}'+
-                                    f'=({len(inds1)}+{len(inds2)}) data points')
+                                    print(f'Starting computing EBM for class pair {indpair_names}, in total {len(inds)}'+
+                                        f'=({len(inds1)}+{len(inds2)}) data points')
+                                    # filter classes
+                                    X_cur_cp = X[inds]
+                                    y_cur_cp = y[inds]
+
+                                    from sklearn.model_selection import train_test_split
+                                    X_train, X_test, y_train, y_test = train_test_split(X_cur_cp, y_cur_cp,
+                                        test_size=0.20, random_state=1, shuffle=True)
+                                    ebm = ExplainableBoostingClassifier(random_state=EBM_seed,
+                                        feature_names=np.array(featnames_nice)[featis],
+                                        n_jobs=n_jobs)
+                                    ebm.fit(X_train, y_train)
+                                    global_exp = ebm.explain_global()
+
+                                    sens,spec, F1, confmat  = utsne.getClfPredPower(ebm,\
+                                        X_test,y_test,class_ind_to_check, printLog=False)
+                                    confmat_normalized = utsne.confmatNormalize(confmat) * 100
+                                    print(f'confmat_normalized_true (pct) = {confmat_normalized}')
+
+                                    EBM_result_per_cp[indpair_names] = global_exp
+                                    indpairs_names += [indpair_names]
+
+                                    # extracting data from explainer
+                                    scores = global_exp.data()['scores']
+                                    names  = global_exp.data()['names']
+                                    sis = np.argsort(scores)[::-1]
+                                    featnames_srt = np.array(names)[sis]
+                                    print(f'EBM: Strongest feat is {featnames_srt[0]}')
+
+
+                                    info_cur = {}
+                                    info_cur['scores'] = scores
+                                    info_cur['explainer'] = global_exp
+                                    info_cur['perf'] = sens,spec, F1, confmat
+                                    info_cur['confmat_normalized'] = confmat_normalized
+                                    # I want a duplicate becasue I might delete
+                                    # explainer since it is too large
+                                    info_cur['feature_names']= names
+
+                                    info_per_cp[indpair_names ] = info_cur
+
+                                featsel_info[featsel_feat_subset_name]['info_per_cp'] = info_per_cp
+                            else:
+                                print('Starting computing EBM for all classes')
+
                                 # filter classes
-                                X_cur_cp = X[inds]
-                                y_cur_cp = y[inds]
+                                X = Xconcat_good_cur[::subskip_fit, featis]
+                                y = class_labels_for_heavy
 
                                 from sklearn.model_selection import train_test_split
-                                X_train, X_test, y_train, y_test = train_test_split(X_cur_cp, y_cur_cp,
-                                    test_size=0.20, random_state=1, shuffle=True)
+                                X_train, X_test, y_train, y_test = \
+                                    train_test_split(X, y, test_size=0.20, random_state=0, shuffle=True)
+
                                 ebm = ExplainableBoostingClassifier(random_state=EBM_seed,
-                                    feature_names=np.array(featnames_nice)[featis],
-                                    n_jobs=n_jobs)
+                                        feature_names=np.array(featnames_nice)[featis], n_jobs=n_jobs)
                                 ebm.fit(X_train, y_train)
                                 global_exp = ebm.explain_global()
 
-                                sens,spec, F1, confmat  = utsne.getClfPredPower(ebm,\
-                                    X_test,y_test,class_ind_to_check, printLog=False)
+                                sens,spec, F1, confmat  = \
+                                    utsne.getClfPredPower(ebm,X_test,y_test,class_ind_to_check, printLog=False)
                                 confmat_normalized = utsne.confmatNormalize(confmat) * 100
                                 print(f'confmat_normalized_true (pct) = {confmat_normalized}')
-
-                                EBM_result_per_cp[indpair_names] = global_exp
-                                indpairs_names += [indpair_names]
 
                                 # extracting data from explainer
                                 scores = global_exp.data()['scores']
                                 names  = global_exp.data()['names']
                                 sis = np.argsort(scores)[::-1]
                                 featnames_srt = np.array(names)[sis]
-                                print(f'EBM: Strongest feat is {featnames_srt[0]}')
+                                nfs = np.nan
+                                if len(sis) > 1:
+                                    nfs = [sis[1] ]
+                                print(f'EBM: Strongest feat is {featnames_srt[0]}'
+                                      f'with score {scores[sis[0] ]}'
+                                      f' ,next feat score is {nfs}')
 
 
                                 info_cur = {}
@@ -2367,49 +2442,9 @@ if do_Classif:
                                 info_cur['explainer'] = global_exp
                                 info_cur['perf'] = sens,spec, F1, confmat
                                 info_cur['confmat_normalized'] = confmat_normalized
-                                # I want a duplicate becasue I might delete
-                                # explainer since it is too large
                                 info_cur['feature_names']= names
-
-                                info_per_cp[indpair_names ] = info_cur
-
-                            featsel_info['info_per_cp'] = info_per_cp
-                        else:
-                            print('Starting computing EBM for all classes')
-
-                            # filter classes
-                            X = Xconcat_good_cur[::subskip_fit, featis]
-                            y = class_labels_for_heavy
-
-                            from sklearn.model_selection import train_test_split
-                            X_train, X_test, y_train, y_test = \
-                                train_test_split(X, y, test_size=0.20, random_state=0, shuffle=True)
-
-                            ebm = ExplainableBoostingClassifier(random_state=EBM_seed,
-                                    feature_names=np.array(featnames_nice)[featis], n_jobs=n_jobs)
-                            ebm.fit(X_train, y_train)
-                            global_exp = ebm.explain_global()
-
-                            sens,spec, F1, confmat  = \
-                                utsne.getClfPredPower(ebm,X_test,y_test,class_ind_to_check, printLog=False)
-                            confmat_normalized = utsne.confmatNormalize(confmat) * 100
-                            print(f'confmat_normalized_true (pct) = {confmat_normalized}')
-
-                            # extracting data from explainer
-                            scores = global_exp.data()['scores']
-                            names  = global_exp.data()['names']
-                            sis = np.argsort(scores)[::-1]
-                            featnames_srt = np.array(names)[sis]
-                            print(f'EBM: Strongest feat is {featnames_srt[0]}')
-
-
-                            info_cur = {}
-                            info_cur['scores'] = scores
-                            info_cur['explainer'] = global_exp
-                            info_cur['perf'] = sens,spec, F1, confmat
-                            info_cur['confmat_normalized'] = confmat_normalized
-                            info_cur['feature_names']= names
-                            featsel_info.update(info_cur)
+                                #featsel_info.update(info_cur)
+                                featsel_info[featsel_feat_subset_name] = info_cur
 
                         usage = getMemUsed();
                     else:
