@@ -58,6 +58,7 @@ $SLEEP
 echo "  rev rsync run files (excluding sh, only py)"
 rsync $FLAGS $SSH_FLAG  $JUSUF/$subdir/*.sh  $ZBOOK_DIR/$subdir/
 rsync $FLAGS $SSH_FLAG  $JUSUF/$subdir/indtool.py  $ZBOOK_DIR/$subdir/
+rsync $FLAGS $SSH_FLAG  $JUSUF/$subdir/_subrun*HPC.py  $ZBOOK_DIR/$subdir/
 $SLEEP
 echo "  rev rsync souce code"
 rsync $FLAGS $SSH_FLAG --exclude="sync*HPC.sh" $JUSUF/*HPC.py $ZBOOK_DIR/
