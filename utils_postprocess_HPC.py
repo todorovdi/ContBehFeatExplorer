@@ -2319,222 +2319,21 @@ def plotFeatSignifSHAP_list(pdf, outputs_grouped, fshs=['XGB_Shapley'],
                 label_str = class_label_names[lblind]
 
                 ###############################
-                ftype_info = utils.collectFeatTypeInfo(featnames_sub)
-
-                feat_groups_all = []
-                feature_groups_names = []
-                clrs = []
-
-                clri = 0
-                if grand_average_per_feat_type:
-                    feat_groups_basic = [f'^{ft}_.*' for ft in ftype_info['ftypes']]
-                    feat_groups_all+= feat_groups_basic
-                    feature_groups_names += feat_groups_basic
-                    clrs += [cmap(clri)] * len(feat_groups_basic)
-                clri += 1
-
-                ft = 'bpcorr'
-                if 'bpcorr' in ftype_info['ftypes']:
-                    feat_groups_two_bands = [f'^{ft}_{fb1}_.*,{fb2}_.*' for fb1,fb2 in ftype_info['fband_pairs']]
-                #     feat_groups_two_bands = ['^bpcorr_gamma.*,tremor.*','^bpcorr_gamma.*,beta.*','^bpcorr_gamma.*,HFO.*',
-                #                                 '^bpcorr_beta.*,tremor.*','^bpcorr_beta.*,gamma.*','^bpcorr_beta.*,HFO.*',
-                #                                 '^bpcorr_tremor.*,beta.*','^bpcorr_tremor.*,gamma.*','^bpcorr_tremor.*,HFO.*']
-                    feat_groups_all += feat_groups_two_bands
-                    feature_groups_names += feat_groups_two_bands
-                    clrs += [cmap(clri)] * len(feat_groups_two_bands)
-
-                for ft in ['rbcorr', 'con']:
-                    if ft in ftype_info['ftypes']:
-                        #feat_groups_rbcorr_band = ['^rbcorr_tremor.*', '^rbcorr_beta.*',  '^rbcorr_gamma.*']
-                        feat_groups_one_band = [ f'^{ft}_{fb}_.*' for fb in ftype_info['fband_per_ftype'][ft] ]
-                        feat_groups_all += feat_groups_one_band
-                        feature_groups_names += feat_groups_one_band
-                        clrs += [cmap(clri)] * len(feat_groups_one_band)
-                #feat_groups_all
-
-                # allow HFO2 and high_beta  (allow numbers and one underscore in
-                # the middle
-                bnpattern = '[a-zA-Z0-9]+_?[a-zA-Z0-9]*'
 
 
-                wasH = 0
-                for ft in gv.noband_feat_types:
-                    if ft in ftype_info['ftypes']:
-                        wasH = True
-
-                if wasH:
-                    ft_templ = f'({"|".join(gv.noband_feat_types) })'
-                    a = [f'^{ft_templ}_LFP.*']
-                    feat_groups_all += a
-                    feature_groups_names += [  '^Hjorth_LFP'  ]
-                    clrs += [cmap(clri)] * len(a)
-
-                if wasH and not merge_Hjorth:
-                    for noband_type in gv.noband_feat_types:
-                    #ft_templ = f'({"|".join(gv.noband_feat_types) })'
-                        a = [f'^{noband_type}_LFP.*']
-                        feat_groups_all += a
-                        feature_groups_names += [  f'^{noband_type}_LFP'  ]
-                        clrs += [cmap(clri)] * len(a)
-
-
-                clri += 1
-                from globvars import gp
-                if roi_labels is not None:
-                    # main side (body)
-                    # get parcel indices of
-                    for grpn,parcel_list in gp.parcel_groupings_post.items():
-                        #feat_groups_cur = []
-                        #print(parcel_list)
-                        plws = utils.addSideToParcels(parcel_list, body_side)
-                        parcel_inds = [ roi_labels.index(parcel) for parcel in plws ]
-
-                        pas = '|'.join(map(str,parcel_inds) )
-                        chn_templ = f'msrc(R|L)_9_({pas})_c[0-9]+'
-
-                        if wasH:
-                            if Hjorth_diff_color:
-                                clri += 1
-                            ft_templ = f'({"|".join(gv.noband_feat_types) })'
-                            a = [f'^{ft_templ}_{chn_templ}']
-                            feat_groups_all += a
-                            feature_groups_names += [  f'^Hjorth_{grpn}'  ]
-                            clrs += [cmap(clri)] * len(a)
-                            #clri += 1
-
-                        if wasH and not merge_Hjorth:
-                            #ft_templ = f'({"|".join(gv.noband_feat_types) })'
-                            for noband_type in gv.noband_feat_types:
-                                a = [f'^{noband_type}_{chn_templ}']
-                                feat_groups_all += a
-                                feature_groups_names += [  f'^{noband_type}_{grpn}'  ]
-                                clrs += [cmap(clri)] * len(a)
-
-
-                if chnames_LFP is None:
-                    chnames_LFP = ['.*']
-                for lfpchn in chnames_LFP_cur:
-
-
-                    clri += 1
-                    separate_by_band2 = True
-                    # now group per LFPch but with free source
-                    chn_templ = 'msrc(R|L)_9_[0-9]+_c[0-9]+'
-                    grpn = 'msrc*'
-
-                    ft = 'bpcorr'
-                    if 'bpcorr' in ftype_info['ftypes']:
-
-                        if separate_by_band2:
-                            fbpairs = ftype_info['fband_pairs']
-                            fbpairs_dispnames = fbpairs
-                        # !! This assume LFP is always in the second place
-                        #if chnames_LFP is not None:
-                        #    for lfpchn in chnames_LFP:
-                        a = [f'^{ft}_{fb1}_{chn_templ},{fb2}_{lfpchn}' for fb1,fb2 in fbpairs]
-                        feat_groups_all += a
-                        feature_groups_names += [f'^{ft}_{fb1}_{grpn},{fb2}_{lfpchn}' for fb1,fb2 in fbpairs_dispnames]
-                        clrs += [cmap(clri)] * len(a)
-                        #else:
-                        #    feat_groups_all += [f'^{ft}_{fb1}_{chn_templ},{fb2}_.*' for fb1,fb2 in ftype_info['fband_pairs']]
-                        #    feature_groups_names += [f'^{ft}_{fb1}_{grpn},{fb2}_.*' for fb1,fb2 in ftype_info['fband_pairs']]
-                    ft = 'rbcorr'
-                    # !! This assume LFP is always in the second place
-                    if ft in ftype_info['ftypes']:
-                        if separate_by_band2:
-                            fbsolos = ftype_info['fband_per_ftype'][ft]
-                            fbsolos_dispnames = fbsolos
-                        #if chnames_LFP is not None:
-                        #    for lfpchn in chnames_LFP:
-                        a = [ f'^{ft}_{fb}_{chn_templ},{fb}_{lfpchn}' for fb in fbsolos ]
-                        feat_groups_all += a
-                        feature_groups_names += [ f'^{ft}_{fb}_{grpn},{fb}_{lfpchn}' for fb in fbsolos_dispnames ]
-                        clrs += [cmap(clri)] * len(a)
-                        #else:
-                        #    feat_groups_all += [ f'^{ft}_{fb}_{chn_templ},.*' for fb in ftype_info['fband_per_ftype'][ft] ]
-                        #    feature_groups_names += [ f'^{ft}_{fb}_{grpn},.*' for fb in ftype_info['fband_per_ftype'][ft] ]
-                    ft = 'con'
-                    # !! This assume LFP is always in the first place
-                    if ft in ftype_info['ftypes']:
-                        if separate_by_band2:
-                            fbsolos = ftype_info['fband_per_ftype'][ft]
-                            fbsolos_dispnames = fbsolos
-                        #if chnames_LFP is not None:
-                        #    for lfpchn in chnames_LFP:
-                        a = [ f'^{ft}_{fb}_{lfpchn},{chn_templ}' for fb in fbsolos ]
-                        feat_groups_all += a
-                        feature_groups_names += [ f'^{ft}_{fb}_{lfpchn},{grpn}' for fb in fbsolos_dispnames ]
-                        clrs += [cmap(clri)] * len(a)
-
-                    #############################################
-
-                    fbpairs = [(bnpattern,bnpattern)]
-                    fbsolos = [bnpattern]
-                    fbpairs_dispnames = [('*','*')]
-                    fbsolos_dispnames = ['*']
-
-                    #clri += 1
-                    if roi_labels is not None:
-                        # main side (body)
-                        # get parcel indices of
-                        for grpn,parcel_list in gp.parcel_groupings_post.items():
-                            clri += 1
-                            #feat_groups_cur = []
-                            #print(parcel_list)
-                            plws = utils.addSideToParcels(parcel_list, body_side)
-                            parcel_inds = [ roi_labels.index(parcel) for parcel in plws ]
-
-                            pas = '|'.join(map(str,parcel_inds) )
-                            chn_templ = f'msrc(R|L)_9_({pas})_c[0-9]+'
-
-                            ft = 'bpcorr'
-                            if 'bpcorr' in ftype_info['ftypes']:
-                                if separate_by_band:
-                                    fbpairs = ftype_info['fband_pairs']
-                                    fbpairs_dispnames = fbpairs
-                                # !! This assume LFP is always in the second place
-                                #if chnames_LFP is not None:
-                                #    for lfpchn in chnames_LFP:
-                                a = [f'^{ft}_{fb1}_{chn_templ},{fb2}_{lfpchn}' for fb1,fb2 in fbpairs]
-                                feat_groups_all += a
-                                feature_groups_names += [f'^{ft}_{fb1}_{grpn},{fb2}_{lfpchn}' for fb1,fb2 in fbpairs_dispnames]
-                                clrs += [cmap(clri)] * len(a)
-                                #else:
-                                #    feat_groups_all += [f'^{ft}_{fb1}_{chn_templ},{fb2}_.*' for fb1,fb2 in ftype_info['fband_pairs']]
-                                #    feature_groups_names += [f'^{ft}_{fb1}_{grpn},{fb2}_.*' for fb1,fb2 in ftype_info['fband_pairs']]
-                            ft = 'rbcorr'
-                            # !! This assume LFP is always in the second place
-                            if ft in ftype_info['ftypes']:
-                                if separate_by_band:
-                                    fbsolos = ftype_info['fband_per_ftype'][ft]
-                                    fbsolos_dispnames = fbsolos
-                                #if chnames_LFP is not None:
-                                #    for lfpchn in chnames_LFP:
-                                a = [ f'^{ft}_{fb}_{chn_templ},{fb}_{lfpchn}' for fb in fbsolos ]
-                                feat_groups_all += a
-                                feature_groups_names += [ f'^{ft}_{fb}_{grpn},{fb}_{lfpchn}' for fb in fbsolos_dispnames ]
-                                clrs += [cmap(clri)] * len(a)
-                                #else:
-                                #    feat_groups_all += [ f'^{ft}_{fb}_{chn_templ},.*' for fb in ftype_info['fband_per_ftype'][ft] ]
-                                #    feature_groups_names += [ f'^{ft}_{fb}_{grpn},.*' for fb in ftype_info['fband_per_ftype'][ft] ]
-                            ft = 'con'
-                            # !! This assume LFP is always in the first place
-                            if ft in ftype_info['ftypes']:
-                                if separate_by_band:
-                                    fbsolos = ftype_info['fband_per_ftype'][ft]
-                                    fbsolos_dispnames = fbsolos
-                                #if chnames_LFP is not None:
-                                #    for lfpchn in chnames_LFP:
-                                a = [ f'^{ft}_{fb}_{lfpchn},{chn_templ}' for fb in fbsolos ]
-                                feat_groups_all += a
-                                feature_groups_names += [ f'^{ft}_{fb}_{lfpchn},{grpn}' for fb in fbsolos_dispnames ]
-                                clrs += [cmap(clri)] * len(a)
-                            #else:
-                            #    feat_groups_all += [ f'^{ft}_{fb}_.*,{chn_templ}' for fb in ftype_info['fband_per_ftype'][ft] ]
-                            #    feature_groups_names += [ f'^{ft}_{fb}_.*,{grpn}' for fb in ftype_info['fband_per_ftype'][ft] ]
+                separate_by_band2 = True
 
                     #display(feat_groups_all)
+                clrs,feature_groups_names,feat_groups_all  = \
+                    prepareFeatGroups(featnames_sub,body_side,
+                                      roi_labels,cmap,
+                                      chnames_LFP, separate_by_band,
+                                      separate_by_band2,
+                                      merge_Hjorth,
+                                      Hjorth_diff_color,
+                                      grand_average_per_feat_type )
 
+                    #############################################
 
                 #display(feat_groups_all)
                 if use_full_scores:
@@ -2674,7 +2473,7 @@ def plotFeatSignifSHAP_list(pdf, outputs_grouped, fshs=['XGB_Shapley'],
     biases_a = np.array(bias_)
 
     from plots import plotErrorBarStrings
-    print(outs_mb)
+    #print(outs_mb)
 
     for  i,(rni,rn,fsh,lblind,bias,maxs) in enumerate(outs_mb):
         if show_abs_plots:
@@ -2685,7 +2484,7 @@ def plotFeatSignifSHAP_list(pdf, outputs_grouped, fshs=['XGB_Shapley'],
         #\ & (np.array(rn_) == rn) )[0]
         assert len(inds) == len(outputs_grouped)
         biases_cur = biases_a[inds]
-        print('rnis ',np.array(rni_)[inds] )
+        #print('rnis ',np.array(rni_)[inds] )
         bm = np.max( biases_cur )
         mm = np.max( maxs_a[inds,:] )
         biasname = 'bias'
@@ -2714,7 +2513,7 @@ def plotFeatSignifSHAP_list(pdf, outputs_grouped, fshs=['XGB_Shapley'],
             #    mm = np.max( maxs_a[inds,5] )
 
             bias_cur = biases_cur[rni]
-            print(biasname, bias_cur)
+            #print(biasname, bias_cur)
             plotErrorBarStrings(ax,[biasname],[bias_cur],xerr=None,
                 same_sets_only = 0,
                 add_args={'marker':marker_mean, 'color':'black',
@@ -2865,7 +2664,6 @@ def plotFeatSignifSHAP_list2_test(pdf, outputs_grouped, fshs=['interpret_EBM'],
     from featlist import getChnamesFromFeatlist
 
     outs = []
-    biases = []
 
     stats_per_all = []
     for rn,a in outputs_grouped.items():
@@ -3018,14 +2816,12 @@ def plotFeatSignifSHAP_list2_test(pdf, outputs_grouped, fshs=['interpret_EBM'],
                 outs +=   [ (rn_,prefix,grp,int_type,fsh,
                              featnaems_EBM_non_interact,label_str,
                              scores_per_class[lblind],feat_imp_stats )  ]
-                biases += [bias]
 
                 ####################################
                 subaxs = axs[lblind,:]
                 #subaxs = axs[0,:]
 
-                if not show_bias:
-                    bias = None
+                bias = None
 
                 print( f'len(feat_groups_all) = {len(feat_groups_all)}, len(featnames_sub) = {len(featnames_sub)}')
                 #import pdb;pdb.set_trace()
@@ -3130,7 +2926,7 @@ def plotFeatSignifSHAP_list2_test(pdf, outputs_grouped, fshs=['interpret_EBM'],
 def prepareFeatGroups(featnames_sub,body_side, roi_labels,cmap, chnames_LFP=None,
                       separate_by_band=True, separate_by_band2=True,
                      merge_Hjorth=True, Hjorth_diff_color=True,
-                     grand_average_per_feat_type=False ):
+                     grand_average_per_feat_type=False, cross_source_groups=False ):
     import globvars as gv
     ftype_info = utils.collectFeatTypeInfo(featnames_sub)
 
@@ -3155,6 +2951,17 @@ def prepareFeatGroups(featnames_sub,body_side, roi_labels,cmap, chnames_LFP=None
         feat_groups_all += feat_groups_two_bands
         feature_groups_names += feat_groups_two_bands
         clrs += [cmap(clri)] * len(feat_groups_two_bands)
+
+    from featlist import selFeatsRegexInds
+    # self con
+    ft = 'con'
+    if ft in ftype_info['ftypes']:
+        clri += 1  # here it makes sense since only one ft is used
+        #        regex_same_LFP = r'.?.?corr.*(LFP.[0-9]+),.*\1.*'
+        feat_groups_one_band = [ f'^{ft}_{fb}_(.*),'+ r'\1' for fb in ftype_info['fband_per_ftype'][ft] ]
+        feat_groups_all += feat_groups_one_band
+        feature_groups_names += [ f'{ft}_{fb}_self' for fb in ftype_info['fband_per_ftype'][ft] ]
+        clrs += [cmap(clri)] * len(feat_groups_one_band)
 
     for ft in ['rbcorr', 'con']:
         if ft in ftype_info['ftypes']:
@@ -3191,6 +2998,7 @@ def prepareFeatGroups(featnames_sub,body_side, roi_labels,cmap, chnames_LFP=None
             clrs += [cmap(clri)] * len(a)
 
 
+    # Hjorth per parcel
     clri += 1
     from globvars import gp
     if roi_labels is not None:
@@ -3224,14 +3032,36 @@ def prepareFeatGroups(featnames_sub,body_side, roi_labels,cmap, chnames_LFP=None
                     clrs += [cmap(clri)] * len(a)
 
 
+    # con self per parcel
+    clri += 1
+    if roi_labels is not None:
+        # main side (body)
+        # get parcel indices of
+        for grpn,parcel_list in gp.parcel_groupings_post.items():
+            #feat_groups_cur = []
+            #print(parcel_list)
+            plws = utils.addSideToParcels(parcel_list, body_side)
+            parcel_inds = [ roi_labels.index(parcel) for parcel in plws ]
+
+            pas = '|'.join(map(str,parcel_inds) )
+            chn_templ = f'msrc(R|L)_9_({pas})_c[0-9]+'
+            ft = 'con'
+            if ft in ftype_info['ftypes']:
+                #        regex_same_LFP = r'.?.?corr.*(LFP.[0-9]+),.*\1.*'
+                feat_groups_one_band = [ f'^{ft}_{fb}_{chn_templ},{chn_templ}' for fb in ftype_info['fband_per_ftype'][ft] ]
+                feat_groups_all += feat_groups_one_band
+                feature_groups_names += [ f'{ft}_{fb}_{grpn}_self' for fb in ftype_info['fband_per_ftype'][ft] ]
+                clrs += [cmap(clri)] * len(feat_groups_one_band)
+
+
+    # per LFP per band  and per parcel
     for lfpchn in chnames_LFP:
-
-
         clri += 1
         # now group per LFPch but with free source
         chn_templ = 'msrc(R|L)_9_[0-9]+_c[0-9]+'
         grpn = 'msrc*'
 
+        # first per band only
         ft = 'bpcorr'
         if 'bpcorr' in ftype_info['ftypes']:
 
@@ -3283,6 +3113,7 @@ def prepareFeatGroups(featnames_sub,body_side, roi_labels,cmap, chnames_LFP=None
         fbpairs_dispnames = [('*','*')]
         fbsolos_dispnames = ['*']
 
+        # now per parcel
         #clri += 1
         if roi_labels is not None:
             # main side (body)
@@ -3342,6 +3173,77 @@ def prepareFeatGroups(featnames_sub,body_side, roi_labels,cmap, chnames_LFP=None
                 #else:
                 #    feat_groups_all += [ f'^{ft}_{fb}_.*,{chn_templ}' for fb in ftype_info['fband_per_ftype'][ft] ]
                 #    feature_groups_names += [ f'^{ft}_{fb}_.*,{grpn}' for fb in ftype_info['fband_per_ftype'][ft] ]
+
+    # cross sources
+    if (roi_labels is not None) and cross_source_groups:
+        keyord = list(gp.parcel_groupings_post.keys())
+        # main side (body)
+        # get parcel indices of
+        for grpni,grpn in enumerate(keyord):
+            if grpni >= len(keyord) - 1:
+                continue
+            for grpn2 in keyord[grpni+1:] :
+            #for grpn2,parcel_list2 in gp.parcel_groupings_post.items():
+                clri += 1
+                #feat_groups_cur = []
+                #print(parcel_list)
+                parcel_list1 = gp.parcel_groupings_post[grpn]
+                parcel_list2 = gp.parcel_groupings_post[grpn2]
+
+                plws = utils.addSideToParcels(parcel_list, body_side)
+                parcel_inds = [ roi_labels.index(parcel) for parcel in plws ]
+
+                plws2 = utils.addSideToParcels(parcel_list2, body_side)
+                parcel_inds2 = [ roi_labels.index(parcel) for parcel in plws2 ]
+
+                pas = '|'.join(map(str,parcel_inds) )
+                chn_templ = f'msrc(R|L)_9_({pas})_c[0-9]+'
+
+                pas2 = '|'.join(map(str,parcel_inds2) )
+                chn_templ2 = f'msrc(R|L)_9_({pas2})_c[0-9]+'
+
+                ft = 'bpcorr'
+                if 'bpcorr' in ftype_info['ftypes']:
+                    if separate_by_band:
+                        fbpairs = ftype_info['fband_pairs']
+                        fbpairs_dispnames = fbpairs
+                    # !! This assume LFP is always in the second place
+                    #if chnames_LFP is not None:
+                    #    for lfpchn in chnames_LFP:
+                    a = [f'^{ft}_{fb1}_{chn_templ},{fb2}_{chn_templ2}' for fb1,fb2 in fbpairs]
+                    feat_groups_all += a
+                    feature_groups_names += [f'^{ft}_{fb1}_{grpn},{fb2}_{grpn2}' for fb1,fb2 in fbpairs_dispnames]
+                    clrs += [cmap(clri)] * len(a)
+                    #else:
+                    #    feat_groups_all += [f'^{ft}_{fb1}_{chn_templ},{fb2}_.*' for fb1,fb2 in ftype_info['fband_pairs']]
+                    #    feature_groups_names += [f'^{ft}_{fb1}_{grpn},{fb2}_.*' for fb1,fb2 in ftype_info['fband_pairs']]
+                ft = 'rbcorr'
+                # !! This assume LFP is always in the second place
+                if ft in ftype_info['ftypes']:
+                    if separate_by_band:
+                        fbsolos = ftype_info['fband_per_ftype'][ft]
+                        fbsolos_dispnames = fbsolos
+                    #if chnames_LFP is not None:
+                    #    for lfpchn in chnames_LFP:
+                    a = [ f'^{ft}_{fb}_{chn_templ},{fb}_{chn_templ2}' for fb in fbsolos ]
+                    feat_groups_all += a
+                    feature_groups_names += [ f'^{ft}_{fb}_{grpn},{fb}_{grpn2}' for fb in fbsolos_dispnames ]
+                    clrs += [cmap(clri)] * len(a)
+                    #else:
+                    #    feat_groups_all += [ f'^{ft}_{fb}_{chn_templ},.*' for fb in ftype_info['fband_per_ftype'][ft] ]
+                    #    feature_groups_names += [ f'^{ft}_{fb}_{grpn},.*' for fb in ftype_info['fband_per_ftype'][ft] ]
+                ft = 'con'
+                # !! This assume LFP is always in the first place
+                if ft in ftype_info['ftypes']:
+                    if separate_by_band:
+                        fbsolos = ftype_info['fband_per_ftype'][ft]
+                        fbsolos_dispnames = fbsolos
+                    #if chnames_LFP is not None:
+                    #    for lfpchn in chnames_LFP:
+                    a = [ f'^{ft}_{fb}_{chn_templ},{chn_templ2}' for fb in fbsolos ]
+                    feat_groups_all += a
+                    feature_groups_names += [ f'^{ft}_{fb}_{grpn},{grpn2}' for fb in fbsolos_dispnames ]
+                    clrs += [cmap(clri)] * len(a)
 
     return clrs,feature_groups_names,feat_groups_all
 
@@ -3887,6 +3789,8 @@ def plotConfmats(outputs_grouped, normalize_mode = 'true', best_LFP=False, commo
     nr = len(outputs_grouped) // nc; #nc= len(scores_stats) - 2;
     #print(nr,nc)
     fig,axs = plt.subplots(nr,nc, figsize = (nc*ww + ww*0.5,nr*hh))#, gridspec_kw={'width_ratios': [1,1,3]} );
+    if nr == 1 and nc == 1:
+        axs = np.array([[axs]])
     #plt.subplots_adjust(top=1-0.02)
     #normalize_mode = 'total'
 
@@ -4269,13 +4173,21 @@ def loadFullScores(outputs_grouped, crop_fname='auto'):
 
 
 
-def loadEBMExplainer(outputs_grouped, fs ):
+def loadEBMExplainer(outputs_grouped, fs, force=False ):
     for rn,a in outputs_grouped.items():
         (prefix,grp,int_type), mult_clf_output = a
-        loadEBMExplainer_(mult_clf_output, fs )
+        loadEBMExplainer_(mult_clf_output, fs, force=force )
 
-def loadEBMExplainer_(mult_clf_output, fs ):
-    if 'explainer' in mult_clf_output['featsel_per_method']['interpret_EBM'] [fs]:
+def loadEBMExplainer_(mult_clf_output, fs, force=False, cure_if_possible=True ):
+
+    pre = mult_clf_output['featsel_per_method']['interpret_EBM']
+    if fs is None or (cure_if_possible and fs not in pre):
+        clf_dict = pre
+    else:
+        clf_dict = pre[fs]
+
+
+    if 'explainer' in clf_dict and not force:
         return
     filename_fullsize = mult_clf_output['filename_full']
     from pathlib import Path
@@ -4287,19 +4199,34 @@ def loadEBMExplainer_(mult_clf_output, fs ):
 
     results_cur =  f['results_cur'][()]
 
+    pre2 = results_cur['featsel_per_method']['interpret_EBM']
+    if fs is None or (cure_if_possible and fs not in pre2):
+        clf_dict_full = pre2
+    else:
+        clf_dict_full = pre2[fs]
     #results_cur.keys()
 
-    EBM = results_cur['featsel_per_method']['interpret_EBM']
-    #scores
-
     #clf_dict = EBM['info_per_cp'][('trem_L', 'hold_L&move_L')]
-    clf_dict = EBM[fs]
-    scores = clf_dict['scores'];
+    #scores = clf_dict['scores'];
     #print(len(results_cur['feature_names_filtered']), len(EBM['feature_indices_used']) )
     #print('len(scores) = ',len(scores) )
-    explainer = clf_dict['explainer']
-    mult_clf_output['featsel_per_method']['interpret_EBM'] [fs]['explainer'] = explainer
+    #explainer = clf_dict_full['explainer']
 
+
+    if fs is None or (cure_if_possible and fs not in pre2):
+        #clf_dict['explainer'] = explainer
+        #if clf_dict
+        print('scores in clf_dict','scores' in clf_dict, 'scores' in clf_dict_full)
+        if set( pre2['feature_indices_used'] ) == set( results_cur['VIF_truncation'][ 'colinds_good_VIFsel'] ):
+            fs = 'VIFsel'
+        else:
+            fs = 'all'
+        mult_clf_output['featsel_per_method']['interpret_EBM'][fs] = clf_dict_full
+        #mult_clf_output['featsel_per_method']['interpret_EBM']['VIFsel']['scores'] =
+        #for kk in list(clf_dict.keys()):
+        #    del mult_clf_output['featsel_per_method']['interpret_EBM'][kk]
+    else:
+        mult_clf_output['featsel_per_method']['interpret_EBM'][fs]['explainer'] = explainer
     #print((rn,grp,int_type), utsne.sprintfPerfs(clf_dict['perf'] ) )
 
     del f

@@ -1937,7 +1937,7 @@ def _getPredPower_singleFold(arg):
 def getPredPowersCV(clf,X,class_labels,class_ind, printLog = False, n_splits=None,
                     ret_clf_obj=False, skip_noCV =False, add_fitopts={},
                    add_clf_creopts ={}, train_on_shuffled =True, seed=0,
-                    label_groups=None ):
+                    group_labels=None ):
     # clf is assumed to be already fitted on entire training data here
     # TODO: maybe I need to adapt for other classifiers
     # ret = [perf_nocv, perfs_CV, perf_aver, confmat_avGroupKFolder ] and maybe list of classif objects
@@ -1963,13 +1963,14 @@ def getPredPowersCV(clf,X,class_labels,class_ind, printLog = False, n_splits=Non
         #if n_KFold_splits is not None:
         from sklearn.model_selection import KFold,GroupKFold
         from sklearn.model_selection import train_test_split
-        if label_groups is None:
+        if group_labels is None:
             kf = KFold(n_splits=n_splits, shuffle=True, random_state=seed)
             split_res = kf.split(X,y)
         else:
-            assert len(label_groups) == len(class_labels), (len(label_groups), len(class_labels) )
-            kf = GroupKFold(n_splits=n_splits)  # no shuffling is possible here
-            split_res = kf.split(X,y,groups=label_groups)  # trains on some groups then tests on other
+            assert len(group_labels) == len(class_labels), (len(group_labels), len(class_labels) )
+            #ngl = len(set(group_labels) )
+            kf = GroupKFold(n_splits=n_splits  )  # no shuffling is possible here
+            split_res = kf.split(X,y,groups=group_labels)  # trains on some groups then tests on other
 
         n_jobs_perrun = add_clf_creopts.get('n_jobs', 1)
 

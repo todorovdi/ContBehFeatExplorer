@@ -32,9 +32,9 @@ newind=`python -c  "print( $shft_ + $baseind)"`
 
 
 # this way we run first all first prefixes, then all second and so on
-RSID=$newind
-echo "modified RUNSTRING_IND is $RSID"
-#RSID=$RUNSTRING_IND
+#RSID=$newind
+RSID=$RUNSTRING_IND
+echo "final RSID is $RSID"
 
 RUNSTRING_CUR=${RUNSTRINGS[$RSID]}
 echo $RUNSTRING_CUR
@@ -43,4 +43,4 @@ echo $RUNSTRING_CUR
 py=python
 export PYTHONPATH=$OSCBAGDIS_DATAPROC_CODE:$PYTHONPATH
 $py -c "import os; print('cwd for $py=',os.getcwd() );"
-$py $CODE/run/$RUNSTRING_CUR --SLURM_job_id "$JOBID"_"$RSID" --calc_MI 0
+$py $CODE/run/$RUNSTRING_CUR --SLURM_job_id "$JOBID"_"$RUNSTRING_IND" --calc_MI 0

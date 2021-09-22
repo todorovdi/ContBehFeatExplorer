@@ -2443,6 +2443,7 @@ if do_Classif:
                                 info_cur['perf'] = sens,spec, F1, confmat
                                 info_cur['confmat_normalized'] = confmat_normalized
                                 info_cur['feature_names']= names
+                                info_cur['feature_indices_used'] = featis
                                 #featsel_info.update(info_cur)
                                 featsel_info[featsel_feat_subset_name] = info_cur
 

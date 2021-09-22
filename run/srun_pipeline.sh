@@ -191,17 +191,18 @@ fi
 
 ######## common for ML and nlproj
 #if [ -z ${var+x} ]; then echo "var is unset"; else echo "var is set to '$var'"; fi
-            PREFIX_ALL_FEATS=1
-               PREFIXES_MAIN=1
-      PREFIXES_CROSS_MOD_AUX=1
+            PREFIX_ALL_FEATS=0
+               PREFIXES_MAIN=0
+      PREFIXES_CROSS_MOD_AUX=0
+            PREFIXES_AUX_SRC=0
 PREFIXES_CROSS_BPCORR_SUBMOD=0
 PREFIXES_CROSS_BPCORR_SUBMOD_ORDBAND=0
 PREFIXES_CROSS_BPCORR_SUBMOD_ORDBAND2=0
 PREFIXES_CROSS_BPCORR_SUBMOD_ORDBAND3=0  # subset of ORDBAND2
 PREFIXES_CROSS_RBCORR_SUBMOD=0
-            PREFIXES_AUX_SRC=1
                 PREFIXES_AUX=0
            PREFIX_SEARCH_LFP=0
+           PREFIXES_BAND_NOH=1
 
 #ALLFEATS_ADD_OPTS="--search_best_LFP LDA"
 ALLFEATS_ADD_OPTS=""
@@ -219,15 +220,15 @@ fi
 # but otherwise it does not work on jusuf -- it has too old bash..
 #GROUPINGS_TO_USE="merge_all_not_trem merge_movements merge_nothing"
 #GROUPINGS_TO_USE="merge_nothing merge_all_not_trem"
-GROUPINGS_TO_USE="merge_nothing"
-#GROUPINGS_TO_USE="merge_movements"
+#GROUPINGS_TO_USE="merge_nothing"
+GROUPINGS_TO_USE="merge_movements merge_all_not_trem"
 
 #int_types_to_use = gp.int_types_to_include
 #INT_SETS_TO_USE="basic trem_vs_quiet"
 #INT_SETS_TO_USE="basic"
 #INT_SETS_TO_USE="trem_vs_hold&move"
-#INT_SETS_TO_USE="basic trem_vs_hold&move"
-INT_SETS_TO_USE="trem_vs_quiet"
+INT_SETS_TO_USE="basic trem_vs_hold&move"
+#INT_SETS_TO_USE="trem_vs_quiet"
 
 if [ $USE_AUX_IVAL_GROUPINGS -gt 0 ]; then
   GROUPINGS_TO_USE="$GROUPINGS_TO_USE merge_within_subj merge_within_medcond merge_within_task"
@@ -266,15 +267,15 @@ LOAD_TSNE=0  #allows to skip those that were already computed
 if [ ${#GENFEATS_PARAM_FILE} -eq 0 ]; then
   GENFEATS_PARAM_FILE=genfeats_defparams.ini
 fi
-if [ ${#MI_PARAM_FILE} -eq 0 ]; then
-  MI_PARAM_FILE=MI_defparams.ini
+if [ ${#ML_PARAM_FILE} -eq 0 ]; then
+  ML_PARAM_FILE=MI_defparams.ini
 fi
 if [ ${#NLPROJ_PARAM_FILE} -eq 0 ]; then
   NLPROJ_PARAM_FILE=nlproj_defparams.ini
 fi
 
 echo GENFEATS_PARAM_FILE=$GENFEATS_PARAM_FILE
-echo MI_PARAM_FILE=$MI_PARAM_FILE
+echo ML_PARAM_FILE=$ML_PARAM_FILE
 
 # FAST TEST ONLY
 #GROUPINGS_TO_USE="merge_nothing,merge_all_not_trem"
@@ -351,6 +352,14 @@ if [ $do_ML -gt 0 ]; then
     if [ $PREFIX_ALL_FEATS -gt 0 ]; then
       # use everything (from main trem side)
       RUNSTRING_CUR=' $RS $ALLFEATS_ADD_OPTS --prefix all'
+      RUNSTRINGS+=("$RUNSTRING_CUR")
+    fi
+    if [ $PREFIXES_BAND_NOH -gt 0 ]; then
+      RUNSTRING_CUR=' $RS --fbands $BANDS_BETA  --feat_types con,rbcorr --prefix allb_beta_noH   '
+      RUNSTRINGS+=("$RUNSTRING_CUR")
+      RUNSTRING_CUR=' $RS --fbands $BANDS_GAMMA   --feat_types con,rbcorr  --prefix allb_gamma_noH  '
+      RUNSTRINGS+=("$RUNSTRING_CUR")
+      RUNSTRING_CUR=' $RS --fbands $BANDS_TREMOR  --feat_types con,rbcorr  --prefix allb_tremor_noH '
       RUNSTRINGS+=("$RUNSTRING_CUR")
     fi
     if [ $PREFIXES_MAIN -gt 0 ]; then
@@ -600,8 +609,8 @@ if [ $do_ML -gt 0 ]; then
   fi
 
   SUBDIR_STR="$INPUT_SUBDIR_STR $OUTPUT_SUBDIR_STR"
-  #COMMON_ALL="--pcexpl $DESIRED_PCA_EXPLAIN --discard $DESIRED_DISCARD --show_plots $ML_PLOTS --sources_type $SOURCES_TYPE --bands_type $BANDS_TYPE --src_grouping $SRC_GROUPING --src_grouping_fn $SRC_GROUPING_FN --skip_XGB $skip_XGB --skip_XGB_aux_int $skip_XGB_aux_int --max_XGB_step_nfeats $max_XGB_step_nfeats --subskip_fit $SUBSKIP_ML_FIT --LFPchan $LFP_CHAN_TO_USE --heavy_fit_red_featset $HEAVY_FIT_REDUCED_FEATSET $SUBDIR_STR --plot_types $ML_PLOT_TYPES --load_only $ML_LOAD_ONLY --param_file $MI_PARAM_FILE"
-  COMMON_ALL="--param_file $MI_PARAM_FILE $SUBDIR_STR"
+  #COMMON_ALL="--pcexpl $DESIRED_PCA_EXPLAIN --discard $DESIRED_DISCARD --show_plots $ML_PLOTS --sources_type $SOURCES_TYPE --bands_type $BANDS_TYPE --src_grouping $SRC_GROUPING --src_grouping_fn $SRC_GROUPING_FN --skip_XGB $skip_XGB --skip_XGB_aux_int $skip_XGB_aux_int --max_XGB_step_nfeats $max_XGB_step_nfeats --subskip_fit $SUBSKIP_ML_FIT --LFPchan $LFP_CHAN_TO_USE --heavy_fit_red_featset $HEAVY_FIT_REDUCED_FEATSET $SUBDIR_STR --plot_types $ML_PLOT_TYPES --load_only $ML_LOAD_ONLY --param_file $ML_PARAM_FILE"
+  COMMON_ALL="--param_file $ML_PARAM_FILE $SUBDIR_STR"
   if [ $RUN_CLASS_LAB_GRP_SEPARATE -eq 0 ]; then
     CLASS_LAB_GRP_STR="--groupings_to_use=$GROUPINGS_TO_USE --int_types_to_use=$INT_SETS_TO_USE"
     #echo COMMON_ALL= $COMMON_ALL    # replaces comma with space
