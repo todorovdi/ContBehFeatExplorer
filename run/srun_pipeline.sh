@@ -192,7 +192,7 @@ fi
 ######## common for ML and nlproj
 #if [ -z ${var+x} ]; then echo "var is unset"; else echo "var is set to '$var'"; fi
             PREFIX_ALL_FEATS=0
-               PREFIXES_MAIN=0
+               PREFIXES_MAIN=1
       PREFIXES_CROSS_MOD_AUX=0
             PREFIXES_AUX_SRC=0
 PREFIXES_CROSS_BPCORR_SUBMOD=0
@@ -369,18 +369,18 @@ if [ $do_ML -gt 0 ]; then
         echo "trying to run with all features resulted in an error, exiting"
         exit 1
       fi
-      RUNSTRING_CUR=' $RS --mods LFP                               --prefix modLFP               '
-      RUNSTRINGS+=("$RUNSTRING_CUR")
-      RUNSTRING_CUR=' $RS --self_couplings_only 1 --mods msrc      --prefix modSrc_self          '    
-      RUNSTRINGS+=("$RUNSTRING_CUR")
-      RUNSTRING_CUR=' $RS --mods msrc                              --prefix modSrc               '              
-      RUNSTRINGS+=("$RUNSTRING_CUR")
-      RUNSTRING_CUR=' $RS --fbands $BANDS_BETA                     --prefix allb_beta            '
-      RUNSTRINGS+=("$RUNSTRING_CUR")
-      RUNSTRING_CUR=' $RS --fbands $BANDS_GAMMA                     --prefix allb_gamma           '
-      RUNSTRINGS+=("$RUNSTRING_CUR")
-      RUNSTRING_CUR=' $RS --fbands $BANDS_TREMOR                     --prefix allb_tremor          '
-      RUNSTRINGS+=("$RUNSTRING_CUR")
+      #RUNSTRING_CUR=' $RS --mods LFP                               --prefix modLFP               '
+      #RUNSTRINGS+=("$RUNSTRING_CUR")
+      #RUNSTRING_CUR=' $RS --self_couplings_only 1 --mods msrc      --prefix modSrc_self          '    
+      #RUNSTRINGS+=("$RUNSTRING_CUR")
+      #RUNSTRING_CUR=' $RS --mods msrc                              --prefix modSrc               '              
+      #RUNSTRINGS+=("$RUNSTRING_CUR")
+      #RUNSTRING_CUR=' $RS --fbands $BANDS_BETA                     --prefix allb_beta            '
+      #RUNSTRINGS+=("$RUNSTRING_CUR")
+      #RUNSTRING_CUR=' $RS --fbands $BANDS_GAMMA                     --prefix allb_gamma           '
+      #RUNSTRINGS+=("$RUNSTRING_CUR")
+      #RUNSTRING_CUR=' $RS --fbands $BANDS_TREMOR                     --prefix allb_tremor          '
+      #RUNSTRINGS+=("$RUNSTRING_CUR")
       RUNSTRING_CUR=' $RS --LFP_related_only 1 --cross_couplings_only 1   --prefix LFPrel_noself '       
       RUNSTRINGS+=("$RUNSTRING_CUR")
       RUNSTRING_CUR=' $RS --feat_types H_act,H_mob,H_compl        --prefix onlyH           '        

@@ -34,7 +34,7 @@
 
 ##SBATCH --array=0,3
 ##SBATCH --array=166  modLFP for S03
-#SBATCH --array=0-8
+#SBATCH --array=0-29
 
 # *** start of job script ***
 ##source set_oscabagdis_env_vars.sh

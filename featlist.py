@@ -443,6 +443,8 @@ def filterFeats(feature_names_all, chnames_LFP, LFP_related_only, parcel_types,
 
             #print(utils.collectFeatTypeInfo(featnames[list(remaining)] ) )
 
+    # parcel_group_names can take only few values
+    # parcel_types is a list of actual parcel names or !parcel_name
     # remove features involving parcels not of the desired type
     if len(parcel_types) == 1 and parcel_types[0] == 'all' and len(parcel_group_names) == 0:
         print('Using all parcels from the file')
@@ -488,19 +490,31 @@ def filterFeats(feature_names_all, chnames_LFP, LFP_related_only, parcel_types,
             # we may have a list of parcel names (with or without side) directly
             # since parcel_types can be wihout side
             good_parcels = []
+            bad_parcels_add = []
             for pcl in parcel_types:
                 if pcl.endswith('_L') or pcl.endswith('_R'):
-                    good_parcels += [pcl]
+                    if not pcl.startswith('!'):
+                        good_parcels += [pcl]
+                    else:
+                        bad_parcels_add += [pcl]
                 else:
                     if pcl.endswith('_B'):
                         pcl = pcl[:-2]
-                    good_parcels += [pcl + '_L' ]
-                    good_parcels += [pcl + '_R' ]
-            bad_parcels2 = set(all_parcels) - set(good_parcels)
+                    if not pcl.startswith('!'):
+                        good_parcels += [pcl + '_L' ]
+                        good_parcels += [pcl + '_R' ]
+                    else:
+                        bad_parcels_add += [pcl[1:] + '_L' ]
+                        bad_parcels_add += [pcl[1:] + '_R' ]
+            if len(good_parcels):
+                bad_parcels2 = ( set(all_parcels) - set(good_parcels) ) | set(bad_parcels_add)
+            else:
+                bad_parcels2 = set(bad_parcels_add)
         #for pcl1 in all_parcels:
         #    for pcl2 in parcel_types:
         #        if pcl1.find(pcl2) < 0:
         #            bad_parcels2 += [pcl1]
+        #import pdb; pdb.set_trace()
         print('size of set(bad_parcels2)= ',len(set(bad_parcels2) ) )
 
         bad_parcels += bad_parcels2

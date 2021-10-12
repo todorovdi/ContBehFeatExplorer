@@ -1568,7 +1568,8 @@ def plotFeatImpStats(feat_types_all, scores_stats, fign='', axs=None,
         # for a fixed data point we look at a signed sum
         # we really need max_abs here as well, otherwise max can be less than
         # mean
-        stat_keys = {'max':'max_abs', 'sum':'sum', 'mean':'mean', 'std':'std' }
+        #stat_keys = {'max':'max_abs', 'sum':'sum', 'mean':'mean', 'std':'std' }
+        stat_keys = {'max':'max', 'sum':'sum', 'mean':'mean', 'std':'std' }
     else:
         stat_keys = {'max':'max_abs', 'sum':'sum_abs', 'mean':'mean_abs',
                      'std':'std_abs' }
@@ -1674,6 +1675,9 @@ def plotFeatImpStats(feat_types_all, scores_stats, fign='', axs=None,
         names_cur = [nm] + names
         sc = [ np.nan ] + list(sc)
     max_max = np.max(sc)
+
+    if max_max < max_sum:
+        import pdb; pdb.set_trace()
 
     names_cur_max = names_cur
     if show_max:
@@ -2086,7 +2090,9 @@ def plotFeatSignifSHAP_list(pdf, outputs_grouped, fshs=['XGB_Shapley'],
                        figname_prefix='',
                        n_individ_feats_show=4, roi_labels = None,
                        chnames_LFP = None, body_side='L', hh=8, ww = None,
-                       separate_by_band = False, suptitle = None, suptitle_fontsize=20,
+                       separate_by_band = False,
+                        separate_by_band2 = True,
+                            suptitle = None, suptitle_fontsize=20,
                       tickfontsize = 10, show_bias=False,
                             use_best_LFP=False, markersize=10, show_max = True,
                            merge_Hjorth = False,
@@ -2097,7 +2103,9 @@ def plotFeatSignifSHAP_list(pdf, outputs_grouped, fshs=['XGB_Shapley'],
                             reconstruct_from_VIF = False,
                             marker_mean = 'o', marker_max = 'x',
                             axs=None, grand_average_per_feat_type=1,
-                            perf_marker_size = 25  ):
+                            perf_marker_size = 25,
+                           cross_source_groups = False,
+                           indivd_imp_xtick_pad =  -300  ):
     '''
     fshs -- names of featsel method to use
     '''
@@ -2321,7 +2329,7 @@ def plotFeatSignifSHAP_list(pdf, outputs_grouped, fshs=['XGB_Shapley'],
                 ###############################
 
 
-                separate_by_band2 = True
+
 
                     #display(feat_groups_all)
                 clrs,feature_groups_names,feat_groups_all  = \
@@ -2331,7 +2339,8 @@ def plotFeatSignifSHAP_list(pdf, outputs_grouped, fshs=['XGB_Shapley'],
                                       separate_by_band2,
                                       merge_Hjorth,
                                       Hjorth_diff_color,
-                                      grand_average_per_feat_type )
+                                      grand_average_per_feat_type,
+                                      cross_source_groups)
 
                     #############################################
 
@@ -2421,7 +2430,7 @@ def plotFeatSignifSHAP_list(pdf, outputs_grouped, fshs=['XGB_Shapley'],
                                             sort = sort_individ_feats,
                                             nshow=n_individ_feats_show)
                 ax.set_title( f'{figname_prefix}: ' + ax.get_title() + f'_lblind = {label_str} (lblind={lblind}):  {fsh}' )
-                ax.tick_params(axis="x",direction="in", pad=-300, labelsize=tickfontsize)
+                ax.tick_params(axis="x",direction="in", pad=indivd_imp_xtick_pad, labelsize=tickfontsize)
 
                 ###############3
 
@@ -2578,7 +2587,9 @@ def plotFeatSignifSHAP_list2_test(pdf, outputs_grouped, fshs=['interpret_EBM'],
                        figname_prefix='',
                        n_individ_feats_show=4, roi_labels = None,
                        chnames_LFP = None, body_side='L', hh=8, ww = None,
-                       separate_by_band = False, suptitle = None, suptitle_fontsize=20,
+                       separate_by_band = False,
+                        separate_by_band2 = True,
+                        suptitle = None, suptitle_fontsize=20,
                       tickfontsize = 10, show_bias=False,
                             use_best_LFP=False, markersize=10, show_max = True,
                            merge_Hjorth = False,
@@ -2590,7 +2601,8 @@ def plotFeatSignifSHAP_list2_test(pdf, outputs_grouped, fshs=['interpret_EBM'],
                             marker_mean = 'o', marker_max = 'x',
                             allow_dif_feat_group_sets = 0,
                             axs=None, grand_average_per_feat_type=1,
-                            featsel_feat_subset_name='all', perf_marker_size = 25):
+                            featsel_feat_subset_name='all', perf_marker_size = 25,
+                            cross_source_groups = False, indivd_imp_xtick_pad=-300):
     '''
     fshs -- names of featsel method to use
     '''
@@ -2785,7 +2797,6 @@ def plotFeatSignifSHAP_list2_test(pdf, outputs_grouped, fshs=['interpret_EBM'],
                 label_str = class_label_names[lblind]
 
                 ###############################
-                separate_by_band2 = True
 
                     #display(feat_groups_all)
                 clrs,feature_groups_names,feat_groups_all  = \
@@ -2795,7 +2806,8 @@ def plotFeatSignifSHAP_list2_test(pdf, outputs_grouped, fshs=['interpret_EBM'],
                                       separate_by_band2,
                                       merge_Hjorth,
                                       Hjorth_diff_color,
-                                      grand_average_per_feat_type )
+                                      grand_average_per_feat_type,
+                                      cross_source_groups)
 
 
                 #display(feat_groups_all)
@@ -2860,7 +2872,7 @@ def plotFeatSignifSHAP_list2_test(pdf, outputs_grouped, fshs=['interpret_EBM'],
                                             sort = sort_individ_feats,
                                             nshow=n_individ_feats_show)
                 ax.set_title( f'{figname_prefix}: ' + ax.get_title() + f'_lblind = {label_str} (lblind={lblind}):  {fsh}' )
-                ax.tick_params(axis="x",direction="in", pad=-300, labelsize=tickfontsize)
+                ax.tick_params(axis="x",direction="in", pad=indivd_imp_xtick_pad, labelsize=tickfontsize)
 
                 ###############3
                 assert not use_best_LFP
@@ -2982,7 +2994,7 @@ def prepareFeatGroups(featnames_sub,body_side, roi_labels,cmap, chnames_LFP=None
         if ft in ftype_info['ftypes']:
             wasH = True
 
-    if wasH:
+    if wasH and merge_Hjorth:
         ft_templ = f'({"|".join(gv.noband_feat_types) })'
         a = [f'^{ft_templ}_LFP.*']
         feat_groups_all += a
@@ -3013,7 +3025,7 @@ def prepareFeatGroups(featnames_sub,body_side, roi_labels,cmap, chnames_LFP=None
             pas = '|'.join(map(str,parcel_inds) )
             chn_templ = f'msrc(R|L)_9_({pas})_c[0-9]+'
 
-            if wasH:
+            if wasH and merge_Hjorth:
                 if Hjorth_diff_color:
                     clri += 1
                 ft_templ = f'({"|".join(gv.noband_feat_types) })'
@@ -3024,6 +3036,8 @@ def prepareFeatGroups(featnames_sub,body_side, roi_labels,cmap, chnames_LFP=None
                 #clri += 1
 
             if wasH and not merge_Hjorth:
+                if Hjorth_diff_color:
+                    clri += 1
                 #ft_templ = f'({"|".join(gv.noband_feat_types) })'
                 for noband_type in gv.noband_feat_types:
                     a = [f'^{noband_type}_{chn_templ}']
@@ -4226,7 +4240,7 @@ def loadEBMExplainer_(mult_clf_output, fs, force=False, cure_if_possible=True ):
         #for kk in list(clf_dict.keys()):
         #    del mult_clf_output['featsel_per_method']['interpret_EBM'][kk]
     else:
-        mult_clf_output['featsel_per_method']['interpret_EBM'][fs]['explainer'] = explainer
+        mult_clf_output['featsel_per_method']['interpret_EBM'][fs] = clf_dict_full
     #print((rn,grp,int_type), utsne.sprintfPerfs(clf_dict['perf'] ) )
 
     del f
