@@ -949,7 +949,114 @@ def plotFeatsWithEverything(dat_pri, times_pri, X_pri, Xtimes_pri, dat_lfp_hires
 
         pdf.close()
 
+def plotComponents(components, feature_names_all, comp_inds, nfeats_show, q,
+                  toshow_decide_0th_component, explained_variance_ratio  = None,
+                  inds_toshow = None,  nfeats_show_pc= None, nfeats_highlight_pc= None,
+                   hh=4):
+    # Ncomponens x Ncomponent_corrds
+    if components is None:
+        return None
+    dd = np.abs(components[comp_inds[0] ] )
+
+    ncomp_to_plot = min( len(comp_inds), components.shape[0] )
+    nr = min( ncomp_to_plot, components.shape[0] )
+    if inds_toshow is None:
+        if toshow_decide_0th_component:
+            print('0th component')
+            inds_sort = np.argsort(dd)  # smallest go first
+            inds_toshow = inds_sort[-nfeats_show:]
+
+            dd_toshow = dd[inds_toshow]
+            #strong_inds = np.where(dd_toshow   > np.quantile(dd_toshow,q) ) [0]
+            strong_inds = inds_toshow
+            strongest_ind = np.argmax(dd_toshow)
+            strong_inds_pc = [strong_inds]
+            strongest_inds_pc = [strongest_ind]
+        else:
+            strong_inds_pc = []
+            strongest_inds_pc = []
+            if nfeats_show_pc is None:
+                nfeats_show_pc = max(1, nfeats_show // ncomp_to_plot)
+            if nfeats_highlight_pc is None:
+                nfeats_highlight_pc = nfeats_show_pc // 2
+            print('Per component we will plot {} feats'.format(nfeats_show_pc) )
+            inds_toshow = []
+            #for i in range(nr):
+            for i in comp_inds:
+                dd = np.abs(components[i  ] )
+
+                inds_sort = np.argsort(dd)  # smallest go first
+                inds_toshow_cur = inds_sort[-nfeats_show_pc:]
+                inds_toshow += [inds_toshow_cur]
+
+                #dd_toshow = dd[inds_toshow_cur]
+                strong_inds = np.where(dd   > np.quantile(dd,q) ) [0]
+                #print(i, strong_inds )
+                strongest_ind = np.argmax(dd)
+                assert  strongest_ind == inds_toshow_cur[-1]
+                strongest_inds_pc += [strongest_ind]
+
+                #strong_inds_pc += [strong_inds.copy() ]
+                strong_inds_pc += [inds_sort[-nfeats_highlight_pc:]  ]
+
+            inds_toshow = np.sort( np.unique( inds_toshow) )
+
+    #print(inds_toshow, strong_inds_pc, strongest_inds_pc)
+
+
+    nc = 1
+    ww = max(14 , min(40, components.shape[1]/3 ) )
+    fig,axs = plt.subplots(nrows=nr, ncols=nc, figsize=(ww*nc, hh*nr), sharex='col')
+    if nr == 1:
+        axs = [axs]
+    for i,compi in enumerate(comp_inds):
+        ax = axs[i]
+        #dd = np.abs(pca.components_[i] )
+        dd = np.abs(components[compi,inds_toshow  ] )
+        ax.plot( dd, lw=0, marker='o' )
+        ax.axhline( np.quantile(dd, q), ls=':', c='r' )
+        ttl = '(abs of) component {}' .format(compi)
+        if explained_variance_ratio is not None:
+            ttl += ', expl {:.4f} of variance (ratio)'.format(explained_variance_ratio[compi])
+        ax.set_title(ttl)
+
+        ax.grid()
+        ax.set_xlim(0, len(inds_toshow) )
+
+
+    ax.set_xticks(np.arange(len(inds_toshow) ))
+    if feature_names_all is not None:
+        ax.set_xticklabels( np.array(feature_names_all)[inds_toshow], rotation=90)
+
+    tls = ax.get_xticklabels()
+    ratio = 0.5 * len(inds_toshow) / len(strong_inds_pc )
+    for compi in range(len(strong_inds_pc ) ):
+        sipc = 0
+        #print(compi, strong_inds_pc[compi] )
+        si_cur = strong_inds_pc[compi]
+        for i in si_cur[::-1]:
+            ii = np.where(inds_toshow == i)[0]
+            #print(ratio, sipc  )
+            if len(ii) > 0 and (sipc < ratio ):
+                sipc += 1
+                ii = ii[0]
+                tls[ii].set_color("purple")
+    for compi in range(len(strong_inds_pc ) ):
+        ii = np.where(inds_toshow == strongest_inds_pc[compi])[0][0]
+        tls[ii ].set_color("red")
+
+    #plt.suptitle('PCA first components info')
+    #plt.savefig('PCA_info.png')
+    return strong_inds_pc
+
 #funloc = plotTFRlike(dat_pri,bpow_abscds_all_reshaped,0, 'beta', chns=['msrcR_0_3_c5', 'LFPR092'])
 #funloc = plotTFRlike(dat_pri,bpow_abscds_all_reshaped,0, 'beta', chns=['LFPR092'])
 
 #funloc['bpow_abscds_reshaped'].shape
+
+#def plotICA(ica):
+#    from mne.preprocessing import ICA
+#    ica = ICA(n_components = n_components_ICA, random_state=0).fit(filt_raw2)
+#
+#    compinds =  range( ica.get_components().shape[1] )  #all components
+#    icacomp = ica.get_sources(filt_raw)

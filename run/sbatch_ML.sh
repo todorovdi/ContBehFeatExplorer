@@ -34,7 +34,7 @@
 
 ##SBATCH --array=0,3
 ##SBATCH --array=166  modLFP for S03
-#SBATCH --array=0-29
+#SBATCH --array=0-42
 
 # *** start of job script ***
 ##source set_oscabagdis_env_vars.sh
@@ -72,6 +72,7 @@ export PATH=$PATH:$HOME/.local/bin
 #module load scikit
 #module load Python-Neuroimaging
 #module load SciPy-Stack
+module load R
 
 echo "DATA_DUSS=$DATA_DUSS"
 

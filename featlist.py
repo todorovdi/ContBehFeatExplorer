@@ -481,6 +481,37 @@ def filterFeats(feature_names_all, chnames_LFP, LFP_related_only, parcel_types,
             #        if pcl1.find(pcl2) >= 0:
             #            bad_parcels += [pcl1]
 
+        good_parcels_cur = []
+        bad_parcels_cur = []
+        for pgn in parcel_group_names:
+            if pgn.startswith('!'):
+                negmode = True
+                pgneff = pgn[1:]
+            else:
+                negmode = False
+                pgneff = pgn
+
+            if pgneff in gp.parcel_groupings_post:
+                curlabel_sublist = gp.parcel_groupings_post[pgneff]
+                if negmode:
+                    for pcl1_sideless in curlabel_sublist:
+                        bad_parcels_cur += [pcl1_sideless + '_L' ]
+                        bad_parcels_cur += [pcl1_sideless + '_R' ]
+                else:
+                    for pcl1_sideless in curlabel_sublist:
+                        good_parcels_cur += [pcl1_sideless + '_L' ]
+                        good_parcels_cur += [pcl1_sideless + '_R' ]
+                    #for pcl1 in all_parcels:
+                    #    pcl1_sideless = pcl1[:-2]
+                    #    if pcl1_sideless not in curlabel_sublist:
+                    #        bad_parcels += [pcl1_sideless + '_L' ]
+                    #        bad_parcels += [pcl1_sideless + '_R' ]
+        assert not (len(bad_parcels_cur) and len(good_parcels_cur) )
+        if len(good_parcels_cur):
+            bad_parcels += list(  set(all_parcels)   - set(good_parcels_cur ) )
+        else:
+            bad_parcels += bad_parcels_cur
+
         #print('bad_parcels=',set(bad_parcels) )
 
         if 'all' in parcel_types:

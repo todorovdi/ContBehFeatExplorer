@@ -2000,6 +2000,7 @@ def read_raw_fieldtrip(fname, info, data_name='data'):
     raw = mne.io.RawArray(data, info)  # create an MNE RawArray
     return raw
 
+# component influence on every channel
 def getCompInfl(ica,sources, comp_inds = None):
     if comp_inds is None:
         comp_inds = np.arange(ica.n_components_)

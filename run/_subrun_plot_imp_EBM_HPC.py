@@ -1,3 +1,4 @@
+from matplotlib.backends.backend_pdf import PdfPages
 import utils_postprocess as pp
 from utils_postprocess_HPC import loadFullScores, loadEBMExplainer_
 from matplotlib.lines import Line2D
@@ -18,10 +19,13 @@ legend_alpha = .3
 suptitle_to_put_ = ''
 legend_loc = 'lower right'
 
-load_explainers = False
+load_explainers = True
 
-#markers_mean = ['o','*']
-#markers_max = ['x','+']
+max_nfeats_to_sum = 20
+max_nfeats_to_sum = None
+
+markers_mean = ['o','*']
+markers_max = ['x','+']
 #markers_mean = [r'$\mathbf{' +f'{int(subj[0][1:])}' + r'}$' for subj in outputs_grouped.keys()]
 #markers_max = [r'$\tilde{' + f'{int(subj[0][1:])  }' + r'}$' for subj in outputs_grouped.keys()]
 
@@ -41,6 +45,7 @@ collect_SHAP_outs = []
 for tpl_ in pref_hh_tuples:
     if isinstance(tpl_,str):
         prefix_cur = tpl_
+        hh_ = None
     else:
         prefix_cur,hh_ = tpl_
     prefixes_to_use = [prefix_cur]
@@ -61,28 +66,32 @@ for tpl_ in pref_hh_tuples:
     (prefix,grp,int_type), mult_clf_output = list(outputs_grouped.values())[0]
 
     rnstr = ';'.join( list( outputs_grouped.values() )[0][0] )
-    out_name_plot = f'{",".join((prefix,grp,int_type) ) }_EBM_feat_signif'
+    sfl = max_nfeats_to_sum is not None
+    out_name_plot = f'{",".join((prefix,grp,int_type) ) }_EBM_feat_signif_sfl{sfl}'
     #chnames_LFP = ['LFPR01', 'LFPR12', 'LFPR23']
 
     #%debug
     merge_Hjorth = prefix_cur != 'onlyH'
-    merge_Hjorth = True
+    merge_Hjorth = False
 
     Hjorth_diff_color = (prefix_cur == 'onlyH') and not merge_Hjorth
 
 
-    hh = 12
-    if prefix_cur == 'onlyH':
-        hh = 5
-    if prefix_cur == 'LFPrel_noself_onlyBpcorr':
-        hh = 9
-    if prefix_cur == 'LFPrel_noself_onlyRbcorr':
-        hh = 7
+    if hh_ is not None:
+        hh = hh_
+    else:
+        hh = 12
+        if prefix_cur == 'onlyH':
+            hh = 5
+        if prefix_cur == 'LFPrel_noself_onlyBpcorr':
+            hh = 9
+        if prefix_cur == 'LFPrel_noself_onlyRbcorr':
+            hh = 7
     #outputs_grouped   #
     #(prefix,grp,int_type), mult_clf_output = output_list[0]
     #%debug
     figfname_full = pjoin(gv.dir_fig, subdir_short, out_name_plot + '.pdf')
-    figfname_full = figfname_full.replace('&','_AND_')
+    #figfname_full = figfname_full.replace('&','_AND_')
     pdf= PdfPages(figfname_full )
 
     for featsel_feat_subset_name_cur in EBM_feat_subsets:
@@ -100,7 +109,7 @@ for tpl_ in pref_hh_tuples:
             ogg = dict( [og] )
             if not use_same_ax:
                 axs = None
-            axs, collect_SHAP_outs_cur = postp.plotFeatSignifSHAP_list2_test(pdf=None,
+            axs, collect_SHAP_outs_cur = postp.plotFeatSignifEBM_list(pdf=None,
                              outputs_grouped=ogg, fshs='interpret_EBM',
                              figname_prefix=prefix, roi_labels=labels_dict['all_raw'],
                              body_side='left', chnames_LFP=None,
@@ -116,18 +125,21 @@ for tpl_ in pref_hh_tuples:
                                 marker_max = markers_max[i], Hjorth_diff_color = Hjorth_diff_color,
                                 axs=axs, grand_average_per_feat_type=0,
                                 featsel_feat_subset_name = featsel_feat_subset_name_cur,
-                                perf_marker_size=25, allow_dif_feat_group_sets=featsel_on_VIF_cur);
+                                perf_marker_size=25, allow_dif_feat_group_sets=featsel_on_VIF_cur,
+                                separate_by_band = True,
+                                separate_by_band2 = True,
+                                max_nfeats_to_sum  = max_nfeats_to_sum );
             legend_elements += [Line2D([0], [0], marker=markers_mean[i], color='orange', lw=0,
-                                   label=f'mean {rname_crop}', markerfacecolor='orange',
+                                   label=f'mean {rn[rname_crop]}', markerfacecolor='orange',
                                        markersize=legend_marker_size,alpha=legend_alpha) ]
             if show_max:
                 legend_elements += [Line2D([0], [0], marker=markers_max[i], color='orange', lw=0,
-                                       label=f'max {rname_crop}', markerfacecolor='orange',
+                                       label=f'max {rn[rname_crop]}', markerfacecolor='orange',
                                            markersize=legend_marker_size,alpha=legend_alpha) ]
 
             if not use_same_ax:
                 pdf.savefig();    plt.close()
-                axs[0,0].set_title(axs[0,0].get_title() + f' {rname_crop2}')
+                axs[0,0].set_title(axs[0,0].get_title() + f' {rn[rname_crop2]}')
 
             collect_SHAP_outs += collect_SHAP_outs_cur
 
@@ -136,7 +148,7 @@ for tpl_ in pref_hh_tuples:
 
 
         if use_same_ax:
-            axs[0,0].set_title( str(axs[0,0].get_title() ) + f' {rname_crop2}*')
+            axs[0,0].set_title( str(axs[0,0].get_title() ) + f' {rn[rname_crop2]}*')
             axs[0,1].legend(handles= legend_elements, loc=legend_loc)
 
             for i in range(len(axs) ):

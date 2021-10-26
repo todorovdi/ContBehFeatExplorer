@@ -654,23 +654,24 @@ def removeLargeItems(res_cur, keep_featsel=['XGB_Shapley','XGB_Shapley2','interp
                         res_cur['featsel_per_method'][fsh]['scores_bias_av'] = bias
                     del res_cur['featsel_per_method'][fsh]['scores']
 
-                if 'explainer' in fspm_cur:
-                    del fspm_cur['explainer']
-                info_per_cp = fspm_cur.get('info_per_cp',None)
-                if info_per_cp is not None:
-                    for info_cur in info_per_cp.values():
-                        if 'explainer' in info_cur:
-                            del info_cur['explainer']
+                for ts in ['explainer', 'explainer_loc', 'ebmobj']:
+                    if ts in fspm_cur:
+                        del fspm_cur[ts]
+                    info_per_cp = fspm_cur.get('info_per_cp',None)
+                    if info_per_cp is not None:
+                        for info_cur in info_per_cp.values():
+                            if ts in info_cur:
+                                del info_cur[ts]
 
-                if fsh == 'interpret_EBM' and ('explainer' not in fspm_cur):
-                    for fsn,info_cur_ in fspm_cur.items():
-                        if 'explainer' in info_cur_:
-                            del info_cur_['explainer']
-                        info_per_cp = fspm_cur.get('info_per_cp',None)
-                        if info_per_cp is not None:
-                            for info_cur in info_per_cp.values():
-                                if 'explainer' in info_cur:
-                                    del info_cur['explainer']
+                    if fsh == 'interpret_EBM' and (ts not in fspm_cur):
+                        for fsn,info_cur_ in fspm_cur.items():
+                            if ts in info_cur_:
+                                del info_cur_[ts]
+                            info_per_cp = fspm_cur.get('info_per_cp',None)
+                            if info_per_cp is not None:
+                                for info_cur in info_per_cp.values():
+                                    if ts in info_cur:
+                                        del info_cur[ts]
 
 
         else:

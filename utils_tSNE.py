@@ -1123,95 +1123,11 @@ def plotPCA(pcapts,pca, nPCAcomponents_to_plot,feature_names_all, colors, marker
         plt.close()
 
     ######################### Plot PCA components structure
-    if components is None:
-        return None
-    dd = np.abs(components[0] )
-
-    nr = min(nPCAcomponents_to_plot, pcapts.shape[1] )
-    if toshow_decide_0th_component:
-        print('0th component')
-        inds_sort = np.argsort(dd)  # smallest go first
-        inds_toshow = inds_sort[-nfeats_show:]
-
-        dd_toshow = dd[inds_toshow]
-        #strong_inds = np.where(dd_toshow   > np.quantile(dd_toshow,q) ) [0]
-        strong_inds = inds_toshow
-        strongest_ind = np.argmax(dd_toshow)
-        strong_inds_pc = [strong_inds]
-        strongest_inds_pc = [strongest_ind]
-    else:
-        strong_inds_pc = []
-        strongest_inds_pc = []
-        nfeats_show_pc = nfeats_show // nPCAcomponents_to_plot
-        print('Per component we will plot {} feats'.format(nfeats_show_pc) )
-        inds_toshow = []
-        for i in range(nr):
-            dd = np.abs(components[i  ] )
-
-            inds_sort = np.argsort(dd)  # smallest go first
-            inds_toshow_cur = inds_sort[-nfeats_show_pc:]
-            inds_toshow += [inds_toshow_cur]
-
-            #dd_toshow = dd[inds_toshow_cur]
-            strong_inds = np.where(dd   > np.quantile(dd,q) ) [0]
-            #print(i, strong_inds )
-            strongest_ind = np.argmax(dd)
-            assert  strongest_ind == inds_toshow_cur[-1]
-            strongest_inds_pc += [strongest_ind]
-
-            #strong_inds_pc += [strong_inds.copy() ]
-            strong_inds_pc += [inds_sort[-nfeats_show_pc//2:]  ]
-
-        inds_toshow = np.sort( np.unique( inds_toshow) )
-
-    #print(inds_toshow, strong_inds_pc, strongest_inds_pc)
-
-
-    nc = 1
-    hh=4
-    ww = max(14 , min(40, components.shape[1]/3 ) )
-    fig,axs = plt.subplots(nrows=nr, ncols=nc, figsize=(ww*nc, hh*nr), sharex='col')
-    if nr == 1:
-        axs = [axs]
-    for i in range(nr):
-        ax = axs[i]
-        #dd = np.abs(pca.components_[i] )
-        dd = np.abs(components[i,inds_toshow  ] )
-        ax.plot( dd )
-        ax.axhline( np.quantile(dd, q), ls=':', c='r' )
-        ttl = '(abs of) component {}' .format(i)
-        if hasattr(pca, 'explained_variance_ratio_'):
-            ttl += ', expl {:.2f} of variance (ratio)'.format(pca.explained_variance_ratio_[i])
-        ax.set_title(ttl)
-
-        ax.grid()
-        ax.set_xlim(0, len(inds_toshow) )
-
-
-    ax.set_xticks(np.arange(len(inds_toshow) ))
-    if feature_names_all is not None:
-        ax.set_xticklabels(feature_names_all[inds_toshow], rotation=90)
-
-    tls = ax.get_xticklabels()
-    ratio = 0.5 * len(inds_toshow) / len(strong_inds_pc )
-    for compi in range(len(strong_inds_pc ) ):
-        sipc = 0
-        #print(compi, strong_inds_pc[compi] )
-        si_cur = strong_inds_pc[compi]
-        for i in si_cur[::-1]:
-            ii = np.where(inds_toshow == i)[0]
-            #print(ratio, sipc  )
-            if len(ii) > 0 and (sipc < ratio ):
-                sipc += 1
-                ii = ii[0]
-                tls[ii].set_color("purple")
-    for compi in range(len(strong_inds_pc ) ):
-        ii = np.where(inds_toshow == strongest_inds_pc[compi])[0][0]
-        tls[ii ].set_color("red")
+    from plots import plotComponents
+    strong_inds_pc = plotComponents(pca.components_, feature_names_all, ncomp_to_plot, nfeats_show, q,
+                  toshow_decide_0th_component, pca.explained_variance_ratio_)
 
     plt.tight_layout()
-    #plt.suptitle('PCA first components info')
-    #plt.savefig('PCA_info.png')
     if pdf is not None:
         pdf.savefig()
         plt.close()
@@ -1911,11 +1827,12 @@ def getClfPredPower(clf,X,class_labels,class_ind, label_ids_order = None,
 
 def _getPredPower_singleFold(arg):
     from xgboost import XGBClassifier
+    from interpret.glassbox import ExplainableBoostingClassifier
     from numpy.linalg import LinAlgError
-    (fold_type,clf,add_clf_creopts,add_fitopts,X_train,X_test,y_train,y_test,class_ind,printLog)  = arg
+    (fold_type,clf,add_clf_creopts,add_fitopts,X_train,X_test,y_train,y_test,class_ind,n_classes, printLog)  = arg
     model_cur = type(clf)(**add_clf_creopts)  # I need num LDA compnents I guess
     try:
-        if isinstance(clf, XGBClassifier):
+        if isinstance(clf, XGBClassifier) or isinstance(clf,ExplainableBoostingClassifier):
             #print('WEIGHTS COMPUTED')
             from sklearn.utils.class_weight import compute_sample_weight
             class_weights = compute_sample_weight('balanced', y_train)
@@ -1957,6 +1874,7 @@ def getPredPowersCV(clf,X,class_labels,class_ind, printLog = False, n_splits=Non
     retcur['perf_nocv'] = perf_nocv
 
     y = class_labels
+    n_classes = len(set(y))
 
     #for model_cur in cv_results['estimator']
     if n_splits is not None:
@@ -1990,13 +1908,16 @@ def getPredPowersCV(clf,X,class_labels,class_ind, printLog = False, n_splits=Non
             X_train, X_test = Xarr[train_index], Xarr[test_index]
             y_train, y_test = class_labels[train_index], class_labels[test_index]
 
+            assert n_classes == len(set(y_train) )
+            assert n_classes == len(set(y_test) )
+
             class_labels_test_u = np.unique(y_test)
             assert len(class_labels_test_u) == len(class_labels_u)
             if len(set(y_train)) <= 1 or len(set(y_test)) <= 1:
                 continue
 
             fold_type = 'regular'
-            arg = (fold_type,clf,add_clf_creopts,add_fitopts,X_train,X_test,y_train,y_test,class_ind, printLog)
+            arg = (fold_type,clf,add_clf_creopts,add_fitopts,X_train,X_test,y_train,y_test,class_ind, n_classes, printLog)
             args += [arg]
 
         if train_on_shuffled:
@@ -2009,7 +1930,7 @@ def getPredPowersCV(clf,X,class_labels,class_ind, printLog = False, n_splits=Non
 
             fold_type_shuffled = 'train_on_shuffled_labels'
             fold_type = fold_type_shuffled
-            arg = (fold_type, clf,add_clf_creopts,add_fitopts,X_train,X_test,y_train,y_test,class_ind, printLog)
+            arg = (fold_type, clf,add_clf_creopts,add_fitopts,X_train,X_test,y_train,y_test,class_ind, n_classes, printLog)
             args += [arg]
 
 
@@ -2057,9 +1978,11 @@ def getPredPowersCV(clf,X,class_labels,class_ind, printLog = False, n_splits=Non
         perf_aver = np.mean(perfarr[not_nan_fold_inds] , axis = 0)
         # it is bad to averge non-normalized confmat. But I still keep full
         # ones as well
-        confmats = [ confmatNormalize(cm, 'true') for cm in confmats ]
-        confmat_aver =  np.mean( confmats, axis=0 )
+        confmats = [ confmatNormalize(cm, 'true') for cm in np.array(confmats)[not_nan_fold_inds] ]
+        confmat_aver =  np.mean( np.array(confmats), axis=0 )
         #ret = [perf_nocv, perfs_CV, perf_aver, confmat_aver ]
+        retcur['good_fold_inds'] = not_nan_fold_inds
+        retcur['bad_fold_inds'] = np.setdiff1d(np.arange(len(perfarr)) , not_nan_fold_inds )
         retcur['perfs_CV'] = perfs_CV
         retcur['perf_aver'] = perf_aver
         retcur['confmat_aver'] = confmat_aver
@@ -3138,7 +3061,6 @@ def gridSearch(dtrain, params, param_grids, keys, num_boost_round=100,
             if k in params_cur:
                 del params_cur[k]
 
-
         for parname,parval in pd.items():
             params_cur[parname] = parval
 
@@ -3232,3 +3154,143 @@ def gridSearchSeq(X,y,params,search_grid,param_list_search_seq,
                                                                              num_boost_round_best))
 
     return params_final, best_params_list, cv_resutls_best_list, num_boost_round_best
+
+def shapr_proxy(X_train, y_train, colnames=None, groups = None,
+                n_samples=200, n_batches=1, class_weights=None,
+                add_clf_creopts={}, n_combinations=None):
+    #colnames = None
+    ##groups = [["0"],["1","2"]]
+    #d = { 'A':["0"], 'B':["1","2"] }  # does not work
+    #n_samples = 200
+    #n_batches = 1
+    #add_clf_creopts
+
+    '''
+    n_batches: Positive integer. Specifies how many batches the total
+            number of feature combinations should be split into when
+            calculating the contribution function for each test
+            observation. The default value is 1. Increasing the number of
+            batches may significantly reduce the RAM allocation for
+            models with many features. This typically comes with a small
+            increase in computation time.
+
+    n_samples: Positive integer. Indicating the maximum number of samples
+            to use in the Monte Carlo integration for every conditional
+            expectation. See also details.
+
+    '''
+
+    if groups is not None:
+        assert isinstance(groups,dict)
+        import rpy2.rlike.container as rlc
+        tags,list_items = list( zip(*groups.items()) )
+        groups = rlc.TaggedList(list_items, tags=tuple(tags) )
+
+    import pandas as pd
+    import rpy2.robjects as robjects
+    from rpy2.robjects import numpy2ri
+    from rpy2.robjects.packages import importr
+    import rpy2.robjects as ro
+    from rpy2.robjects.conversion import localconverter
+    from rpy2.robjects import pandas2ri
+
+    numpy2ri.activate()
+    #import feather as ft
+
+    assert X_train.ndim == 2
+    assert X_train.shape[0] == len(y_train)
+    if  class_weights is not None:
+        assert  len( class_weights) == len(y_train)
+
+    if colnames is None:
+        colnames = map(str,range(X_train.shape[1]))
+    assert len(colnames) == X_train.shape[1]
+    df = pd.DataFrame(X_train, columns = colnames  )
+
+    xgboost = importr('xgboost')
+    shapr = importr('shapr')
+    base= importr('base')
+
+    # arrow_feather = importr('arrow')
+    # arrow_feather.read_feather(fn)
+
+
+    with localconverter(ro.default_converter + pandas2ri.converter):
+        r_from_pd_df = ro.conversion.py2rpy(df)
+
+    X_train_r = robjects.r['matrix'](X_train, ncol=X_train.shape[1])
+    dtrain = xgboost.xgb_DMatrix(X_train, label = y_train)
+    #robjects.r('colnames(X_train_r) <- range(10)' )
+
+
+    num_class = len(set(y_train) )
+    if num_class > 2:
+        objective = "multi:softprob"
+
+        raise ValueError('shapr will fail')
+
+        model = xgboost.xgboost(dtrain, nround = 20, verbose = False,
+                weight=class_weights, objective = objective , num_class=num_class,
+                                **add_clf_creopts)#, **add_fitopts)
+    else:
+        objective = "binary:logistic"
+
+        model = xgboost.xgboost(dtrain, nround = 20,
+        verbose = False, weight=class_weights,
+                            objective = objective ,
+                                **add_clf_creopts)#, **add_fitopts)
+
+    p = base.mean(y_train)   # bias
+    if groups is None:
+        print('Running shapr.shapr withOUT groups')
+
+        # Prepare the data for explanation
+        if n_combinations is not None:
+            explainer = shapr.shapr(r_from_pd_df, model, n_combinations = n_combinations)
+        else:
+            explainer = shapr.shapr(r_from_pd_df, model)
+        #> The specified model provides feature classes that are NA. The classes of data are taken as the truth.
+
+        # Specifying the phi_0, i.e. the expected prediction without any features
+
+        print('Starting corrected kernelShap (no groups)')
+
+        # Computing the actual Shapley values with kernelSHAP accounting for feature dependence using
+        # the empirical (conditional) distribution approach with bandwidth parameter sigma = 0.1 (default)
+        explanation = shapr.explain(
+        r_from_pd_df,
+        approach = "empirical",
+        explainer = explainer,
+        prediction_zero = p,
+        n_samples = n_samples,
+        n_batches = n_batches
+        )
+
+    else:
+        #c("gaussian", rep("empirical", 4), #      rep("copula", 5))
+        #group <- list(A = c("lstat", "rm"), B = c("dis", "indus"))
+        #explainer_group <- shapr(x_train, model, group = group)
+        print('Running shapr.shapr with groups')
+
+        if n_combinations is not None:
+            explainer_group = shapr.shapr(r_from_pd_df, model, group=groups, n_combinations = n_combinations)
+        else:
+            explainer_group = shapr.shapr(r_from_pd_df, model, group=groups)
+
+        print(f'Starting corrected kernelShap (on {len(group)} groups)')
+
+        explanation = shapr.explain(
+            r_from_pd_df,
+            explainer_group,
+            approach = "empirical",
+            prediction_zero = p,
+            n_samples = n_samples,
+            n_batches = n_batches
+        )
+    #  print(explain_groups$dt)
+
+
+
+    numpy2ri.deactivate()
+
+    return explanation

@@ -120,7 +120,7 @@ for tpl_ in pref_hh_tuples:
         ogg = dict( [og] )
         if not use_same_ax:
             axs = None
-        axs, collect_SHAP_outs_cur = postp.plotFeatSignifSHAP_list(pdf=None,
+        axs, collect_SHAP_outs_cur = postp.plotFeatSignifSHAP_ICA_list(pdf=None,
                                  outputs_grouped=ogg, fshs='XGB_Shapley',
                                  figname_prefix=prefix, roi_labels=labels_dict['all_raw'],
                                  body_side='left', chnames_LFP=None,

@@ -189,10 +189,19 @@ else
   RUN_CLASS_LAB_GRP_SEPARATE=0
 fi
 
+#PREFIX_ALL_FEATS=1
+#PREFIXES_MAIN=1
+#PREFIXES_CROSS_MOD_AUX=1
+#PREFIXES_AUX_SRC=1
+
 ######## common for ML and nlproj
 #if [ -z ${var+x} ]; then echo "var is unset"; else echo "var is set to '$var'"; fi
             PREFIX_ALL_FEATS=0
-               PREFIXES_MAIN=1
+               PREFIXES_MAIN=0
+                PREFIXES_TMP=0
+               PREFIXES_TMP2=0
+               PREFIXES_TMP3=0
+               PREFIXES_TMP4=1
       PREFIXES_CROSS_MOD_AUX=0
             PREFIXES_AUX_SRC=0
 PREFIXES_CROSS_BPCORR_SUBMOD=0
@@ -202,7 +211,7 @@ PREFIXES_CROSS_BPCORR_SUBMOD_ORDBAND3=0  # subset of ORDBAND2
 PREFIXES_CROSS_RBCORR_SUBMOD=0
                 PREFIXES_AUX=0
            PREFIX_SEARCH_LFP=0
-           PREFIXES_BAND_NOH=1
+           PREFIXES_BAND_NOH=0
 
 #ALLFEATS_ADD_OPTS="--search_best_LFP LDA"
 ALLFEATS_ADD_OPTS=""
@@ -215,20 +224,6 @@ else
   DDASH=""
 fi
 
-#--groupings_to_use
-# using spaces inatead of commas kills compatibilitiy with prev versions (when I could run muliple groupings in one file)
-# but otherwise it does not work on jusuf -- it has too old bash..
-#GROUPINGS_TO_USE="merge_all_not_trem merge_movements merge_nothing"
-#GROUPINGS_TO_USE="merge_nothing merge_all_not_trem"
-#GROUPINGS_TO_USE="merge_nothing"
-GROUPINGS_TO_USE="merge_movements merge_all_not_trem"
-
-#int_types_to_use = gp.int_types_to_include
-#INT_SETS_TO_USE="basic trem_vs_quiet"
-#INT_SETS_TO_USE="basic"
-#INT_SETS_TO_USE="trem_vs_hold&move"
-INT_SETS_TO_USE="basic trem_vs_hold&move"
-#INT_SETS_TO_USE="trem_vs_quiet"
 
 if [ $USE_AUX_IVAL_GROUPINGS -gt 0 ]; then
   GROUPINGS_TO_USE="$GROUPINGS_TO_USE merge_within_subj merge_within_medcond merge_within_task"
@@ -369,53 +364,221 @@ if [ $do_ML -gt 0 ]; then
         echo "trying to run with all features resulted in an error, exiting"
         exit 1
       fi
-      #RUNSTRING_CUR=' $RS --mods LFP                               --prefix modLFP               '
-      #RUNSTRINGS+=("$RUNSTRING_CUR")
-      #RUNSTRING_CUR=' $RS --self_couplings_only 1 --mods msrc      --prefix modSrc_self          '    
-      #RUNSTRINGS+=("$RUNSTRING_CUR")
-      #RUNSTRING_CUR=' $RS --mods msrc                              --prefix modSrc               '              
-      #RUNSTRINGS+=("$RUNSTRING_CUR")
+      RUNSTRING_CUR=' $RS --mods LFP                               --prefix modLFP               '
+      RUNSTRINGS+=("$RUNSTRING_CUR")
+      RUNSTRING_CUR=' $RS --self_couplings_only 1 --mods msrc      --prefix modSrc_self  '
+      RUNSTRINGS+=("$RUNSTRING_CUR")
+      RUNSTRING_CUR=' $RS --feat_types H_act,H_mob,H_compl        --prefix onlyH           '        
+      RUNSTRINGS+=("$RUNSTRING_CUR")
+      RUNSTRING_CUR=' $RS --feat_types H_act                     --prefix onlyH_act '        
+      RUNSTRINGS+=("$RUNSTRING_CUR")
+      RUNSTRING_CUR=' $RS --mods msrc         --prefix modSrc      '              
+      RUNSTRINGS+=("$RUNSTRING_CUR")
+      RUNSTRING_CUR=' $RS --LFP_related_only 1 --cross_couplings_only 1 --prefix LFPrel_noself ' 
+      RUNSTRINGS+=("$RUNSTRING_CUR")
+
+      RUNSTRING_CUR=' $RS --fbands $BANDS_BETA  --feat_types con,rbcorr --prefix allb_beta_noH   '
+      RUNSTRINGS+=("$RUNSTRING_CUR")
+      RUNSTRING_CUR=' $RS --fbands $BANDS_GAMMA   --feat_types con,rbcorr  --prefix allb_gamma_noH  '
+      RUNSTRINGS+=("$RUNSTRING_CUR")
+      RUNSTRING_CUR=' $RS --fbands $BANDS_TREMOR  --feat_types con,rbcorr  --prefix allb_tremor_noH '
+      RUNSTRINGS+=("$RUNSTRING_CUR")
+      # most contribution comes from Hjorth if I include it
       #RUNSTRING_CUR=' $RS --fbands $BANDS_BETA                     --prefix allb_beta            '
       #RUNSTRINGS+=("$RUNSTRING_CUR")
       #RUNSTRING_CUR=' $RS --fbands $BANDS_GAMMA                     --prefix allb_gamma           '
       #RUNSTRINGS+=("$RUNSTRING_CUR")
       #RUNSTRING_CUR=' $RS --fbands $BANDS_TREMOR                     --prefix allb_tremor          '
       #RUNSTRINGS+=("$RUNSTRING_CUR")
-      RUNSTRING_CUR=' $RS --LFP_related_only 1 --cross_couplings_only 1   --prefix LFPrel_noself '       
+    fi
+    if [ $PREFIXES_TMP -gt 0 ]; then
+      RUNSTRING_CUR=' $RS --feat_types H_act,H_mob,H_compl --parcel_group_names !Cerebellum  --prefix onlyH_noCB '        
       RUNSTRINGS+=("$RUNSTRING_CUR")
-      RUNSTRING_CUR=' $RS --feat_types H_act,H_mob,H_compl        --prefix onlyH           '        
+
+      RUNSTRING_CUR=' $RS --feat_types H_act,H_mob,H_compl --parcel_group_names !OccipitalMid  --prefix onlyH_noOccipitalMid '        
+      RUNSTRINGS+=("$RUNSTRING_CUR")
+
+      RUNSTRING_CUR=' $RS --feat_types H_act,H_mob,H_compl --parcel_group_names !FrontalMed  --prefix onlyH_noFrontalMed '        
+      RUNSTRINGS+=("$RUNSTRING_CUR")
+
+      RUNSTRING_CUR=' $RS --feat_types H_act,H_mob,H_compl --parcel_group_names !FrontalSup  --prefix onlyH_noFrontalSup '        
+      RUNSTRINGS+=("$RUNSTRING_CUR")
+
+      RUNSTRING_CUR=' $RS --feat_types H_act,H_mob,H_compl --parcel_group_names !TemporalMid  --prefix onlyH_noTemporalMid '        
+      RUNSTRINGS+=("$RUNSTRING_CUR")
+
+      RUNSTRING_CUR=' $RS --feat_types H_act,H_mob,H_compl --parcel_group_names !Sensorimotor  --prefix onlyH_noSensorimotor '        
+      RUNSTRINGS+=("$RUNSTRING_CUR")
+
+      RUNSTRING_CUR=' $RS --feat_types H_act,H_mob,H_compl --mods msrc --prefix onlyH_noLFP '        
       RUNSTRINGS+=("$RUNSTRING_CUR")
     fi
+
+    if [ $PREFIXES_TMP2 -gt 0 ]; then
+      RUNSTRING_CUR=' $RS --feat_types H_act --prefix onlyH_act '        
+      RUNSTRINGS+=("$RUNSTRING_CUR")
+      RUNSTRING_CUR=' $RS --feat_types H_mob --prefix onlyH_mob '        
+      RUNSTRINGS+=("$RUNSTRING_CUR")
+      RUNSTRING_CUR=' $RS --feat_types H_compl --prefix onlyH_compl '        
+      RUNSTRINGS+=("$RUNSTRING_CUR")
+
+      RUNSTRING_CUR=' $RS --feat_types H_act,H_mob --prefix onlyH_nocompl '        
+      RUNSTRINGS+=("$RUNSTRING_CUR")
+      RUNSTRING_CUR=' $RS --feat_types H_mob,H_compl --prefix onlyH_noact '        
+      RUNSTRINGS+=("$RUNSTRING_CUR")
+      RUNSTRING_CUR=' $RS --feat_types H_act,H_compl --prefix onlyH_nomob '        
+      RUNSTRINGS+=("$RUNSTRING_CUR")
+    fi
+
+    if [ $PREFIXES_TMP3 -gt 0 ]; then
+      RUNSTRING_CUR=' $RS --feat_types H_act --parcel_group_names !Cerebellum  --prefix onlyH_act_noCB '        
+      RUNSTRINGS+=("$RUNSTRING_CUR")
+
+      RUNSTRING_CUR=' $RS --feat_types H_act --parcel_group_names !OccipitalMid  --prefix onlyH_act_noOccipitalMid '        
+      RUNSTRINGS+=("$RUNSTRING_CUR")
+
+      RUNSTRING_CUR=' $RS --feat_types H_act --parcel_group_names !FrontalMed  --prefix onlyH_act_noFrontalMed '        
+      RUNSTRINGS+=("$RUNSTRING_CUR")
+
+      RUNSTRING_CUR=' $RS --feat_types H_act --parcel_group_names !FrontalSup  --prefix onlyH_act_noFrontalSup '        
+      RUNSTRINGS+=("$RUNSTRING_CUR")
+
+      RUNSTRING_CUR=' $RS --feat_types H_act --parcel_group_names !TemporalMid  --prefix onlyH_act_noTemporalMid '        
+      RUNSTRINGS+=("$RUNSTRING_CUR")
+
+      RUNSTRING_CUR=' $RS --feat_types H_act --parcel_group_names !Sensorimotor  --prefix onlyH_act_noSensorimotor '        
+      RUNSTRINGS+=("$RUNSTRING_CUR")
+
+      RUNSTRING_CUR=' $RS --feat_types H_act --mods msrc --prefix onlyH_act_noLFP '        
+      RUNSTRINGS+=("$RUNSTRING_CUR")
+    fi
+
+    if [ $PREFIXES_TMP4 -gt 0 ]; then
+      #RUNSTRING_CUR=' $RS --feat_types H_act --parcel_group_names !Cerebellum  --prefix onlyH_act_noCB '        
+      #RUNSTRINGS+=("$RUNSTRING_CUR")
+
+      #RUNSTRING_CUR=' $RS --feat_types H_act --parcel_group_names !ParietalSup  --prefix onlyH_act_noParietalSup '        
+      #RUNSTRINGS+=("$RUNSTRING_CUR")
+
+      #RUNSTRING_CUR=' $RS --feat_types H_act --parcel_group_names !FrontalSup,!Cerebellum  --prefix onlyH_act_noCBnoFS '        
+      #RUNSTRINGS+=("$RUNSTRING_CUR")
+
+      #RUNSTRING_CUR=' $RS --feat_types H_act --parcel_group_names !ParietalSup,!FrontalSup,!Cerebellum  --prefix onlyH_act_noCBnoFSnoPS '        
+      #RUNSTRINGS+=("$RUNSTRING_CUR")
+
+      #RUNSTRING_CUR=' $RS --feat_types H_act --parcel_group_names !ParietalInf,!ParietalSup,!FrontalSup,!Cerebellum  --prefix onlyH_act_noCBnoFSnoPSnoPI '        
+      #RUNSTRINGS+=("$RUNSTRING_CUR")
+
+      #RUNSTRING_CUR=' $RS --feat_types H_act --parcel_group_names !FrontalMed,!ParietalInf,!ParietalSup,!FrontalSup,!Cerebellum  --prefix onlyH_act_noCBnoFSnoPSnoPInoFM '        
+      #RUNSTRINGS+=("$RUNSTRING_CUR")
+
+      #RUNSTRING_CUR=' $RS --feat_types H_act --parcel_group_names !OccipitalInf,!FrontalMed,!ParietalInf,!ParietalSup,!FrontalSup,!Cerebellum  --prefix onlyH_act_noCBnoFSnoPSnoPInoFMnoOI '        
+      #RUNSTRINGS+=("$RUNSTRING_CUR")
+
+      #RUNSTRING_CUR=' $RS --feat_types H_act --parcel_group_names !OccipitalMid,!OccipitalInf,!FrontalMed,!ParietalInf,!ParietalSup,!FrontalSup,!Cerebellum  --prefix onlyH_act_noCBnoFSnoPSnoPInoFMnoOInoOM '        
+      #RUNSTRINGS+=("$RUNSTRING_CUR")
+
+      #RUNSTRING_CUR=' $RS --feat_types H_act --parcel_group_names !Angular,!OccipitalMid,!OccipitalInf,!FrontalMed,!ParietalInf,!ParietalSup,!FrontalSup,!Cerebellum  --prefix onlyH_act_noCBnoFSnoPSnoPInoFMnoOInoOMnoA '        
+      #RUNSTRINGS+=("$RUNSTRING_CUR")
+
+      #--------
+      #RUNSTRING_CUR=' $RS --feat_types H_act --parcel_group_names !TemporalInf,!Angular,!OccipitalMid,!OccipitalInf,!FrontalMed,!ParietalInf,!ParietalSup,!FrontalSup,!Cerebellum  --prefix onlyH_act_noCBnoFSnoPSnoPInoFMnoOInoOMnoAnoTI '        
+      #RUNSTRINGS+=("$RUNSTRING_CUR")
+
+      #RUNSTRING_CUR=' $RS --feat_types H_act --parcel_group_names !Sensorimotor,!TemporalInf,!Angular,!OccipitalMid,!OccipitalInf,!FrontalMed,!ParietalInf,!ParietalSup,!FrontalSup,!Cerebellum  --prefix onlyH_act_noCBnoFSnoPSnoPInoFMnoOInoOMnoAnoTInoSM '        
+      #RUNSTRINGS+=("$RUNSTRING_CUR")
+
+      #RUNSTRING_CUR=' $RS --feat_types H_act --parcel_group_names !Sensorimotor --prefix onlyH_act_noSM '        
+      #RUNSTRINGS+=("$RUNSTRING_CUR")
+
+      #RUNSTRING_CUR=' $RS --feat_types H_act --parcel_group_names !TemporalSup,!Sensorimotor,!TemporalInf,!Angular,!OccipitalMid,!OccipitalInf,!FrontalMed,!ParietalInf,!ParietalSup,!FrontalSup,!Cerebellum  --prefix onlyH_act_noCBnoFSnoPSnoPInoFMnoOInoOMnoAnoTInoSMnoTS '        
+      #RUNSTRINGS+=("$RUNSTRING_CUR")
+
+      #RUNSTRING_CUR=' $RS --feat_types H_act --parcel_group_names !FrontalInf,!TemporalSup,!Sensorimotor,!TemporalInf,!Angular,!OccipitalMid,!OccipitalInf,!FrontalMed,!ParietalInf,!ParietalSup,!FrontalSup,!Cerebellum  --prefix onlyH_act_noCBnoFSnoPSnoPInoFMnoOInoOMnoAnoTInoSMnoTSnoFI '        
+      #RUNSTRINGS+=("$RUNSTRING_CUR")
+
+      ##--------------
+
+      #RUNSTRING_CUR=' $RS --feat_types H_act --parcel_group_names Cerebellum  --prefix onlyH_act_CB '        
+      #RUNSTRINGS+=("$RUNSTRING_CUR")
+
+      #RUNSTRING_CUR=' $RS --feat_types H_act --parcel_group_names Sensorimotor,Cerebellum  --prefix onlyH_act_CBySM '        
+      #RUNSTRINGS+=("$RUNSTRING_CUR")
+
+      #RUNSTRING_CUR=' $RS --feat_types H_act --parcel_group_names FrontalSup,Cerebellum  --prefix onlyH_act_CByFS '        
+      #RUNSTRINGS+=("$RUNSTRING_CUR")
+
+      #RUNSTRING_CUR=' $RS --feat_types H_act --parcel_group_names ParietalSup,FrontalSup,Cerebellum  --prefix onlyH_act_CByFSyPS '        
+      #RUNSTRINGS+=("$RUNSTRING_CUR")
+
+      #RUNSTRING_CUR=' $RS --feat_types H_act --parcel_group_names ParietalInf,ParietalSup,FrontalSup,Cerebellum  --prefix onlyH_act_CByFSyPSyPI '        
+      #RUNSTRINGS+=("$RUNSTRING_CUR")
+
+      #RUNSTRING_CUR=' $RS --feat_types H_act --parcel_group_names FrontalMed,ParietalInf,ParietalSup,FrontalSup,Cerebellum  --prefix onlyH_act_CByFSyPSyPIyFM '        
+      #RUNSTRINGS+=("$RUNSTRING_CUR")
+
+      #RUNSTRING_CUR=' $RS --feat_types H_act --parcel_group_names Sensorimotor  --prefix onlyH_act_SM '        
+      #RUNSTRINGS+=("$RUNSTRING_CUR")
+
+      #RUNSTRING_CUR=' $RS --feat_types H_act --parcel_group_names Sensorimotor,OccipitalInf  --prefix onlyH_act_SMyOI '        
+      #RUNSTRINGS+=("$RUNSTRING_CUR")
+
+      #RUNSTRING_CUR=' $RS --feat_types H_act --parcel_group_names Sensorimotor,OccipitalInf,FrontalSup  --prefix onlyH_act_SMyOIyFS '        
+      #RUNSTRINGS+=("$RUNSTRING_CUR")
+
+      #RUNSTRING_CUR=' $RS --feat_types H_act --parcel_group_names Sensorimotor,OccipitalInf,FrontalSup,FrontalInf  --prefix onlyH_act_SMyOIyFSyFI '        
+      #RUNSTRINGS+=("$RUNSTRING_CUR")
+
+      #RUNSTRING_CUR=' $RS --feat_types H_act --parcel_group_names Sensorimotor,OccipitalInf,FrontalSup,FrontalInf,TemporalMid  --prefix onlyH_act_SMyOIyFSyFIyTM '        
+      #RUNSTRINGS+=("$RUNSTRING_CUR")
+
+      RUNSTRING_CUR=' $RS --mods msrc --feat_types H_act --parcel_group_names Sensorimotor  --prefix onlyH_act_SM_noLFP '        
+      RUNSTRINGS+=("$RUNSTRING_CUR")
+
+      RUNSTRING_CUR=' $RS --mods msrc --feat_types H_act --parcel_group_names Sensorimotor,OccipitalInf  --prefix onlyH_act_SMyOI_noLFP '        
+      RUNSTRINGS+=("$RUNSTRING_CUR")
+
+      RUNSTRING_CUR=' $RS --mods msrc --feat_types H_act --parcel_group_names Sensorimotor,OccipitalInf,FrontalSup  --prefix onlyH_act_SMyOIyFS_noLFP '        
+      RUNSTRINGS+=("$RUNSTRING_CUR")
+
+      RUNSTRING_CUR=' $RS --mods msrc --feat_types H_act --parcel_group_names Sensorimotor,OccipitalInf,FrontalSup,FrontalInf  --prefix onlyH_act_SMyOIyFSyFI_noLFP '        
+      RUNSTRINGS+=("$RUNSTRING_CUR")
+
+      RUNSTRING_CUR=' $RS --mods msrc --feat_types H_act --parcel_group_names Sensorimotor,OccipitalInf,FrontalSup,FrontalInf,TemporalMid  --prefix onlyH_act_SMyOIyFSyFIyTM_noLFP '        
+      RUNSTRINGS+=("$RUNSTRING_CUR")
+    fi
+
+
     if [ $PREFIXES_AUX_SRC -gt 0 ]; then
-      RUNSTRING_CUR=' $RS --parcel_group_names $PARCEL_TYPES_MOTOR       --prefix onlyMotorSrc  '   
+      RUNSTRING_CUR=' $RS --parcel_group_names Sensorimotor       --prefix onlyMotorSrc  '   
       RUNSTRINGS+=("$RUNSTRING_CUR")
-      RUNSTRING_CUR=' $RS --parcel_group_names $PARCEL_TYPES_NONMOTOR    --prefix onlyRestSrc   '   
+      RUNSTRING_CUR=' $RS --parcel_group_names !Sensorimotor    --prefix onlyRestSrc   '   
       RUNSTRINGS+=("$RUNSTRING_CUR")
-      RUNSTRING_CUR=' $RS --parcel_types $PARCEL_TYPES_CB                --prefix onlyCBSrc     '   
+      RUNSTRING_CUR=' $RS --parcel_group_names Cerebellum         --prefix onlyCBSrc     '   
       RUNSTRINGS+=("$RUNSTRING_CUR")
     fi
     if [ $PREFIXES_CROSS_MOD_AUX -ne 0 ]; then 
       CROSS_MOD="--LFP_related_only 1 --cross_couplings_only 1"
-      RUNSTRING_CUR=' $RS $CROSS_MOD --feat_types con             --prefix LFPrel_noself_onlyCon     '
+      RUNSTRING_CUR=' $RS $CROSS_MOD --feat_types con     --prefix LFPrel_noself_onlyCon     '
       RUNSTRINGS+=("$RUNSTRING_CUR")
-      RUNSTRING_CUR=' $RS $CROSS_MOD --feat_types rbcorr          --prefix LFPrel_noself_onlyRbcorr  '
+      RUNSTRING_CUR=' $RS $CROSS_MOD --feat_types rbcorr  --prefix LFPrel_noself_onlyRbcorr  '
       RUNSTRINGS+=("$RUNSTRING_CUR")
-      RUNSTRING_CUR=' $RS $CROSS_MOD --feat_types bpcorr          --prefix LFPrel_noself_onlyBpcorr  '
+      RUNSTRING_CUR=' $RS $CROSS_MOD --feat_types bpcorr  --prefix LFPrel_noself_onlyBpcorr  '
       RUNSTRINGS+=("$RUNSTRING_CUR")
     fi 
     if [ $PREFIX_SEARCH_LFP -ne 0 ]; then
-      RUNSTRING_CUR=' $RS --mods LFP                               --prefix modLFP               '
+      RUNSTRING_CUR=' $RS --mods LFP        --prefix modLFP               '
       RUNSTRINGS+=("$RUNSTRING_CUR")
       RUNSTRING_CUR=' $RS --LFP_related_only 1 --cross_couplings_only 1   --prefix LFPrel_noself '       
       RUNSTRINGS+=("$RUNSTRING_CUR")
-      RUNSTRING_CUR=' $RS --feat_types H_act,H_mob,H_compl        --prefix onlyH           '        
+      RUNSTRING_CUR=' $RS --feat_types H_act,H_mob,H_compl   --prefix onlyH           '        
       RUNSTRINGS+=("$RUNSTRING_CUR")
       CROSS_MOD="--LFP_related_only 1 --cross_couplings_only 1"
-      RUNSTRING_CUR=' $RS $CROSS_MOD --feat_types con             --prefix LFPrel_noself_onlyCon     '
+      RUNSTRING_CUR=' $RS $CROSS_MOD --feat_types con      --prefix LFPrel_noself_onlyCon     '
       RUNSTRINGS+=("$RUNSTRING_CUR")
-      RUNSTRING_CUR=' $RS $CROSS_MOD --feat_types rbcorr          --prefix LFPrel_noself_onlyRbcorr  '
+      RUNSTRING_CUR=' $RS $CROSS_MOD --feat_types rbcorr   --prefix LFPrel_noself_onlyRbcorr  '
       RUNSTRINGS+=("$RUNSTRING_CUR")
-      RUNSTRING_CUR=' $RS $CROSS_MOD --feat_types bpcorr          --prefix LFPrel_noself_onlyBpcorr  '
+      RUNSTRING_CUR=' $RS $CROSS_MOD --feat_types bpcorr   --prefix LFPrel_noself_onlyBpcorr  '
       RUNSTRINGS+=("$RUNSTRING_CUR")
     fi
     if [ $PREFIXES_CROSS_BPCORR_SUBMOD -ne 0 ]; then 

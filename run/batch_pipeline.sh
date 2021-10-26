@@ -62,8 +62,22 @@ raws=$raws_decent
 raws_compl=$raws_compl_decent
 
 
+if [ $rawstrs_type = "per_subject" ]; then
 #grouped by subject
-raws_strs=("S01_off_hold,S01_on_hold,S01_off_move,S01_on_move" "S02_off_hold,S02_on_hold,S02_off_move,S02_on_move" "S04_off_hold,S04_on_hold,S04_off_move,S04_on_move"  "S05_off_hold,S05_on_hold,S05_off_move,S05_on_move" "S07_off_hold,S07_on_hold,S07_off_move,S07_on_move" "S03_off_hold,S03_off_move")
+  raws_strs=("S01_off_hold,S01_on_hold,S01_off_move,S01_on_move" "S02_off_hold,S02_on_hold,S02_off_move,S02_on_move" "S04_off_hold,S04_on_hold,S04_off_move,S04_on_move"  "S05_off_hold,S05_on_hold,S05_off_move,S05_on_move" "S07_off_hold,S07_on_hold,S07_off_move,S07_on_move" "S03_off_hold,S03_off_move")
+elif [ $rawstrs_type = "per_subject_per_medcond" ]; then
+#grouped by medcond within subject 
+  raws_strs=("S01_off_hold,S01_on_hold" "S01_off_move,S01_on_move" "S02_off_hold,S02_on_hold" "S02_off_move,S02_on_move" "S04_off_hold,S04_on_hold" "S04_off_move,S04_on_move"  "S05_off_hold,S05_on_hold" "S05_off_move,S05_on_move" "S07_off_hold,S07_on_hold" "S07_off_move,S07_on_move" "S03_off_hold,S03_off_move")
+elif [ $rawstrs_type = "together_but_5,3" ]; then
+# everything together to be joined (no 5 and no 3)
+  raws_strs=("S01_off_hold,S01_on_hold,S01_off_move,S01_on_move,S02_off_hold,S02_on_hold,S02_off_move,S02_on_move,S04_off_hold,S04_on_hold,S04_off_move,S04_on_move,S07_off_hold,S07_on_hold,S07_off_move,S07_on_move" )
+elif [ $rawstrs_type = "together" ]; then
+# everything together to be joined (with 5 and 3)
+  raws_strs=("S01_off_hold,S01_on_hold,S01_off_move,S01_on_move,S02_off_hold,S02_on_hold,S02_off_move,S02_on_move,S03_off_hold,S03_off_move,S04_off_hold,S04_on_hold,S04_off_move,S04_on_move,S05_off_hold,S05_on_hold,S05_off_move,S05_on_move,S07_off_hold,S07_on_hold,S07_off_move,S07_on_move" )
+elif [ $rawstrs_type = "per_medcond" ]; then
+# separated by medcond (and S03 put aside)
+  raws_strs=("S01_off_hold,S01_off_move,S02_off_hold,S02_off_move,S04_off_hold,S04_off_move,S05_off_hold,S05_off_move,S07_off_hold,S07_off_move"  "S01_on_hold,S01_on_move,S02_on_hold,S02_on_move,S04_on_hold,S04_on_move,S05_on_hold,S05_on_move,S07_on_hold,S07_on_move" )
+fi
 
 # no first two
 #raws_strs=("S04_off_hold,S04_on_hold,S04_off_move,S04_on_move"  "S05_off_hold,S05_on_hold,S05_off_move,S05_on_move" "S07_off_hold,S07_on_hold,S07_off_move,S07_on_move" "S03_off_hold,S03_off_move")
@@ -77,14 +91,6 @@ raws_strs=("S01_off_hold,S01_on_hold,S01_off_move,S01_on_move" "S02_off_hold,S02
 #raws_strs=("S03_off_hold,S03_off_move")
 #raws_strs=("S01_off_hold,S01_on_hold,S01_off_move")
 
-# everything together to be joined (no 5 and no 3)
-#raws_strs=("S01_off_hold,S01_on_hold,S01_off_move,S01_on_move,S02_off_hold,S02_on_hold,S02_off_move,S02_on_move,S04_off_hold,S04_on_hold,S04_off_move,S04_on_move,S07_off_hold,S07_on_hold,S07_off_move,S07_on_move" )
-
-# everything together to be joined (with 5 and 3)
-#raws_strs=("S01_off_hold,S01_on_hold,S01_off_move,S01_on_move,S02_off_hold,S02_on_hold,S02_off_move,S02_on_move,S03_off_hold,S03_off_move,S04_off_hold,S04_on_hold,S04_off_move,S04_on_move,S05_off_hold,S05_on_hold,S05_off_move,S05_on_move,S07_off_hold,S07_on_hold,S07_off_move,S07_on_move" )
-
-# separated by medcond (and S03 put aside)
-raws_strs=("S01_off_hold,S01_off_move,S02_off_hold,S02_off_move,S04_off_hold,S04_off_move,S05_off_hold,S05_off_move,S07_off_hold,S07_off_move"  "S01_on_hold,S01_on_move,S02_on_hold,S02_on_move,S04_on_hold,S04_on_move,S05_on_hold,S05_on_move,S07_on_hold,S07_on_move" )
 
 
 

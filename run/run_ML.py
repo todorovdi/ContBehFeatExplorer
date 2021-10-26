@@ -175,6 +175,7 @@ XGB_tree_method = 'hist'  # or 'exact' or 'gpu_hist'
 XGB_max_depth  = 4 # def = 6
 XGB_min_child_weight = 3  # min num of samples making creating new node
 XGB_tune_param = True
+load_XGB_params_auto = 1
 XGB_params_search_grid = {}
 XGB_params_search_grid['max_depth'] = np.arange(3,10,2)
 XGB_params_search_grid['min_child_weight'] = np.arange(3,12,2)
@@ -187,6 +188,7 @@ VIF_search_worst = False
 EBM_compute_pairwise = 1
 EBM_featsel_feats = ['VIFsel']  # 'all','best_LFP', 'heavy' are also possible
 featsel_on_VIF = 1
+EBM_CV = 0
 
 XGB_featsel_feats = ['VIFsel']
 
@@ -246,10 +248,10 @@ opts, args = getopt.getopt(effargv,"hr:n:s:w:p:",
          "selMinFeatSet_after_featsel=", "n_jobs=", "label_groups_to_use=",
          "SLURM_job_id=", "featsel_only_best_LFP=",
          "XGB_max_depth=", "XGB_min_child_weight=", "XGB_tune_param=",
-         "EBM_compute_pairwise=", "EBM_featsel_feats=", 'XGB_featsel_feats',
+         "EBM_compute_pairwise=", "EBM_featsel_feats=", 'XGB_featsel_feats=',
          "featsel_on_VIF=", "custom_rawname_str=",
          "do_cleanup=", "VIF_thr=", "VIF_search_worst=", "compute_ICA=",
-         "use_ICA_for_classif="])
+         "use_ICA_for_classif=", "load_XGB_params_auto=", "EBM_CV="])
 print(sys.argv)
 print('Argv str = ',' '.join(sys.argv ) )
 print(opts)
@@ -306,6 +308,10 @@ for opt,arg in pars.items():
         do_XGB = not bool(int(arg))
     elif opt == "skip_LDA":
         do_LDA = not bool(int(arg))
+    elif opt == "load_XGB_params_auto":
+        load_XGB_params_auto = int(arg)
+    elif opt == "EBM_CV":
+        EBM_CV = int(arg)
     elif opt == "VIF_thr":
         VIF_thr = float(arg)
     elif opt == "VIF_search_worst":
@@ -319,7 +325,13 @@ for opt,arg in pars.items():
     elif opt == "EBM_featsel_feats":
         EBM_featsel_feats = arg.split(',')
     elif opt == "XGB_featsel_feats":
-        XGB_featsel_feats = arg.split(',')
+        XGB_featsel_feats_ = arg.split(',')
+        XGB_featsel_feats = []
+        for ff in XGB_featsel_feats_:
+            if len(ff)  :
+                XGB_featsel_feats += [ff]
+        if not len(XGB_featsel_feats):
+            print('!Warning! XGB_featsel_feats is empty')
     elif opt == "calc_MI":
         calc_MI = int(arg)
     elif opt == "XGB_max_depth":
@@ -327,7 +339,7 @@ for opt,arg in pars.items():
     elif opt == "XGB_min_child_weight":
         XGB_min_child_weight = int(arg)
     elif opt == "XGB_tune_param":
-        XGB_tune_param == int(arg)
+        XGB_tune_param = int(arg)
     elif opt == "calc_VIF":
         calc_VIF = int(arg)
     elif opt == "savefile_rawname_format":
@@ -386,6 +398,8 @@ for opt,arg in pars.items():
         n_splits = int(arg)
     elif opt == "search_best_LFP":
         search_best_LFP = arg.split(',')
+        if max([len(a) for a in  search_best_LFP] ) == 0:
+            search_best_LFP = []
     elif opt == "calc_selMinFeatSet":
         calc_selMinFeatSet = int(arg)
     elif opt == "src_grouping":
@@ -480,13 +494,16 @@ for opt,arg in pars.items():
         print('Unrecognized option {} with arg {}, exiting'.format(opt,arg) )
         sys.exit('Unrecognized option')
 
-if not featsel_only_best_LFP:
-    search_best_LFP = []
-else:
+if use_ICA_for_classif and not compute_ICA:
+    raise ValueError('nonsense')
+
+if featsel_only_best_LFP and not use_main_LFP_chan:
     if 'best_LFP' not in XGB_featsel_feats:
         XGB_featsel_feats += ['best_LFP']
+else:
+    search_best_LFP = []
 
-if featsel_on_VIF and 'VIFsel' not in XGB_featsel_feats:
+if featsel_on_VIF and ('VIFsel' not in XGB_featsel_feats) and calc_VIF:
     XGB_featsel_feats += ['VIFsel']
 
 if fbands_per_mod_set > 0:
@@ -1032,16 +1049,20 @@ Xsubset_to_fit = Xconcat_to_fit[bininds_noartif_nounlab]
 pca.fit(Xsubset_to_fit )   # fit to not-outlier data
 pcapts = pca.transform(Xconcat_imputed)  # transform outliers as well
 
+
+ica = None
 if compute_ICA:
     from sklearn.decomposition import FastICA
     max_iter = 500
-    ica = FastICA(n_components=Xsubset_to_fit.shape[1],
-                    random_state=0, max_iter=max_iter)
     pcapts_good = pca.transform(Xsubset_to_fit)  # transform outliers as well
+    ica = FastICA(n_components=pcapts_good.shape[1],
+                    random_state=0, max_iter=max_iter)
     ica.fit(pcapts_good)
     Xsubset_to_fit_ICA =  ica.transform(pcapts_good)
     featnames_ICA = [ f'ica {fi}' for fi in \
                      np.arange(Xsubset_to_fit_ICA.shape[1] ) ]
+
+    Xconcat_imputed = ica.transform(pcapts)
 
 assert not (use_ICA_for_classif and len(search_best_LFP))
 
@@ -1140,6 +1161,9 @@ if do_Classif:
                     pcapts.shape[1], skip, windowsz, use_main_LFP_chan, grouping_key,int_types_key,
                     rawname_format = savefile_rawname_format,
                     custom_rawname_str=custom_rawname_str)
+
+            fname_ML_full_intermed = pjoin( gv.data_dir, output_subdir, filename_to_save)
+            fname_ML_full_intermed_light = pjoin( gv.data_dir, output_subdir, '_!' + filename_to_save)
             if save_output:
                 print(f'later we will be saving to {filename_to_save}')
 
@@ -1315,7 +1339,8 @@ if do_Classif:
                 #path_list = pre_final_path.split(os.path.sep)
                 #final_path = pjoin(
                 obj = resobj[key]
-                saveResToFolder_(obj, final_path + '.npz')
+                if save_output:
+                    saveResToFolder_(obj, final_path + '.npz')
 
             ####################### Feature subsets (PCA) preparation
 
@@ -1403,6 +1428,8 @@ if do_Classif:
             results_cur['featnames_for_fit'] = featnames_for_fit
             results_cur['featnames_nice_for_fit'] = featnames_nice_for_fit
 
+            results_cur['icaobj'] = ica
+
             try:
                 # we really want this and not Xconcat good cur here
                 C = np.corrcoef(Xsubset_to_fit,rowvar=False)
@@ -1433,6 +1460,21 @@ if do_Classif:
             saveResToFolder(results_cur, 'corr_matrix_hist' )
             saveResToFolder(results_cur, 'nonsyn_feat_inds' )
 
+            ##################
+
+            lab_enc = preprocessing.LabelEncoder()
+            # just skipped class_labels_good
+            lab_enc.fit(class_labels_for_heavy)
+            class_labels_good_for_classif = lab_enc.transform(class_labels_for_heavy)
+            from sklearn.utils.class_weight import compute_sample_weight
+            class_weights = compute_sample_weight('balanced',class_labels_good_for_classif)
+            class_label_ids = lab_enc.inverse_transform( np.arange( len(set(class_labels_good_for_classif)) ) )
+            class_label_names_ordered = [revdict[cli] for cli in class_label_ids]
+
+            results_cur['class_labels_good_for_classif'] = class_labels_good_for_classif
+            results_cur['class_label_ids'] = class_label_ids
+            results_cur['class_label_names_ordered'] = class_label_names_ordered
+            results_cur['class_weights'] = class_weights
 
 
             #indlist = fip_fs
@@ -1592,19 +1634,20 @@ if do_Classif:
                     #    pdf.close()
                     sys.exit(0)
 
-                # look at different feature subsets based on q threshold from PCA
-                for thri in range(len( feat_variance_q_thr )):
-                    lda_version_name = 'best_PCA-derived_features_{}'.format( feat_variance_q_thr[thri] )
-                    pca_derived_featinds = pca_derived_featinds_perthr[thri]
-                    if len(pca_derived_featinds) == 0:
-                        continue
-                    res_cur = utsne.calcLDAVersions(Xconcat_good_cur[:,pca_derived_featinds],
-                                                        Xconcat_imputed[:,pca_derived_featinds],
-                                                        class_labels_good,
-                                        n_components_LDA, class_ind_to_check, revdict,
-                                                calcName=lda_version_name,n_splits=n_splits)
-                    LDA_analysis_versions[lda_version_name] = res_cur
-                    gc.collect()
+                if not use_ICA_for_classif:
+                    # look at different feature subsets based on q threshold from PCA
+                    for thri in range(len( feat_variance_q_thr )):
+                        lda_version_name = 'best_PCA-derived_features_{}'.format( feat_variance_q_thr[thri] )
+                        pca_derived_featinds = pca_derived_featinds_perthr[thri]
+                        if len(pca_derived_featinds) == 0:
+                            continue
+                        res_cur = utsne.calcLDAVersions(Xconcat_good_cur[:,pca_derived_featinds],
+                                                            Xconcat_imputed[:,pca_derived_featinds],
+                                                            class_labels_good,
+                                            n_components_LDA, class_ind_to_check, revdict,
+                                                    calcName=lda_version_name,n_splits=n_splits)
+                        LDA_analysis_versions[lda_version_name] = res_cur
+                        gc.collect()
 
 
                 # Important indices only (from LDA scalings)
@@ -1640,6 +1683,7 @@ if do_Classif:
                     #LDA_analysis_versions
                     saveResToFolder(LDA_analysis_versions, vn, 'LDA_analysis_versions' )
 
+
                 perfs_LDA_featsearch  = None
                 best_inds_LDA = None
                 if calc_selMinFeatSet:
@@ -1673,20 +1717,12 @@ if do_Classif:
 
             usage = getMemUsed();
             ##################
-            lab_enc = preprocessing.LabelEncoder()
-            # just skipped class_labels_good
-            lab_enc.fit(class_labels_for_heavy)
-            class_labels_good_for_classif = lab_enc.transform(class_labels_for_heavy)
+            #lab_enc = preprocessing.LabelEncoder()
+            ## just skipped class_labels_good
+            #lab_enc.fit(class_labels_for_heavy)
+            #class_labels_good_for_classif = lab_enc.transform(class_labels_for_heavy)
 
-            from sklearn.utils.class_weight import compute_sample_weight
-            class_weights = compute_sample_weight('balanced',class_labels_good_for_classif)
 
-            class_label_ids = lab_enc.inverse_transform( np.arange( len(set(class_labels_good_for_classif)) ) )
-            class_label_names_ordered = [revdict[cli] for cli in class_label_ids]
-
-            results_cur['class_labels_good_for_classif'] = class_labels_good_for_classif
-            results_cur['class_label_ids'] = class_label_ids
-            results_cur['class_label_names_ordered'] = class_label_names_ordered
 
             do_XGB_cur =  do_XGB and not (int_types_key in gp.int_type_datset_rel and skip_XGB_aux_intervals  )
             clf_XGB = None
@@ -1744,36 +1780,50 @@ if do_Classif:
                 print('Starting XGB on X.shape ', X_cur.shape)
 
                 if XGB_tune_param:
-                    add_clf_creopts_CV = dict(add_clf_creopts.items())
-                    if len(numpoints_per_class_id)  > 2:
-                        add_clf_creopts_CV['objective'] = 'multi:softprob'
-                        add_clf_creopts_CV['num_class'] = len(numpoints_per_class_id)
-                        tune_metric = 'mlogloss'
+                    add_clf_creopts_tuned, add_fitopts_tuned     = None,None
+                    if load_XGB_params_auto and os.path.exists(fname_ML_full_intermed_light):
+                        fe = np.load(fname_ML_full_intermed_light, allow_pickle=True)
+                        resc_ = fe['results_light'][()]
+                        rc = resc_['XGB_analysis_versions']['all_present_features']
+                        add_clf_creopts_tuned  = rc.get('add_clf_creopts',None)
+                        add_fitopts_tuned      = rc.get('add_fitopts',None)
+                        if (add_clf_creopts_tuned is not None) and (add_fitopts_tuned is not None):
+                            print('-------- Loaded XGB parameters from file!')
+
+                    if (add_clf_creopts_tuned is None) or add_fitopts_tuned is None:
+                        add_clf_creopts_CV = dict(add_clf_creopts.items())
+                        if len(numpoints_per_class_id)  > 2:
+                            add_clf_creopts_CV['objective'] = 'multi:softprob'
+                            add_clf_creopts_CV['num_class'] = len(numpoints_per_class_id)
+                            tune_metric = 'mlogloss'
+                        else:
+                            add_clf_creopts_CV['objective'] = 'binary:logistic'
+                            tune_metric = 'logloss'
+
+                        #search_grid['eta'] = np.array([.3, .2, .1, .05, .01, .005])
+                        XGB_param_list_search_seq = [ ['max_depth','min_child_weight'],
+                                                ['subsample', 'eta'] ]
+
+                        print('Start XGB param tuning, XGB_param_list_search_seq=',XGB_param_list_search_seq)
+                        add_clf_creopts_orig = add_clf_creopts
+                        add_clf_creopts, best_params_list, cv_resutls_best_list,\
+                            num_boost_round_best=\
+                            utsne.gridSearchSeq(X_cur,y_cur, add_clf_creopts_CV,
+                                            XGB_params_search_grid,
+                                            XGB_param_list_search_seq,
+                                            num_boost_round=100,
+                                early_stopping_rounds=10, nfold=n_splits, seed=0,
+                                            sel_num_boost_round=1,
+                                                main_metric=tune_metric, printLog=1)
                     else:
-                        add_clf_creopts_CV['objective'] = 'binary:logistic'
-                        tune_metric = 'logloss'
-
-                    #search_grid['eta'] = np.array([.3, .2, .1, .05, .01, .005])
-                    XGB_param_list_search_seq = [ ['max_depth','min_child_weight'],
-                                            ['subsample', 'eta'] ]
-
-                    print('Start XGB param tuning, XGB_param_list_search_seq=',XGB_param_list_search_seq)
-                    add_clf_creopts_orig = add_clf_creopts
-                    add_clf_creopts, best_params_list, cv_resutls_best_list,\
-                        num_boost_round_best=\
-                        utsne.gridSearchSeq(X_cur,y_cur, add_clf_creopts_CV,
-                                        XGB_params_search_grid,
-                                        XGB_param_list_search_seq,
-                                        num_boost_round=100,
-                            early_stopping_rounds=10, nfold=n_splits, seed=0,
-                                           sel_num_boost_round=1,
-                                            main_metric=tune_metric, printLog=1)
+                        add_clf_creopts = add_clf_creopts_tuned
+                        add_fitopts = add_fitopts_tuned
 
                     #if num_boost_round_best is not None:
                     #    add_fitopts['n_estimators'] = num_boost_round_best
 
-                print('Hyperparam tuning gave us ',
-                      add_clf_creopts,add_fitopts)
+                    print('Hyperparam tuning gave us ',
+                        add_clf_creopts,add_fitopts)
                 if calc_selMinFeatSet:
                     clf_XGB = XGBClassifier(**add_clf_creopts)
                     clf_XGB.fit(X_cur, y_cur, **add_fitopts)
@@ -1872,6 +1922,8 @@ if do_Classif:
                         add_clf_creopts=add_clf_creopts,
                         ret_clf_obj=False, seed=0)
                     rc = {'perf_dict':r0, 'importances':clf_XGB.feature_importances_}
+                    rc['add_clf_creopts'] = add_clf_creopts
+                    rc['add_fitopts'] = add_fitopts
 
                     perfstr = utsne.sprintfPerfs(r0['perf_aver'])
                     print(f'<!>  XGB {XGB_version_name} perfs are {perfstr}')
@@ -2242,7 +2294,7 @@ if do_Classif:
             #                                       '_{}{}.npz'.format(sind_join_str,out_name))
 
 
-            fname_ML_full_intermed = pjoin( gv.data_dir, output_subdir, filename_to_save)
+            results_cur['filename_full'] =  fname_ML_full_intermed
 
             # collect small non-system local variables
             #vv = locals().items()
@@ -2269,14 +2321,18 @@ if do_Classif:
                         'feature_names_filtered_pri':dict(enumerate(feature_names_pri)),
                          'featnames_nice':featnames_nice,
                           'bininds_good':bininds_noartif_nounlab,
+                            'inds_not_neut': inds_not_neut,
                          'feat_info_pri':dict(enumerate(feat_info_pri)),
                         'rawtimes_pri':dict(enumerate(rawtimes_pri)),
                          'Xtimes_pri':dict(enumerate(Xtimes_pri)),
                         'wbd_pri':dict(enumerate(wbd_pri)),
                         'pcapts':pcapts, 'pcaobj':pca,
+                            'icaobj':ica,
                         'X_imputed':Xconcat_imputed,
                           'pars':pars,
-                            'roi_labels': roi_labels}
+                            'roi_labels': roi_labels,
+                            'ann_related': (anns, anns_pri, times_concat, dataset_bounds, wbd_merged)
+                            }
                 # using bininds_good and X_imputed one gets Xsubset_to_fit
                 np.savez(fname_ML_full_intermed, **savedict  )
             else:
@@ -2331,9 +2387,9 @@ if do_Classif:
                         #    print(str(e) )
                         #    shap_values = None
                     elif fsh == 'XGB_Shapley':
-                        print('Starting computing ',fsh)
                         X = Xconcat_good_cur[::subskip_fit]
                         y = class_labels_good_for_classif
+                        some_computed = False
 
                         for featsel_feat_subset_name in XGB_featsel_feats:
                             featis = np.arange(X.shape[-1])
@@ -2359,8 +2415,10 @@ if do_Classif:
                                     print(f'{fsh} for VIFsel -- additional conditions not satisfied, skipping')
                                     continue
                             else:
-                                raise ValueError(f'unknown feat subset name {featsel_feat_subset_name}')
+                                raise ValueError(f'{fsh} unknown feat subset name {featsel_feat_subset_name}')
 
+
+                            print(f'Starting computing {fsh} for feat subset {featsel_feat_subset_name}')
                             #if featsel_only_best_LFP and 'LFP' in data_modalities and 'XGB' in search_best_LFP and len(chnames_LFP) > 1:
                             #    featis, featis_bad = getFeatIndsRelToOnlyOneLFPchan(featnames,
                             #            chn=results_cur['best_LFP']['XGB']['winning_chan'],
@@ -2402,6 +2460,9 @@ if do_Classif:
 
                             gc.collect()
                             usage = getMemUsed();
+                            some_computed = True
+                        if not some_computed:
+                            print(f'!Warning!: no XGB featsel computed, XGB_featsel_feats = {XGB_featsel_feats}')
                     elif fsh == 'interpret_EBM':
                         import itertools
                         import interpret
@@ -2409,9 +2470,7 @@ if do_Classif:
 
                         # since EBM only works for binary, I treat each pair of classes separately
                         EBM_seed = 0
-
                         for featsel_feat_subset_name in EBM_featsel_feats:
-                            print(f'Starting {fsh} for featsel_feat_subset_name = {featsel_feat_subset_name}')
                             featis = np.arange(Xconcat_good_cur.shape[-1])
                             if featsel_feat_subset_name == 'all':
                                 featis = np.arange(Xconcat_good_cur.shape[-1])
@@ -2436,6 +2495,17 @@ if do_Classif:
                                     continue
                             else:
                                 raise ValueError(f'unknown feat subset name {featsel_feat_subset_name}')
+
+                            print(f'Starting {fsh} for featsel_feat_subset_name = {featsel_feat_subset_name}')
+
+                            ebm_params = {}
+                            ebm_params['n_jobs'] =n_jobs
+                            #ebm_params['min_samples_leaf']=add_clf_creopts['min_child_weight']
+                            ebm_params['random_state']=EBM_seed
+                            #ebm_params['binning'] = 'quantile'
+                            featnames_ebm = np.array(featnames_nice_for_fit)[featis]
+                            ebm_creopts = {'feature_names': featnames_ebm}
+                            ebm_creopts.update(ebm_params)
 
                             if EBM_compute_pairwise:
                                 featsel_info[featsel_feat_subset_name] = {}
@@ -2468,16 +2538,29 @@ if do_Classif:
                                     from sklearn.model_selection import train_test_split
                                     X_train, X_test, y_train, y_test = train_test_split(X_cur_cp, y_cur_cp,
                                         test_size=0.20, random_state=1, shuffle=True)
-                                    ebm = ExplainableBoostingClassifier(random_state=EBM_seed,
-                                        feature_names=np.array(featnames_nice_for_fit)[featis],
-                                        n_jobs=n_jobs)
-                                    ebm.fit(X_train, y_train)
-                                    global_exp = ebm.explain_global()
 
-                                    sens,spec, F1, confmat  = utsne.getClfPredPower(ebm,\
-                                        X_test,y_test,class_ind_to_check, printLog=False)
-                                    confmat_normalized = utsne.confmatNormalize(confmat) * 100
-                                    print(f'confmat_normalized_true (pct) = {confmat_normalized}')
+
+                                    #%debug
+                                    r0_ebm = None
+                                    if EBM_CV:
+                                        r0_ebm = utsne.getPredPowersCV(ebm,X_cup_cp,y_cur_cp,
+                                                class_ind_to_check_lenc, printLog = False, n_splits=n_splits,
+                                                ret_clf_obj=True, skip_noCV =False, add_fitopts={},
+                                                add_clf_creopts =ebm_creopts, train_on_shuffled =False, seed=0,
+                                                group_labels=None )
+                                    else:
+                                        ebm = ExplainableBoostingClassifier( **ebm_creopts)
+
+                                        class_weights_cur = compute_sample_weight('balanced',y_train)
+                                        ebm.fit(X_train, y_train, sample_weight=class_weights_cur)
+                                        global_exp = ebm.explain_global()
+                                        # or maybe better to put test dataset?
+                                        local_exp = ebm.explain_local(X_cur_cp,y_cur_cp)
+
+                                        sens,spec, F1, confmat  = utsne.getClfPredPower(ebm,\
+                                            X_test,y_test,class_ind_to_check, printLog=False)
+                                        confmat_normalized = utsne.confmatNormalize(confmat) * 100
+                                        print(f'confmat_normalized_true (pct) = {confmat_normalized}')
 
                                     EBM_result_per_cp[indpair_names] = global_exp
                                     indpairs_names += [indpair_names]
@@ -2492,7 +2575,9 @@ if do_Classif:
 
                                     info_cur = {}
                                     info_cur['scores'] = scores
+                                    info_cur['ebmobj'] = ebm
                                     info_cur['explainer'] = global_exp
+                                    info_cur['explainer_loc'] = local_exp
                                     info_cur['perf'] = sens,spec, F1, confmat
                                     info_cur['confmat_normalized'] = confmat_normalized
                                     # I want a duplicate becasue I might delete
@@ -2513,16 +2598,43 @@ if do_Classif:
                                 X_train, X_test, y_train, y_test = \
                                     train_test_split(X, y, test_size=0.20, random_state=0, shuffle=True)
 
-                                ebm = ExplainableBoostingClassifier(random_state=EBM_seed,
-                                        feature_names=np.array(featnames_nice_for_fit)[featis], n_jobs=n_jobs)
-                                ebm.fit(X_train, y_train)
+
+
+                                r0_ebm = None
+                                if EBM_CV:
+                                    ebm = ExplainableBoostingClassifier(**ebm_creopts)
+                                    class_weights_cur = compute_sample_weight('balanced',y)
+                                    ebm.fit(X, y, sample_weight=class_weights_cur)
+
+                                    r0_ebm = utsne.getPredPowersCV(ebm,X,y,
+                                            class_ind_to_check_lenc, printLog = False, n_splits=n_splits,
+                                            ret_clf_obj=True, skip_noCV =False, add_fitopts={},
+                                            add_clf_creopts =ebm_creopts, train_on_shuffled =False, seed=0,
+                                            group_labels=None )
+                                    sens,spec, F1 = r0_ebm['perf_aver']
+                                    confmat  = r0_ebm['confmat_aver']
+
+                                    from utils_postprocess_HPC import EBMlocExpl2scores
+                                    scores_list = []
+                                    for ebm_cur in r0_ebm['clf_objs']:
+                                        local_exp = ebm_cur.explain_local(X,y)
+                                        scores_cur,true_labels,predicted_labels, featnames_out = \
+                                            EBMlocExpl2scores(local_exp, inc_interactions=False)
+                                        assert tuple(featnames_out) == tuple(featnames_ebm)
+                                        scores_list += [scores_cur]
+                                    scores = np.mean(scores_cur)
+                                else:
+                                    ebm = ExplainableBoostingClassifier(ebm_creopts)
+                                    class_weights_cur = compute_sample_weight('balanced',y_train)
+                                    ebm.fit(X_train, y_train, sample_weight=class_weights_cur)
+                                    local_exp = ebm.explain_local(X,y)
+
+                                    sens,spec, F1, confmat  = \
+                                        utsne.getClfPredPower(ebm,X_test,y_test,class_ind_to_check, printLog=False)
+                                    confmat_normalized = utsne.confmatNormalize(confmat) * 100
+                                    print(f'confmat_normalized_true (pct) = {confmat_normalized}')
+
                                 global_exp = ebm.explain_global()
-
-                                sens,spec, F1, confmat  = \
-                                    utsne.getClfPredPower(ebm,X_test,y_test,class_ind_to_check, printLog=False)
-                                confmat_normalized = utsne.confmatNormalize(confmat) * 100
-                                print(f'confmat_normalized_true (pct) = {confmat_normalized}')
-
                                 # extracting data from explainer
                                 scores = global_exp.data()['scores']
                                 names  = global_exp.data()['names']
@@ -2530,7 +2642,7 @@ if do_Classif:
                                 featnames_srt = np.array(names)[sis]
                                 nfs = np.nan
                                 if len(sis) > 1:
-                                    nfs = [sis[1] ]
+                                    nfs = scores[ sis[1] ]
                                 print(f'EBM: Strongest feat is {featnames_srt[0]}'
                                       f'with score {scores[sis[0] ]}'
                                       f' ,next feat score is {nfs}')
@@ -2538,8 +2650,11 @@ if do_Classif:
 
                                 info_cur = {}
                                 info_cur['scores'] = scores
+                                info_cur['ebmobj'] = ebm
                                 info_cur['explainer'] = global_exp
+                                info_cur['explainer_loc'] = local_exp
                                 info_cur['perf'] = sens,spec, F1, confmat
+                                info_cur['perf_dict'] = r0_ebm
                                 info_cur['confmat_normalized'] = confmat_normalized
                                 info_cur['feature_names']= names
                                 info_cur['feature_indices_used'] = featis
@@ -2550,7 +2665,8 @@ if do_Classif:
                     else:
                         raise ValueError(f'{fsh} not implemented')
 
-                    featsel_info['feature_indices_used'] = featis
+                    # this one is not informative! left for compatibility
+                    #featsel_info['feature_indices_used'] = featis
                     featsel_per_method[fsh] = featsel_info
                     saveResToFolder(featsel_per_method, fsh,
                                     'featsel_per_method' )
@@ -2803,8 +2919,6 @@ if do_Classif:
 
                 results_cur_cleaned = pp.removeLargeItems(results_cur)
 
-                fname_ML_full_intermed_light = pjoin( gv.data_dir,
-                                                     output_subdir, '_!' + filename_to_save)
                 print('Saving LIGHT ext intermediate result to {}'.format(fname_ML_full_intermed_light) )
                 np.savez(fname_ML_full_intermed_light,
                          results_light=results_cur_cleaned)
@@ -2896,7 +3010,8 @@ if not single_fit_type_mode:
                     selected_feat_inds = selected_feat_inds_pri[rawind],
                     info = ML_info, feat_info = feat_info_pri[rawind],
                     lda_output_pg = mult_clf_results_pg_cur, Xtimes=Xtimes_pri[rawind], argv=sys.argv,
-                    X_imputed=Xconcat_imputed[sl] ,  rawtimes=rawtimes_pri[rawind] )
+                    X_imputed=Xconcat_imputed[sl] ,  rawtimes=rawtimes_pri[rawind],
+                     bininds_noartif_nounlab = bininds_noartif_nounlab)
             print('Saving PCA to ',fname_PCA_full)
         else:
             print('Skipping saving because save_output=0')

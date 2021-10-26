@@ -4544,4 +4544,9 @@ def runFilePart(fullfname, runstr, startline=None,lastline=None, use_ipython=Tru
 
     # would be useless for use_ipython  = True, but not otherwise
     return locals()
-
+def pcaica2featCoef(pca,ica):
+    # returns mix_appl -- num_features x num_ica_components
+    mix_large = np.eye(pca.components_.shape[0])
+    mix_large[:ica.n_components, :ica.n_components]  = ica.mixing_
+    mix_appl = pca.components_.T @ mix_large  #np.dot(mix_large,   ica.pca_components_ ) [ sel]
+    return mix_appl
