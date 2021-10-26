@@ -17,7 +17,8 @@ legend_marker_size = 10
 legend_alpha = .3
 
 suptitle_to_put_ = ''
-legend_loc = 'lower right'
+#legend_loc = 'lower right'
+legend_loc = -1,0.5
 
 load_explainers = True
 
