@@ -1124,7 +1124,8 @@ def plotPCA(pcapts,pca, nPCAcomponents_to_plot,feature_names_all, colors, marker
 
     ######################### Plot PCA components structure
     from plots import plotComponents
-    strong_inds_pc = plotComponents(pca.components_, feature_names_all, ncomp_to_plot, nfeats_show, q,
+    strong_inds_pc = plotComponents(pca.components_, feature_names_all,
+                                    nPCAcomponents_to_plot, nfeats_show, q,
                   toshow_decide_0th_component, pca.explained_variance_ratio_)
 
     plt.tight_layout()
@@ -1829,7 +1830,7 @@ def _getPredPower_singleFold(arg):
     from xgboost import XGBClassifier
     from interpret.glassbox import ExplainableBoostingClassifier
     from numpy.linalg import LinAlgError
-    (fold_type,clf,add_clf_creopts,add_fitopts,X_train,X_test,y_train,y_test,class_ind,n_classes, printLog)  = arg
+    (fold_type,clf,add_clf_creopts,add_fitopts,X_train,X_test,y_train,y_test,class_ind,n_classes, split_ind, printLog)  = arg
     model_cur = type(clf)(**add_clf_creopts)  # I need num LDA compnents I guess
     try:
         if isinstance(clf, XGBClassifier) or isinstance(clf,ExplainableBoostingClassifier):
@@ -1848,13 +1849,13 @@ def _getPredPower_singleFold(arg):
         print( str(e) )
         model_cur, perf_cur = None, None
 
-    return fold_type, model_cur,perf_cur
+    return split_ind, fold_type, model_cur,perf_cur
 
 
 def getPredPowersCV(clf,X,class_labels,class_ind, printLog = False, n_splits=None,
                     ret_clf_obj=False, skip_noCV =False, add_fitopts={},
                    add_clf_creopts ={}, train_on_shuffled =True, seed=0,
-                    group_labels=None ):
+                    group_labels=None, stratified = True ):
     # clf is assumed to be already fitted on entire training data here
     # TODO: maybe I need to adapt for other classifiers
     # ret = [perf_nocv, perfs_CV, perf_aver, confmat_avGroupKFolder ] and maybe list of classif objects
@@ -1879,10 +1880,13 @@ def getPredPowersCV(clf,X,class_labels,class_ind, printLog = False, n_splits=Non
     #for model_cur in cv_results['estimator']
     if n_splits is not None:
         #if n_KFold_splits is not None:
-        from sklearn.model_selection import KFold,GroupKFold
+        from sklearn.model_selection import StratifiedKFold,KFold,GroupKFold
         from sklearn.model_selection import train_test_split
         if group_labels is None:
-            kf = KFold(n_splits=n_splits, shuffle=True, random_state=seed)
+            if stratified:
+                kf = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=seed)
+            else:
+                kf = KFold(n_splits=n_splits, shuffle=True, random_state=seed)
             split_res = kf.split(X,y)
         else:
             assert len(group_labels) == len(class_labels), (len(group_labels), len(class_labels) )
@@ -1903,6 +1907,8 @@ def getPredPowersCV(clf,X,class_labels,class_ind, printLog = False, n_splits=Non
 
         class_labels_u = np.unique(class_labels)
 
+        test_indices = []
+        split_ind = 0
         for train_index, test_index in split_res:
             #print(train_index )
             X_train, X_test = Xarr[train_index], Xarr[test_index]
@@ -1917,8 +1923,14 @@ def getPredPowersCV(clf,X,class_labels,class_ind, printLog = False, n_splits=Non
                 continue
 
             fold_type = 'regular'
-            arg = (fold_type,clf,add_clf_creopts,add_fitopts,X_train,X_test,y_train,y_test,class_ind, n_classes, printLog)
+            arg = (fold_type,clf,add_clf_creopts,add_fitopts,\
+                   X_train,X_test,y_train,y_test,class_ind, n_classes, split_ind, printLog)
             args += [arg]
+
+            split_ind += 1
+
+            test_indices += [test_index]
+
 
         if train_on_shuffled:
             # train on shuffled labels to check overfitting
@@ -1930,21 +1942,23 @@ def getPredPowersCV(clf,X,class_labels,class_ind, printLog = False, n_splits=Non
 
             fold_type_shuffled = 'train_on_shuffled_labels'
             fold_type = fold_type_shuffled
-            arg = (fold_type, clf,add_clf_creopts,add_fitopts,X_train,X_test,y_train,y_test,class_ind, n_classes, printLog)
+            arg = (fold_type, clf,add_clf_creopts,add_fitopts,X_train,X_test,y_train,y_test,class_ind, n_classes, -1, printLog)
             args += [arg]
 
+        retcur['test_indices_list'] =  [0]*len(args)
 
         res_fold_type_spec = None
         if n_jobs_perrun > 1:
             n_jobs = 1
             for arg in args:
                 r = _getPredPower_singleFold(arg)
-                fold_type, model_cur,perfs_cur = r
+                split_ind, fold_type, model_cur,perfs_cur = r
                 if fold_type != 'regular':
                     res_fold_type_spec = r
                 else:
                     models += [model_cur]
                     perfs_CV += [perfs_cur]
+                retcur['test_indices_list'][split_ind] = test_indices[split_ind]
         else:
             n_jobs = max(1, min(len(args) , mpr.cpu_count()-gp.n_free_cores) )
 
@@ -1960,7 +1974,7 @@ def getPredPowersCV(clf,X,class_labels,class_ind, printLog = False, n_splits=Non
 
             for r in res:
                 # perfs_cur - 4-tuple
-                fold_type, model_cur,perfs_cur = r
+                split_ind, fold_type, model_cur,perfs_cur = r
                 if fold_type != 'regular':
                     res_fold_type_spec = r
                 else:
@@ -1968,6 +1982,9 @@ def getPredPowersCV(clf,X,class_labels,class_ind, printLog = False, n_splits=Non
                         models += [model_cur]
                         perfs_CV += [perfs_cur]
                         #indcv_indset += 1
+
+                retcur['test_indices_list'][split_ind] = test_indices[split_ind]
+
 
         # convert three performance measures to a single matrix for further
         # averaging
@@ -2459,7 +2476,7 @@ def makeClassLabels(sides_hand, grouping, int_types_to_distinguish,
     return class_labels, class_labels_good, revdict, class_ids_grouped, inds_not_neut
 
 def countClassLabels(class_labels_good, class_ids_grouped=None,revdict=None):
-    assert revdict is not None or (class_ids_grouped is not None)
+    #assert revdict is not None or (class_ids_grouped is not None)
     if isinstance (class_labels_good,np.ndarray):
         assert class_labels_good.ndim == 1
     elif not isinstance (class_labels_good,list):
@@ -2471,18 +2488,23 @@ def countClassLabels(class_labels_good, class_ids_grouped=None,revdict=None):
             lbl = revdict.get(cid, 'cid={}'.format(cid) )
             counts[lbl ] = num_cur
     else:
-        raise ValueError('to be debugged')
-        cids_used = []
-        class_names_used = []
-        for class_name in class_ids_grouped:
-            cid = class_ids_grouped[class_name]
-            if cid in cids_used:
-                class_name
-            else:
-                lbl = class_name
-            #print(cid)
-            num_cur = np.sum(class_labels_good == cid)
-            counts[lbl] = num_cur
+        if class_ids_grouped is None:
+            for cid in set(class_labels_good):
+                num_cur = np.sum(class_labels_good == cid)
+                counts[cid ] = num_cur
+        else:
+            raise ValueError('to be debugged')
+            cids_used = []
+            class_names_used = []
+            for class_name in class_ids_grouped:
+                cid = class_ids_grouped[class_name]
+                if cid in cids_used:
+                    class_name
+                else:
+                    lbl = class_name
+                #print(cid)
+                num_cur = np.sum(class_labels_good == cid)
+                counts[lbl] = num_cur
     return counts
 
 
@@ -2531,6 +2553,7 @@ def balanced_accuracy_pseudo_binary(y_true, y_pred, *, sample_weight=None,
     return score
 
 def getScoresPerClass(class_ids,scores, ret_bias=False):
+    # assumes shape  numpoints x numclasses x (numfeats  + 1)
     if scores.ndim == 2:
         lblinds = np.sort( np.unique(class_ids) )
     elif scores.ndim == 3:
@@ -3277,7 +3300,7 @@ def shapr_proxy(X_train, y_train, colnames=None, groups = None,
         else:
             explainer_group = shapr.shapr(r_from_pd_df, model, group=groups)
 
-        print(f'Starting corrected kernelShap (on {len(group)} groups)')
+        print(f'Starting corrected kernelShap (on {len(groups)} groups)')
 
         explanation = shapr.explain(
             r_from_pd_df,
@@ -3294,3 +3317,294 @@ def shapr_proxy(X_train, y_train, colnames=None, groups = None,
     numpy2ri.deactivate()
 
     return explanation
+
+
+def classSubsetInds(y,cid):
+    if isinstance(y,list):
+        y = np.array(y)
+    inds0 = np.where(y == cid) [0]
+    #print(inds0)
+    uy = np.unique(y)
+    inds_per_class = {}
+    for class_id in (set(uy) - set([cid])):
+        inds_cur = np.where(y == class_id)[0]
+        inds_cur_full = np.append(inds0,inds_cur)
+        #print(inds_cur.shape,inds_cur_full.shape,inds0.shape)
+        inds_per_class[(cid,class_id)] = inds_cur_full
+    return inds_per_class
+
+
+def _computeEBM(X,y,EBM,ebm_creopts,revdict, class_ind_to_check_lenc, n_splits=5,
+               EBM_CV=0, featnames_ebm=None, tune_params = False,
+                params_space = None, max_evals = 20):
+    import itertools
+    from interpret.glassbox.ebm.utils import EBMUtils
+    from sklearn.utils.class_weight import compute_sample_weight
+    from sklearn.model_selection import train_test_split
+    from utils_postprocess_HPC import EBMlocExpl2scores
+
+    from interpret.glassbox import ExplainableBoostingClassifier as _EBM
+    from interpret.privacy import DPExplainableBoostingClassifier as _DPEBM
+
+    do_oversample = 1
+    if do_oversample:
+        from imblearn.over_sampling import RandomOverSampler
+        oversample = RandomOverSampler(sampling_strategy='minority')
+        X_orig,y_orig = X,y
+        X,y = oversample.fit_resample(X,y)
+
+    if tune_params:
+        ebm_creopts_loc = dict(ebm_creopts.items())  # make a copy
+        from hyperopt import fmin,tpe, Trials, STATUS_OK
+        if EBM == _DPEBM:
+            q = 1e-1
+            qX = np.quantile(X,[q,1-q], axis=0) # 2 x X.shape[0]
+            privacy_schema = dict( zip( range(X.shape[0]), list( zip(*qX) )  ) )
+            privacy_schema['target'] = (0,0)  # it will not be used
+            ebm_creopts_loc['composition'] = 'gdp'
+            ebm_creopts_loc['privacy_schema'] = privacy_schema
+
+        from sklearn.model_selection import cross_val_score
+
+        def objective(space_loc):
+            import time
+            st_time = time.time()
+            ebm_creopts_locloc = dict(ebm_creopts_loc.items())
+            ebm_creopts_locloc.update(space_loc)
+
+            #model = EBM(**space_loc)
+            model = EBM(**ebm_creopts_locloc)
+            accuracy = cross_val_score(model,X,y,cv=4, scoring='balanced_accuracy').mean()
+
+            return {'loss':-accuracy, 'status':STATUS_OK,
+                    'creopts':ebm_creopts_loc, 'effparams':space_loc,
+                    'time':time.time() - st_time}
+
+        trials = Trials()
+        best = fmin(fn=objective, space=params_space, algo=tpe.suggest, max_evals=max_evals, trials=trials)
+
+        trial_ind = np.argmin( trials.losses() )
+        best_detailed = trials.results[ trial_ind ]['creopts']
+        ebm_creopts_loc.update(best_detailed )
+        ebm_creopts = ebm_creopts_loc
+    else:
+        trials = None
+
+    r0_ebm = None
+    perf_per_cp = None
+    ebm_merged = None
+    if EBM_CV:
+        ebm = EBM(**ebm_creopts)
+        if do_oversample:
+            class_weights_cur = None
+        else:
+            class_weights_cur = compute_sample_weight('balanced',y)
+
+        ebm.fit(X, y, sample_weight=class_weights_cur)
+
+        r0_ebm = getPredPowersCV(ebm,X,y,
+                class_ind_to_check_lenc, printLog = True, n_splits=n_splits,
+                ret_clf_obj=True, skip_noCV =False, add_fitopts={},
+                add_clf_creopts =ebm_creopts, train_on_shuffled =False, seed=0,
+                group_labels=None )
+        sens,spec, F1 = r0_ebm['perf_aver']
+        confmat  = r0_ebm['confmat_aver']
+
+        perf_per_cp = {}
+        uls = list(set(y))
+        if len( uls  ) == 2:
+            for icv,ebm_cur in enumerate(r0_ebm['clf_objs']):
+                inds_cur = r0_ebm['test_indices_list' ][icv]
+                inds_per_cp = classSubsetInds(y[inds_cur], class_ind_to_check_lenc)
+                for cp,inds_cur_cp in inds_per_cp.items():
+                    if cp not in perf_per_cp:
+                        perf_per_cp[cp] = []
+
+                    XX,yy = X[inds_cur_cp],y[inds_cur_cp]
+                    #print('fdsfs')
+                    perf_cur = getClfPredPower(ebm_cur,XX,yy,
+                        class_ind_to_check_lenc, printLog=False)
+                    #import pdb; pdb.set_trace()
+                    perf_per_cp[cp] += [perf_cur]
+
+            for cp,inds_cur_cp in inds_per_cp.items():
+                confmats = [p[-1] for p in perf_per_cp[cp] ]
+                confmats = [ confmatNormalize(cm, 'true') for cm in np.array(confmats) ]
+                confmat_aver =  np.mean( np.array(confmats), axis=0 )
+
+                perfarr = np.vstack( [ (p[0],p[1],p[2])  for p in perf_per_cp[cp]]  )
+                perf_aver = np.mean(perfarr , axis = 0)
+
+                d = {'confmat_aver':confmat_aver, 'perf_aver':perf_aver }
+                perf_per_cp[cp] += [  d  ]
+        else:
+            from utils_postprocess_HPC import perfFromConfmat
+            class_pairs = list(itertools.combinations(uls, 2))
+            perf_per_cp = {}
+            for cp in class_pairs:
+                c1,c2 = cp
+                confmat_aver = confmat[[c1,c2],:][:,[c1,c2] ]
+                ind = c1
+                if c2 == class_ind_to_check_lenc:
+                    ind = c2
+                perf_aver = perfFromConfmat(confmat,ind)
+                d = {'confmat_aver':confmat_aver, 'perf_aver':perf_aver }
+                perf_per_cp[cp] = [ d  ]
+
+
+        merge_EBMs = 0
+        if merge_EBMs:
+            ebm_merged = EBMUtils.merge_models(models=r0_ebm['clf_objs'])
+            local_exp = ebm_merged.explain_local(X,y)
+            scores_cur,true_labels,predicted_labels, featnames_out = \
+                EBMlocExpl2scores(local_exp.data(), inc_interactions=False)
+            scores = np.mean(scores_cur)
+        else:
+            scores_list = []
+            for ebm_cur in r0_ebm['clf_objs']:
+                # don't forget that we explain model, not data
+                local_exp = ebm_cur.explain_local(X,y)
+                #local_exp = ebm_cur.explain_local(X,y)
+                expl_data = local_exp.data()
+                if expl_data is None:
+                    expl_data = ebm_cur.explain_local(X,y)._internal_obj['specific']
+                #return ebm_cur,expl_data
+                scores_cur,true_labels,predicted_labels, featnames_out = \
+                    EBMlocExpl2scores(expl_data, inc_interactions=False)
+                assert tuple(featnames_out) == tuple(featnames_ebm)
+                scores_list += [scores_cur]
+                assert scores_cur.shape[0] == X.shape[0]
+            scores = np.mean(np.array(scores_list), axis=0)
+
+        confmat_normalized = r0_ebm['confmat_aver']
+        #print('scores cur shape ', scores_cur.shape)
+        #print('scores ', scores_cur.shape)
+        #import pdb; pdb.set_trace()
+    else:
+        X_train, X_test, y_train, y_test = \
+            train_test_split(X, y, test_size=0.20, random_state=0, shuffle=True)
+        ebm = EBM(**ebm_creopts)
+        if do_oversample:
+            class_weights_cur = None
+        else:
+            class_weights_cur = compute_sample_weight('balanced',y_train)
+        ebm.fit(X_train, y_train, sample_weight=class_weights_cur)
+        local_exp = ebm.explain_local(X,y)
+        if expl_data is None:
+            expl_data = ebm_cur.explain_local(X,y)._internal_obj['specific']
+
+        sens,spec, F1, confmat  = \
+            getClfPredPower(ebm,X_test,y_test,class_ind_to_check_lenc, printLog=False)
+        confmat_normalized = confmatNormalize(confmat) * 100
+        print(f'confmat_normalized_true (pct) = {confmat_normalized}')
+
+        inds_per_cp = classSubsetInds(y_test, class_ind_to_check_lenc)
+        perf_per_cp = {}
+        for cp,inds_cur_cp in inds_per_cp.items():
+            perfs = []
+            XX,yy = X_test[inds_cur_cp],y_test[inds_cur_cp]
+            perf_cur = getClfPredPower(ebm,XX,yy,
+                class_ind_to_check_lenc, printLog=False)
+            perfs += [perf_cur]
+            perf_per_cp[cp] = perfs
+
+        for cp,inds_cur_cp in inds_per_cp.items():
+            confmats = [p[-1] for p in perf_per_cp[cp] ]
+            confmats = [ confmatNormalize(cm, 'true') for cm in np.array(confmats) ]
+            confmat_aver =  np.mean( np.array(confmats), axis=0 )
+
+            perfarr = np.vstack( [ (p[0],p[1],p[2])  for p in perf_per_cp[cp]]  )
+            perf_aver = np.mean(perfarr , axis = 0)
+
+            d = {'confmat_aver':confmat_aver, 'perf_aver':perf_aver }
+            perf_per_cp[cp] += [  d  ]
+
+    global_exp = ebm.explain_global()
+    # extracting data from explainer
+    scores = global_exp.data()['scores']
+    names  = global_exp.data()['names']
+    sis = np.argsort(scores)[::-1]
+    featnames_srt = np.array(names)[sis]
+    nfs = np.nan
+    if len(sis) > 1:
+        nfs = scores[ sis[1] ]
+    print(f'EBM: Strongest feat is {featnames_srt[0]}'
+            f'with score {scores[sis[0] ]}'
+            f' ,next feat score is {nfs}')
+
+
+    info_cur = {}
+    info_cur['scores'] = scores
+    info_cur['ebmobj'] = ebm
+    info_cur['ebm_mergedobj'] = ebm_merged
+    info_cur['explainer'] = global_exp
+    info_cur['explainer_loc'] = local_exp
+    info_cur['perf'] = sens,spec, F1, confmat
+    info_cur['perf_dict'] = r0_ebm
+    info_cur['confmat_normalized'] = confmat_normalized
+    info_cur['feature_names']= names
+    info_cur['perf_per_cp' ] = perf_per_cp
+    info_cur['ebm_creopts'] = ebm_creopts
+    info_cur['hyperopt_trials'] = trials
+    res = info_cur
+
+        #featsel_info.update(info_cur)
+    return res
+
+
+def computeEBM(X,y,EBM,ebm_creopts,revdict, class_ind_to_check_lenc, n_splits=5,
+               EBM_compute_pairwise=0,EBM_CV=0, featnames_ebm=None,
+               tune_params = False, params_space = None, max_evals = 20 ):
+    import itertools
+    from interpret.glassbox.ebm.utils import EBMUtils
+    from sklearn.utils.class_weight import compute_sample_weight
+
+    if EBM_compute_pairwise:
+        uls = list(set(y))
+        class_pairs = list(itertools.combinations(uls, 2))
+        print(class_pairs)
+
+        info_per_cp = {}
+        #cpi = 0
+        for cpi,(c1,c2) in enumerate(class_pairs):
+            inds1 = np.where(y == c1)[0]
+            inds2 = np.where(y == c2)[0]
+
+            inds = np.append(inds1,inds2)
+            indpair_names = revdict[c1],revdict[c2]
+
+            print(f'Starting computing EBM for class pair {indpair_names}, in total {len(inds)}'+
+                f'=({len(inds1)}+{len(inds2)}) data points')
+            # filter classes
+            X_cur_cp = X[inds]
+            y_cur_cp = y[inds]
+
+            info_cur_cp = _computeEBM(X,y,EBM,ebm_creopts,revdict, class_ind_to_check_lenc,
+                n_splits=n_splits, EBM_CV=EBM_CV, featnames_ebm=featnames_ebm,
+                                      tune_params = tune_params,
+                                      params_space = params_space, max_evals = max_evals)
+
+            #global_exp = info_cur_cp['explainer']
+            ## extracting data from explainer
+            #scores = global_exp.data()['scores']
+            #names  = global_exp.data()['names']
+            #sis = np.argsort(scores)[::-1]
+            #featnames_srt = np.array(names)[sis]
+            #print(f'EBM: Strongest feat is {featnames_srt[0]}')
+
+            info_per_cp['data_point_inds'] = inds
+            info_per_cp[indpair_names ] = info_cur_cp
+
+        res = info_per_cp
+    else:
+        print('Starting computing EBM for all classes')
+
+        # filter classes
+
+        info_cur = _computeEBM(X,y,EBM,ebm_creopts,revdict, class_ind_to_check_lenc,
+            n_splits=n_splits, EBM_CV=EBM_CV, featnames_ebm=featnames_ebm,
+                        tune_params = tune_params, params_space = params_space, max_evals = max_evals)
+        res = info_cur
+
+        #featsel_info.update(info_cur)
+    return res

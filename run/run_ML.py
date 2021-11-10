@@ -189,6 +189,8 @@ EBM_compute_pairwise = 1
 EBM_featsel_feats = ['VIFsel']  # 'all','best_LFP', 'heavy' are also possible
 featsel_on_VIF = 1
 EBM_CV = 0
+EBM_tune_param = False
+EBM_tune_max_evals = 30
 
 XGB_featsel_feats = ['VIFsel']
 
@@ -204,7 +206,7 @@ groupings_to_use = [ 'merge_nothing' ]
 #int_types_to_use = gv.int_types_to_include
 int_types_to_use = [ 'basic', 'trem_vs_quiet' ]
 featsel_methods = []
-featsel_methods_all_possible = ['interpret_EBM', 'XGB_Shapley', 'SHAP_XGB' ]
+featsel_methods_all_possible = ['interpret_EBM', 'interpret_DPEBM', 'XGB_Shapley', 'SHAP_XGB' ]
 selMinFeatSet_after_featsel = 'XGB_Shapley'
 do_XGB_SHAP_twice = 1
 
@@ -248,6 +250,7 @@ opts, args = getopt.getopt(effargv,"hr:n:s:w:p:",
          "selMinFeatSet_after_featsel=", "n_jobs=", "label_groups_to_use=",
          "SLURM_job_id=", "featsel_only_best_LFP=",
          "XGB_max_depth=", "XGB_min_child_weight=", "XGB_tune_param=",
+         "EBM_tune_param=", "EBM_tune_max_evals=",
          "EBM_compute_pairwise=", "EBM_featsel_feats=", 'XGB_featsel_feats=',
          "featsel_on_VIF=", "custom_rawname_str=",
          "do_cleanup=", "VIF_thr=", "VIF_search_worst=", "compute_ICA=",
@@ -340,6 +343,10 @@ for opt,arg in pars.items():
         XGB_min_child_weight = int(arg)
     elif opt == "XGB_tune_param":
         XGB_tune_param = int(arg)
+    elif opt == "EBM_tune_param":
+        EBM_tune_param = int(arg)
+    elif opt == "EBM_tune_max_evals":
+        EBM_tune_max_evals = int(arg)
     elif opt == "calc_VIF":
         calc_VIF = int(arg)
     elif opt == "savefile_rawname_format":
@@ -2348,7 +2355,22 @@ if do_Classif:
                     featsel_info = {}
                     shap_values = None
                     explainer = None
-                    if fsh == 'SHAP_XGB':
+                    if fsh == 'shapr':
+                        for featsel_feat_subset_name in shapr_featsel_feats:
+                            featis = np.arange(Xconcat_good_cur.shape[-1])
+                            if featsel_feat_subset_name == 'all':
+                                featis = np.arange(Xconcat_good_cur.shape[-1])
+                            elif featsel_feat_subset_name == 'heavy':
+                                featis = feat_inds_for_heavy
+
+                        X_shapr = Xconcat_good_cur[::subskip_fit, featis]
+                        y_shapr = class_labels_good_for_classif
+
+                        featnames_ebm = np.array(featnames_nice_for_fit)[featis]
+                        expl = utsne.shapr_proxy(X_shapr, y_train, colnames=None, groups = None,
+                                        n_samples=200, n_batches=1, class_weights=None,
+                                        add_clf_creopts={}, n_combinations=None)
+                    elif fsh == 'SHAP_XGB':
                         import shap
                         #X = Ximp_per_raw[rncur][prefix]
                         #X_to_fit = X[gi]
@@ -2463,10 +2485,13 @@ if do_Classif:
                             some_computed = True
                         if not some_computed:
                             print(f'!Warning!: no XGB featsel computed, XGB_featsel_feats = {XGB_featsel_feats}')
-                    elif fsh == 'interpret_EBM':
+                    elif fsh in [ 'interpret_EBM', 'interpret_DPEBM' ]:
                         import itertools
                         import interpret
-                        from interpret.glassbox import ExplainableBoostingClassifier
+                        if fsh == 'interpret_EBM':
+                            from interpret.glassbox import ExplainableBoostingClassifier as EBM
+                        else:
+                            from interpret.privacy import DPExplainableBoostingClassifier as EBM
 
                         # since EBM only works for binary, I treat each pair of classes separately
                         EBM_seed = 0
@@ -2497,174 +2522,80 @@ if do_Classif:
                                 raise ValueError(f'unknown feat subset name {featsel_feat_subset_name}')
 
                             print(f'Starting {fsh} for featsel_feat_subset_name = {featsel_feat_subset_name}')
+                            featnames_ebm = np.array(featnames_nice_for_fit)[featis]
 
                             ebm_params = {}
                             ebm_params['n_jobs'] =n_jobs
                             #ebm_params['min_samples_leaf']=add_clf_creopts['min_child_weight']
                             ebm_params['random_state']=EBM_seed
-                            #ebm_params['binning'] = 'quantile'
-                            featnames_ebm = np.array(featnames_nice_for_fit)[featis]
+                            # outer_bags=8
+                            #  validation_size=0.15,
+                            #  ebm_params['binning'] = 'quantile'
+                            #  min_samples_leaf=2,
+                            #  max_leaves=3,
+                            # interactions=10,
+                            # learning_rate=0.01
+
+                            from hyperopt import hp
+                            X_EBM = Xconcat_good_cur[::subskip_fit, featis]
+                            y_EBM = class_labels_good_for_classif
+
+
+                            if fsh == 'interpret_EBM':
+                                ebm_params['min_samples_leaf']=3
+
+                                params_space = { 'max_bins': hp.choice('max_bins',[64,128,256,384, 512]),
+                                    'outer_bags':hp.choice('outer_bags',[2,4,8,12,16]),
+                                    'learning_rate':hp.choice('learning_rate',[1e-3,5e-3,1e-2,2e-2]),
+                                    'validation_size':hp.choice('validation_size',[0.10,0.15, 0.2, 0.3]),
+                                    'min_samples_leaf':hp.choice('min_samples_leaf',[2,3,4,5,7]),
+                                    'max_leaves':hp.choice('max_leaves',[2,3,5,7]),
+                                    'binning': hp.choice('binning',['quantile','quantile_humanized', 'uniform'])
+                                    }
+                                if len(numpoints_per_class_id) > 2:
+                                    nfeats = len(featnames_ebm)
+                                    interaction_d = {'interactions': hp.quniform('interactions',0, (nfeats*(nfeats-1) // 2),1),
+                                    'max_interaction_bins':hp.choice('max_interaction_bins', [16,32,64])
+                                    }
+                                    space.update(interaction_d)
+
+                            elif fsh == 'interpret_DPEBM':
+                                ebm_params['min_samples_leaf']=3
+
+                                params_space = {  'max_bins': hp.choice('max_bins',[16,32,64,128,256]),
+                                #quantile_humanized
+                                    'outer_bags':hp.choice('outer_bags',[1,2,4,8]),
+                                    'learning_rate':hp.choice('learning_rate',[1e-3,5e-3,1e-2,2e-2]),
+                                    #'validation_size':hp.choice('validation_size',[0., 0.10, 0.2, 0.3]),
+                                    'min_samples_leaf':hp.choice('min_samples_leaf',[2,3,4,5,7]),
+                                    'max_leaves':hp.choice('max_leaves',[2,3,5,7]),
+                                    'bin_budget_frac':hp.choice( 'bin_budget_frac', [0.05, 0.1, 0.2] ) ,
+                                    'epsilon': hp.choice('epsilon', [0.75, 1, 1.25]),
+                                    'delta': hp.choice('delta', [1e-6, 1e-5, 2e-5, 1e-4, 1e-3])
+                                }
+
+                                if len(set(y_EBM) ) != 2:
+                                    print(f'Cannot do {fsh} for multiclass, skipping')
+                                    continue
+
                             ebm_creopts = {'feature_names': featnames_ebm}
                             ebm_creopts.update(ebm_params)
 
-                            if EBM_compute_pairwise:
-                                featsel_info[featsel_feat_subset_name] = {}
-
-                                EBM_result_per_cp= {}
-                                indpairs_names = []
-
-                                X = Xconcat_good_cur[::subskip_fit, featis]
-                                y = class_labels_for_heavy
-
-                                uls = list(set(class_labels_for_heavy))
-                                class_pairs = list(itertools.combinations(uls, 2))
-                                print(class_pairs)
-
-                                info_per_cp = {}
-                                #cpi = 0
-                                for cpi,(c1,c2) in enumerate(class_pairs):
-                                    inds1 = np.where(class_labels_for_heavy == c1)[0]
-                                    inds2 = np.where(class_labels_for_heavy == c2)[0]
-
-                                    inds = np.hstack((inds1,inds2))
-                                    indpair_names = revdict[c1],revdict[c2]
-
-                                    print(f'Starting computing EBM for class pair {indpair_names}, in total {len(inds)}'+
-                                        f'=({len(inds1)}+{len(inds2)}) data points')
-                                    # filter classes
-                                    X_cur_cp = X[inds]
-                                    y_cur_cp = y[inds]
-
-                                    from sklearn.model_selection import train_test_split
-                                    X_train, X_test, y_train, y_test = train_test_split(X_cur_cp, y_cur_cp,
-                                        test_size=0.20, random_state=1, shuffle=True)
-
-
-                                    #%debug
-                                    r0_ebm = None
-                                    if EBM_CV:
-                                        r0_ebm = utsne.getPredPowersCV(ebm,X_cup_cp,y_cur_cp,
-                                                class_ind_to_check_lenc, printLog = False, n_splits=n_splits,
-                                                ret_clf_obj=True, skip_noCV =False, add_fitopts={},
-                                                add_clf_creopts =ebm_creopts, train_on_shuffled =False, seed=0,
-                                                group_labels=None )
-                                    else:
-                                        ebm = ExplainableBoostingClassifier( **ebm_creopts)
-
-                                        class_weights_cur = compute_sample_weight('balanced',y_train)
-                                        ebm.fit(X_train, y_train, sample_weight=class_weights_cur)
-                                        global_exp = ebm.explain_global()
-                                        # or maybe better to put test dataset?
-                                        local_exp = ebm.explain_local(X_cur_cp,y_cur_cp)
-
-                                        sens,spec, F1, confmat  = utsne.getClfPredPower(ebm,\
-                                            X_test,y_test,class_ind_to_check, printLog=False)
-                                        confmat_normalized = utsne.confmatNormalize(confmat) * 100
-                                        print(f'confmat_normalized_true (pct) = {confmat_normalized}')
-
-                                    EBM_result_per_cp[indpair_names] = global_exp
-                                    indpairs_names += [indpair_names]
-
-                                    # extracting data from explainer
-                                    scores = global_exp.data()['scores']
-                                    names  = global_exp.data()['names']
-                                    sis = np.argsort(scores)[::-1]
-                                    featnames_srt = np.array(names)[sis]
-                                    print(f'EBM: Strongest feat is {featnames_srt[0]}')
-
-
-                                    info_cur = {}
-                                    info_cur['scores'] = scores
-                                    info_cur['ebmobj'] = ebm
-                                    info_cur['explainer'] = global_exp
-                                    info_cur['explainer_loc'] = local_exp
-                                    info_cur['perf'] = sens,spec, F1, confmat
-                                    info_cur['confmat_normalized'] = confmat_normalized
-                                    # I want a duplicate becasue I might delete
-                                    # explainer since it is too large
-                                    info_cur['feature_names']= names
-
-                                    info_per_cp[indpair_names ] = info_cur
-
-                                featsel_info[featsel_feat_subset_name]['info_per_cp'] = info_per_cp
-                            else:
-                                print('Starting computing EBM for all classes')
-
-                                # filter classes
-                                X = Xconcat_good_cur[::subskip_fit, featis]
-                                y = class_labels_for_heavy
-
-                                from sklearn.model_selection import train_test_split
-                                X_train, X_test, y_train, y_test = \
-                                    train_test_split(X, y, test_size=0.20, random_state=0, shuffle=True)
-
-
-
-                                r0_ebm = None
-                                if EBM_CV:
-                                    ebm = ExplainableBoostingClassifier(**ebm_creopts)
-                                    class_weights_cur = compute_sample_weight('balanced',y)
-                                    ebm.fit(X, y, sample_weight=class_weights_cur)
-
-                                    r0_ebm = utsne.getPredPowersCV(ebm,X,y,
-                                            class_ind_to_check_lenc, printLog = False, n_splits=n_splits,
-                                            ret_clf_obj=True, skip_noCV =False, add_fitopts={},
-                                            add_clf_creopts =ebm_creopts, train_on_shuffled =False, seed=0,
-                                            group_labels=None )
-                                    sens,spec, F1 = r0_ebm['perf_aver']
-                                    confmat  = r0_ebm['confmat_aver']
-
-                                    from utils_postprocess_HPC import EBMlocExpl2scores
-                                    scores_list = []
-                                    for ebm_cur in r0_ebm['clf_objs']:
-                                        local_exp = ebm_cur.explain_local(X,y)
-                                        scores_cur,true_labels,predicted_labels, featnames_out = \
-                                            EBMlocExpl2scores(local_exp, inc_interactions=False)
-                                        assert tuple(featnames_out) == tuple(featnames_ebm)
-                                        scores_list += [scores_cur]
-                                    scores = np.mean(scores_cur)
-                                else:
-                                    ebm = ExplainableBoostingClassifier(ebm_creopts)
-                                    class_weights_cur = compute_sample_weight('balanced',y_train)
-                                    ebm.fit(X_train, y_train, sample_weight=class_weights_cur)
-                                    local_exp = ebm.explain_local(X,y)
-
-                                    sens,spec, F1, confmat  = \
-                                        utsne.getClfPredPower(ebm,X_test,y_test,class_ind_to_check, printLog=False)
-                                    confmat_normalized = utsne.confmatNormalize(confmat) * 100
-                                    print(f'confmat_normalized_true (pct) = {confmat_normalized}')
-
-                                global_exp = ebm.explain_global()
-                                # extracting data from explainer
-                                scores = global_exp.data()['scores']
-                                names  = global_exp.data()['names']
-                                sis = np.argsort(scores)[::-1]
-                                featnames_srt = np.array(names)[sis]
-                                nfs = np.nan
-                                if len(sis) > 1:
-                                    nfs = scores[ sis[1] ]
-                                print(f'EBM: Strongest feat is {featnames_srt[0]}'
-                                      f'with score {scores[sis[0] ]}'
-                                      f' ,next feat score is {nfs}')
-
-
-                                info_cur = {}
-                                info_cur['scores'] = scores
-                                info_cur['ebmobj'] = ebm
-                                info_cur['explainer'] = global_exp
-                                info_cur['explainer_loc'] = local_exp
-                                info_cur['perf'] = sens,spec, F1, confmat
-                                info_cur['perf_dict'] = r0_ebm
-                                info_cur['confmat_normalized'] = confmat_normalized
-                                info_cur['feature_names']= names
-                                info_cur['feature_indices_used'] = featis
-                                #featsel_info.update(info_cur)
-                                featsel_info[featsel_feat_subset_name] = info_cur
+                            info_cur = utsne.computeEBM(X_EBM,y_EBM,EBM,ebm_creopts,revdict,
+                                    class_ind_to_check_lenc, n_splits=n_splits,
+                                    EBM_compute_pairwise=EBM_compute_pairwise,
+                                    EBM_CV=EBM_CV, featnames_ebm=featnames_ebm,
+                                    tune_params = EBM_tune_param, params_space=params_space,
+                                                        max_evals=EBM_tune_max_evals)
+                            info_cur['feature_indices_used'] = featis
+                            featsel_info[featsel_feat_subset_name] = info_cur
 
                         usage = getMemUsed();
                     else:
                         raise ValueError(f'{fsh} not implemented')
 
+                    # results_cur['featsel_per_method']['XGB_Shapley'][sbuset_name][scores]
+                    # results_cur['featsel_per_method']['XGB_Shapley'][sbuset_name][info_per_cp][cp][scores]
                     # this one is not informative! left for compatibility
                     #featsel_info['feature_indices_used'] = featis
                     featsel_per_method[fsh] = featsel_info

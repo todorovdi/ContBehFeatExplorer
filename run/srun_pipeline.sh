@@ -197,12 +197,12 @@ fi
 ######## common for ML and nlproj
 #if [ -z ${var+x} ]; then echo "var is unset"; else echo "var is set to '$var'"; fi
             PREFIX_ALL_FEATS=0
-               PREFIXES_MAIN=0
+               PREFIXES_MAIN=1
                 PREFIXES_TMP=0
                PREFIXES_TMP2=0
                PREFIXES_TMP3=0
-               PREFIXES_TMP4=1
-      PREFIXES_CROSS_MOD_AUX=0
+               PREFIXES_TMP4=0
+      PREFIXES_CROSS_MOD_AUX=1
             PREFIXES_AUX_SRC=0
 PREFIXES_CROSS_BPCORR_SUBMOD=0
 PREFIXES_CROSS_BPCORR_SUBMOD_ORDBAND=0
@@ -366,11 +366,11 @@ if [ $do_ML -gt 0 ]; then
       fi
       RUNSTRING_CUR=' $RS --mods LFP                               --prefix modLFP               '
       RUNSTRINGS+=("$RUNSTRING_CUR")
-      RUNSTRING_CUR=' $RS --self_couplings_only 1 --mods msrc      --prefix modSrc_self  '
+      RUNSTRING_CUR=' $RS --feat_types H_act                     --prefix onlyH_act '        
       RUNSTRINGS+=("$RUNSTRING_CUR")
       RUNSTRING_CUR=' $RS --feat_types H_act,H_mob,H_compl        --prefix onlyH           '        
       RUNSTRINGS+=("$RUNSTRING_CUR")
-      RUNSTRING_CUR=' $RS --feat_types H_act                     --prefix onlyH_act '        
+      RUNSTRING_CUR=' $RS --self_couplings_only 1 --mods msrc      --prefix modSrc_self  '
       RUNSTRINGS+=("$RUNSTRING_CUR")
       RUNSTRING_CUR=' $RS --mods msrc         --prefix modSrc      '              
       RUNSTRINGS+=("$RUNSTRING_CUR")

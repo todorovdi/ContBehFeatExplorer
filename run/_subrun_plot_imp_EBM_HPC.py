@@ -18,7 +18,10 @@ legend_alpha = .3
 
 suptitle_to_put_ = ''
 #legend_loc = 'lower right'
-legend_loc = -1,0.5
+legend_loc = 0.5,-0.1
+legend_loc = 1,0
+
+legend2_loc = 1,0
 
 load_explainers = True
 
@@ -27,6 +30,8 @@ max_nfeats_to_sum = None
 
 markers_mean = ['o','*']
 markers_max = ['x','+']
+
+markers_per_subj = True
 #markers_mean = [r'$\mathbf{' +f'{int(subj[0][1:])}' + r'}$' for subj in outputs_grouped.keys()]
 #markers_max = [r'$\tilde{' + f'{int(subj[0][1:])  }' + r'}$' for subj in outputs_grouped.keys()]
 
@@ -57,6 +62,24 @@ for tpl_ in pref_hh_tuples:
     if not len(outputs_grouped):
         print(f'{prefix_cur}: Found not outputs.. skipping')
         continue
+
+
+    if markers_per_subj:
+        markers_mean, markers_max = [], []
+        for keystr_tpl in outputs_grouped.keys():
+            keystr = keystr_tpl[0]
+            medstate = keystr[4:]
+            si =  int(keystr[1:3])
+            if medstate == 'off':
+                s =  r'$\mathbf{' +f'{si}' + r'}$'
+                s2 = r'$\tilde{'  +f'{si}' + r'}$'
+            elif medstate == 'on':
+                s =  r'$\mathbf{' +f'{si}' + r'}^o$'
+                s2 = r'$\tilde{'  +f'{si}' + r'}^o$'
+            else:
+                raise ValueError
+            markers_mean += [ s ]
+            markers_max  += [ s2 ]
 
     #pp.printDict(outputs_grouped,1,print_leaves=1)
 
@@ -158,6 +181,12 @@ for tpl_ in pref_hh_tuples:
 
             plt.tight_layout()
             pdf.savefig();    plt.close()
+
+            #remove_perf_legend = 1
+            #if remove_perf_legend:
+            if legend2_loc is not None:
+                #axs[0,-2].legend(loc=legend2_loc )
+                axs[0,-2].get_legend().remove()
 
     cax,clrb = postp.plotConfmats(outputs_grouped, best_LFP=0, ww=9,hh=9)
     kind = ';'.join( list( outputs_grouped.values() )[0][0] )

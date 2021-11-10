@@ -2614,7 +2614,7 @@ def plotFeatSignifEBM_list(pdf, outputs_grouped, fshs=['interpret_EBM'],
                             axs=None, grand_average_per_feat_type=1,
                             featsel_feat_subset_name='all', perf_marker_size = 25,
                             cross_source_groups = False, indivd_imp_xtick_pad=-300,
-                          max_nfeats_to_sum = 20 ):
+                          max_nfeats_to_sum = 20, legend_loc = 'lower right' ):
     '''
     fshs -- names of featsel method to use
     '''
@@ -2935,7 +2935,8 @@ def plotFeatSignifEBM_list(pdf, outputs_grouped, fshs=['interpret_EBM'],
                            [ perfs_actual[0] * 100 ], c='purple',
                             marker = marker_mean, s=perf_marker_size,
                            label='EMB_perf')
-                ax.legend(loc='lower right')
+
+                ax.legend(loc=legend_loc)
 
                 ax.set_xlabel('spec')
                 ax.set_ylabel('sens')
@@ -4494,54 +4495,6 @@ def perfFromConfmat(confmat,ind):
         sens,spec = np.array(ps).mean(axis=0)
         return sens,spec
 
-def EBMlocExpl2scores(loc_expls, inc_interactions=False):
-    #from utils_postprocess_HPC import splitScoresEBM
-    num_classes = len(loc_expls[0]['meta']['label_names'])
-
-    featnames0 = loc_expls[0]['names']
-
-
-    # here actual order of the features is not important for me
-    inds_ni,fns_ni,_,_ = splitScoresEBM( np.arange(len(featnames0) ), featnames0  )
-
-    scs = []
-    fns = []
-    intercepts = []
-    true_labels = []
-    predicted_labels = []
-    for d in loc_expls:
-        scores = np.array( d['scores'] )
-        if num_classes == 2:
-            scores_neg = np.log( 1 - np.exp(scores) )
-            scores = np.vstack([scores,scores_neg])
-        else:
-            scores = scores.T   # id x nfeats
-        featnames = d['names']
-
-        assert tuple(featnames) == tuple(featnames0)
-
-        if not inc_interactions:
-            scores = scores[ :, inds_ni ]
-            featnames = np.array(featnames)[ inds_ni]
-
-        intercept_ind = 0
-        assert d['extra']['names'][intercept_ind] == 'Intercept', d['extra']['names'][intercept_ind]
-        intercept = d['extra']['scores'][intercept_ind]
-        true_label = d['perf']['actual']
-        predicted_label = d['perf']['predicted']
-
-        scs += [ scores]
-        fns += [featnames]
-        intercepts += [intercept]
-        true_labels += [true_label]
-        predicted_labels += [predicted_label]
-
-
-    scores = np.array( scs)
-    intercepts = np.array(intercepts)
-    print(scores.shape, intercepts.shape)
-    res = np.concatenate([scores,intercepts[:,:,None]],axis=-1)
-    return res,true_labels,predicted_labels, featnames
 
 #TP+FN -- sensitiv  -- total number of positives
 #TP+FP -- precision -- over all predicted as positive
@@ -4866,12 +4819,17 @@ def splitScoresEBM(scores,feature_names):
 
 
 def EBMlocExpl2scores(loc_expls, inc_interactions=False):
+    assert loc_expls is not None
     from utils_postprocess_HPC import splitScoresEBM
     num_classes = len(loc_expls[0]['meta']['label_names'])
 
     featnames0 = loc_expls[0]['names']
     # here actual order of the features is not important for me
     inds_ni,fns_ni,_,_ = splitScoresEBM( np.arange(len(featnames0) ), featnames0  )
+
+    #from scipy.stats import logistic
+    from scipy.special import expit
+    from scipy.special import logit
 
     scs = []
     fns = []
@@ -4881,7 +4839,8 @@ def EBMlocExpl2scores(loc_expls, inc_interactions=False):
     for d in loc_expls:
         scores = np.array( d['scores'] )
         if num_classes == 2:
-            scores_neg = np.log( 1 - np.exp(scores) )
+            # TODO: is it the correct formula?
+            scores_neg = expit( 1 - logit(scores) )
             scores = np.vstack([scores,scores_neg])
         else:
             scores = scores.T   # id x nfeats
@@ -4894,7 +4853,8 @@ def EBMlocExpl2scores(loc_expls, inc_interactions=False):
             featnames = np.array(featnames)[ inds_ni]
 
         intercept_ind = 0
-        assert d['extra']['names'][intercept_ind] == 'Intercept', d['extra']['names'][intercept_ind]
+        assert d['extra']['names'][intercept_ind] == 'Intercept',\
+            d['extra']['names'][intercept_ind]
         intercept = d['extra']['scores'][intercept_ind]
         true_label = d['perf']['actual']
         predicted_label = d['perf']['predicted']
@@ -4908,6 +4868,8 @@ def EBMlocExpl2scores(loc_expls, inc_interactions=False):
 
     scores = np.array( scs)
     intercepts = np.array(intercepts)
+    if num_classes == 2:
+        intercepts = np.array( [ intercepts , -intercepts ] ).T
     print(scores.shape, intercepts.shape)
     res = np.concatenate([scores,intercepts[:,:,None]],axis=-1)
     return res,true_labels,predicted_labels, featnames

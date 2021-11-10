@@ -629,14 +629,18 @@ def removeLargeItems(res_cur, keep_featsel=['XGB_Shapley','XGB_Shapley2','interp
                      remove_full_scores=True, verbose=0):
     featsel_methods = list(res_cur['featsel_per_method'] )
     for fsh in featsel_methods:
-        if fsh in keep_featsel:
+        if fsh not in keep_featsel:
+            del res_cur['featsel_per_method'][fsh]
+            continue
+
+        for ffsn in res_cur['featsel_per_method'][fsh]:
             if remove_full_scores:
                 class_labels_good = res_cur['class_labels_good']
                 revdict = res_cur['revdict']
                 from sklearn import preprocessing
                 lab_enc = preprocessing.LabelEncoder()
                 # just skipped class_labels_good
-                fspm_cur = res_cur['featsel_per_method'][fsh]
+                fspm_cur = res_cur['featsel_per_method'][fsh][ffsn]
                 if 'scores' in fspm_cur and fsh != 'interpret_EBM':
                     if 'scores_av' not in fspm_cur:
                         scores = fspm_cur['scores']
@@ -649,10 +653,10 @@ def removeLargeItems(res_cur, keep_featsel=['XGB_Shapley','XGB_Shapley2','interp
                         class_ids = lab_enc.transform(class_labels_good[::subskip_fit])
 
                         scores_av, bias = utsne.getScoresPerClass(class_ids,scores, ret_bias=1)
-                        res_cur['featsel_per_method'][fsh]['scores_av'] = scores_av
+                        res_cur['featsel_per_method'][fsh][ffsn]['scores_av'] = scores_av
 
-                        res_cur['featsel_per_method'][fsh]['scores_bias_av'] = bias
-                    del res_cur['featsel_per_method'][fsh]['scores']
+                        res_cur['featsel_per_method'][fsh][ffsn]['scores_bias_av'] = bias
+                    del res_cur['featsel_per_method'][fsh][ffsn]['scores']
 
                 for ts in ['explainer', 'explainer_loc', 'ebmobj']:
                     if ts in fspm_cur:
@@ -665,17 +669,13 @@ def removeLargeItems(res_cur, keep_featsel=['XGB_Shapley','XGB_Shapley2','interp
 
                     if fsh == 'interpret_EBM' and (ts not in fspm_cur):
                         for fsn,info_cur_ in fspm_cur.items():
-                            if ts in info_cur_:
+                            if isinstance(info_cur_,dict) and ts in info_cur_:
                                 del info_cur_[ts]
                             info_per_cp = fspm_cur.get('info_per_cp',None)
                             if info_per_cp is not None:
                                 for info_cur in info_per_cp.values():
                                     if ts in info_cur:
                                         del info_cur[ts]
-
-
-        else:
-            del res_cur['featsel_per_method'][fsh]
 
 
     if ('best_inds_XGB_fs' not in res_cur) and 'perfs_XGB_fs' in res_cur:
