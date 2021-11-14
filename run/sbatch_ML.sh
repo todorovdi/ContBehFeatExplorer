@@ -11,8 +11,9 @@
 
 #SBATCH --time=23:00:00
 #SBATCH --partition=batch
-#SBATCH --mem=80G
+#SBATCH --mem=128G
 
+##SBATCH --mem=80G
 ##SBATCH --partition=batch
 ##SBATCH --time=4:00:00
 ##SBATCH --mem=80G

@@ -1037,7 +1037,7 @@ def prepTableInfo3(output_per_raw, prefixes=None, perf_to_use_list = [('perfs_XG
         clf_type,perf_to_use,perf_red_to_use = tpl[:3]
         if len(tpl) == 4:
             perf_add = tpl[3]
-            print('AAAAAAAAAAAAAA',perf_add)
+            print('perf tuple has length 4',perf_add)
         else:
             perf_add = None
         info_per_rn_pref ={}

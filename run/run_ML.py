@@ -191,6 +191,9 @@ featsel_on_VIF = 1
 EBM_CV = 0
 EBM_tune_param = False
 EBM_tune_max_evals = 30
+EBM_balancing = 'auto'
+EBM_balancing_numfeats_thr = 120
+EBM_seed = 0
 
 XGB_featsel_feats = ['VIFsel']
 
@@ -345,6 +348,10 @@ for opt,arg in pars.items():
         XGB_tune_param = int(arg)
     elif opt == "EBM_tune_param":
         EBM_tune_param = int(arg)
+    elif opt == "EBM_balancing":
+        EBM_balancing = arg
+    elif opt == "EBM_balancing_numfeats_thr":
+        EBM_balancing_numfeats_thr = int(arg)
     elif opt == "EBM_tune_max_evals":
         EBM_tune_max_evals = int(arg)
     elif opt == "calc_VIF":
@@ -1270,6 +1277,16 @@ if do_Classif:
                         len(Xconcat_imputed),
                         rem_neut = discard_remaining_int_types_during_fit)
 
+                # same but without merging (will need for EBM)
+                class_labels_nm, class_labels_good_nm, revdict_nm, class_ids_grouped_nm,inds_not_neut_nm  = \
+                    utsne.makeClassLabels(sides_hand, gp.groupings['merge_nothing'],
+                        int_types_to_distinguish,
+                        ivalis_tb_indarrays_merged, bininds_noartif_nounlab,
+                        len(Xconcat_imputed),
+                        rem_neut = discard_remaining_int_types_during_fit)
+
+                assert len(class_labels_good_nm) == len(class_labels_good)
+
                 if discard_remaining_int_types_during_fit:
                     # then we have to remove the data points as well
                     #neq = class_labels_good != gp.class_id_neut
@@ -1777,6 +1794,10 @@ if do_Classif:
                 featnames_heavy = list(np.array(featnames_for_fit)[feat_inds_for_heavy] )
                 featnames_nice_heavy = list( np.array(featnames_nice_for_fit)[feat_inds_for_heavy] )
                 class_ind_to_check_lenc = lab_enc.transform([class_ind_to_check])[0]
+
+                revdict_lenc = {}
+                for k,kn in revdict.items():
+                    revdict_lenc[ lab_enc.transform([k] )[0]  ] = kn
                 ##########################3
 
                 add_fitopts = { 'eval_metric':'mlogloss' }
@@ -2494,7 +2515,6 @@ if do_Classif:
                             from interpret.privacy import DPExplainableBoostingClassifier as EBM
 
                         # since EBM only works for binary, I treat each pair of classes separately
-                        EBM_seed = 0
                         for featsel_feat_subset_name in EBM_featsel_feats:
                             featis = np.arange(Xconcat_good_cur.shape[-1])
                             if featsel_feat_subset_name == 'all':
@@ -2557,7 +2577,7 @@ if do_Classif:
                                     interaction_d = {'interactions': hp.quniform('interactions',0, (nfeats*(nfeats-1) // 2),1),
                                     'max_interaction_bins':hp.choice('max_interaction_bins', [16,32,64])
                                     }
-                                    space.update(interaction_d)
+                                    params_space.update(interaction_d)
 
                             elif fsh == 'interpret_DPEBM':
                                 ebm_params['min_samples_leaf']=3
@@ -2581,8 +2601,15 @@ if do_Classif:
                             ebm_creopts = {'feature_names': featnames_ebm}
                             ebm_creopts.update(ebm_params)
 
-                            info_cur = utsne.computeEBM(X_EBM,y_EBM,EBM,ebm_creopts,revdict,
-                                    class_ind_to_check_lenc, n_splits=n_splits,
+                            if EBM_balancing == 'auto':
+                                if X_EBM.shape[1] > EBM_balancing_numfeats_thr:
+                                    EMB_balancing_cur = 'weighting'
+                                else:
+                                    EMB_balancing_cur = 'oversample'
+
+                            info_cur = utsne.computeEBM(X_EBM,y_EBM,EBM,ebm_creopts,revdict_lenc,
+                                    class_ind_to_check_lenc, class_labels_good_nm, revdict_nm,
+                                    n_splits=n_splits,
                                     EBM_compute_pairwise=EBM_compute_pairwise,
                                     EBM_CV=EBM_CV, featnames_ebm=featnames_ebm,
                                     tune_params = EBM_tune_param, params_space=params_space,
@@ -2598,6 +2625,8 @@ if do_Classif:
                     # results_cur['featsel_per_method']['XGB_Shapley'][sbuset_name][info_per_cp][cp][scores]
                     # this one is not informative! left for compatibility
                     #featsel_info['feature_indices_used'] = featis
+                    #if fsh ==  'interpret_DPEBM':
+                    #    import pdb; pdb.set_trace()
                     featsel_per_method[fsh] = featsel_info
                     saveResToFolder(featsel_per_method, fsh,
                                     'featsel_per_method' )
@@ -2847,6 +2876,8 @@ if do_Classif:
                 savedict['results_cur'] =results_cur
 
                 np.savez(fname_ML_full_intermed, **savedict )
+
+                print('!!!!!!!!!!!!!  ',featsel_per_method.keys() )
 
                 results_cur_cleaned = pp.removeLargeItems(results_cur)
 

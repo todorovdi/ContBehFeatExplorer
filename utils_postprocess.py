@@ -625,23 +625,24 @@ def extractLightInfo(f):
 
     return removeLargeItems(res_cur)
 
-def removeLargeItems(res_cur, keep_featsel=['XGB_Shapley','XGB_Shapley2','interpret_EBM'],
+def removeLargeItems(res_cur, keep_featsel='all',
                      remove_full_scores=True, verbose=0):
     featsel_methods = list(res_cur['featsel_per_method'] )
     for fsh in featsel_methods:
-        if fsh not in keep_featsel:
+        if isinstance(keep_featsel,list) and fsh not in keep_featsel:
             del res_cur['featsel_per_method'][fsh]
             continue
 
+        # over feature subset names
         for ffsn in res_cur['featsel_per_method'][fsh]:
+            fspm_cur = res_cur['featsel_per_method'][fsh][ffsn]
             if remove_full_scores:
                 class_labels_good = res_cur['class_labels_good']
                 revdict = res_cur['revdict']
                 from sklearn import preprocessing
                 lab_enc = preprocessing.LabelEncoder()
                 # just skipped class_labels_good
-                fspm_cur = res_cur['featsel_per_method'][fsh][ffsn]
-                if 'scores' in fspm_cur and fsh != 'interpret_EBM':
+                if ('scores' in fspm_cur) and ( fsh not in [ 'interpret_EBM', 'interpret_DPEBM' ] ):
                     if 'scores_av' not in fspm_cur:
                         scores = fspm_cur['scores']
 
@@ -658,24 +659,32 @@ def removeLargeItems(res_cur, keep_featsel=['XGB_Shapley','XGB_Shapley2','interp
                         res_cur['featsel_per_method'][fsh][ffsn]['scores_bias_av'] = bias
                     del res_cur['featsel_per_method'][fsh][ffsn]['scores']
 
-                for ts in ['explainer', 'explainer_loc', 'ebmobj']:
-                    if ts in fspm_cur:
-                        del fspm_cur[ts]
-                    info_per_cp = fspm_cur.get('info_per_cp',None)
-                    if info_per_cp is not None:
-                        for info_cur in info_per_cp.values():
-                            if ts in info_cur:
-                                del info_cur[ts]
+            if fsh not in ['interpret_EBM' , 'interpret_DPEBM', 'XGB_Shapley']:
+                continue
+            print(fsh, ffsn, 'fspm_cur.keys() = ', fspm_cur.keys())
+            #for ts in ['explainer', 'explainer_loc', 'ebmobj', 'ebm_mergeobj']:
 
-                    if fsh == 'interpret_EBM' and (ts not in fspm_cur):
-                        for fsn,info_cur_ in fspm_cur.items():
-                            if isinstance(info_cur_,dict) and ts in info_cur_:
-                                del info_cur_[ts]
-                            info_per_cp = fspm_cur.get('info_per_cp',None)
-                            if info_per_cp is not None:
-                                for info_cur in info_per_cp.values():
-                                    if ts in info_cur:
-                                        del info_cur[ts]
+            if 'perf_dict' in fspm_cur.keys():
+                if 'clf_objs' in fspm_cur['perf_dict']:
+                    del fspm_cur['perf_dict']['clf_objs']
+            for ts in ['explainer', 'explainer_loc', 'ebmobj', 'ebm_mergedobj']:
+                if ts in fspm_cur.keys():
+                    del fspm_cur[ts]
+                info_per_cp = fspm_cur.get('info_per_cp',None)
+                if info_per_cp is not None:
+                    for info_cur in info_per_cp.values():
+                        if ts in info_cur:
+                            del info_cur[ts]
+
+                if fsh in ['interpret_EBM', 'interpret_DPEBM' ] and (ts not in fspm_cur):
+                    for fsn,info_cur_ in fspm_cur.items():
+                        if isinstance(info_cur_,dict) and ts in info_cur_:
+                            del info_cur_[ts]
+                        info_per_cp = fspm_cur.get('info_per_cp',None)
+                        if info_per_cp is not None:
+                            for info_cur in info_per_cp.values():
+                                if ts in info_cur:
+                                    del info_cur[ts]
 
 
     if ('best_inds_XGB_fs' not in res_cur) and 'perfs_XGB_fs' in res_cur:
@@ -753,9 +762,10 @@ def removeLargeItems(res_cur, keep_featsel=['XGB_Shapley','XGB_Shapley2','interp
     return res_cur
 
 def printSizeInfo(res_cur,depthcur=0,depthleft=0, units=1024**2, minsize=1):
-    if isinstance((int,float,str)):
+    if isinstance(res_cur, (int,float,str)):
         return
     if not ( isinstance(res_cur, dict) or hasattr( res_cur, '__dict__') ):
+        print('ret')
         print( f'{total_size(res_cur) / units:.4f}' )
         return
     if hasattr( res_cur, '__dict__') :
