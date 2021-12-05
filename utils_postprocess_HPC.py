@@ -18,7 +18,8 @@ def collectPerformanceInfo3(rawnames, prefixes, ndays_before = None,
                            remove_large_items=1, list_only = False,
                            allow_multi_fn_same_prefix = False, use_light_files=True,
                             rawname_regex_full =False,
-                           start_time=None,end_time=None ):
+                           start_time=None,end_time=None,
+                           lighter_light = False ):
     '''
     rawnames can actually be just subject ids (S01  etc)
     red means smallest possible feat set as found by XGB
@@ -252,12 +253,18 @@ def collectPerformanceInfo3(rawnames, prefixes, ndays_before = None,
                     res_cur['featsel_shap_res'] = f['featsel_shap_res'][()]
 
                 from utils_postprocess import removeLargeItems
-                if not use_light_files:
-                    res_cur['class_labels_good'] = f['class_labels_good']
+                if (not use_light_files) or lighter_light:
+                    if 'class_labels_good' in f:
+                        res_cur['class_labels_good'] = f['class_labels_good']
+                    else:
+                        print('class_labels_good is not in the archive!')
                     res_cur = removeLargeItems(res_cur)
 
                     if remove_large_items:
-                        fname_light = pjoin( dir_to_use, '_!' + fnf)
+                        newfn = fnf
+                        if not use_light_files:
+                            newfn = '_!' + fnf
+                        fname_light = pjoin( dir_to_use, newfn)
                         print('resaving LIGHT file ',fname_light)
                         np.savez(fname_light, results_light=res_cur)
 
@@ -1138,6 +1145,11 @@ def prepTableInfo3(output_per_raw, prefixes=None, perf_to_use_list = [('perfs_XG
                                         perfs_red_noCV = anver_red_cur['perf_dict']['perf_nocv']
                                         ps = anver_red_cur['perf_dict'].get('perfs_CV', None)
                                     perfs_red_CV_recalc = recalcPerfFromCV(ps,lblind_trem)
+                                elif perf_red_to_use in ['interpret_EBM', 'interpret_DPEBM']:
+                                    featsubset_name = 'all'
+                                    EBM_dict = mult_clf_results['featsel_per_method'][perf_red_to_use][featsubset_name]
+                                    perfs_red = EBM_dict['perf']
+                                    perfs_red_CV = EBM_dict['perf_dict']['perf_aver']
                                 else:
                                     print(f'perf_red_to_use (={perf_to_use}): None!')
 
@@ -1199,6 +1211,11 @@ def prepTableInfo3(output_per_raw, prefixes=None, perf_to_use_list = [('perfs_XG
 
                                 #num = numdict_cur[perf_to_use]
                                 #num_red = numdict_cur[perf_red_to_use]
+                            if clf_type in ['interpret_EBM', 'interpret_DPEBM']:
+                                featsubset_name = 'all'
+                                EBM_dict = mult_clf_results['featsel_per_method'][clf_type][featsubset_name]
+                                perfs_red = EBM_dict['perf']
+                                perfs_red_CV = EBM_dict['perf_aver']
 
                             if use_CV_perf:
                                 perfs = perfs_CV
@@ -3793,6 +3810,34 @@ def prepareFeatGroups(featnames_sub,body_side, roi_labels,cmap, chnames_LFP=None
     return clrs,feature_groups_names,feat_groups_all
 
 
+def plotTableInfoBrain(table_info_per_perf_type, perf_tuple):
+    from utils import vizGroup2
+
+    labels_dict = rec_info['label_groups_dict'][()]
+    srcgroups_dict = rec_info['srcgroups_dict'][()]
+    coords = rec_info['coords_Jan_actual'][()]
+
+    if head_subj_ind is None:
+        rncur = sind_str + '_off_hold'
+    else:
+        rncur = head_subj_ind + '_off_hold'
+    sources_type=multi_clf_output['info']['sources_type']
+    src_file_grouping_ind = multi_clf_output['info']['src_grouping_fn']
+    src_rec_info_fn = '{}_{}_grp{}_src_rec_info'.format(rncur,
+                                                        sources_type,src_file_grouping_ind)
+    src_rec_info_fn_full = os.path.join(gv.data_dir, src_rec_info_fn + '.npz')
+    rec_info = np.load(src_rec_info_fn_full, allow_pickle=True)
+    sgdn = 'all_raw'
+    roi_labels_ = np.array(  labels_dict[sgdn] )
+    roi_labels = ['unlabeled'] + list( roi_labels_[parcel_indices_all] )
+
+
+    clrs =  utils.vizGroup2(sind_str,coords,roi_labels,srcgrp, show=False,
+                            alpha=.1, figsize_mult=1.5,msz=30, printLog=0,
+                            color_grouping=roi_lab_codes,
+                            color_group_labels= color_group_labels,
+                            sizes=sizes_list, msz_mult=0.3, seed=seed)
+
 def plotTableInfos2(table_info_per_perf_type, perf_tuple,
                       output_subdir='', alpha_bar = 0.7,
                     use_recalc_perf = True, prefixes_sorted = None,
@@ -4003,6 +4048,197 @@ def plotTableInfos2(table_info_per_perf_type, perf_tuple,
     if not os.path.exists(dirfig):
         os.mkdir(dirfig)
     plt.savefig(pjoin(gv.dir_fig, output_subdir,figfname))
+
+
+def plotTableInfos_onlyBar(table_info_per_perf_type, perf_tuple,
+                      output_subdir='', alpha_bar = 0.7,
+                    use_recalc_perf = True, prefixes_sorted = None,
+                           prefix2final_name = None,
+                    crop_rawname='last',
+                   sort_by_featnum = 0 ):
+    import matplotlib.pyplot as plt
+
+    info_per_rn_pref = table_info_per_perf_type[perf_tuple]
+    rns = list( info_per_rn_pref.values() )
+    nrpef = len( rns[0].keys() )
+
+    nr = len(rns)
+    nc = 1
+    ww = 12; hh = 4 *  nrpef / 20
+    fig,axs = plt.subplots(nr,nc, figsize = (ww*nc, hh*nr))
+    axs = axs.reshape((nr,nc))
+
+    pveclen = 2
+    colors = ['blue', 'red', 'purple', 'green']
+    color_full = colors[0]
+    color_red = colors[1]
+    color_red2 = colors[2]
+    color_add = colors[3]
+    str_per_pref_per_rowname_per_clftype = {}
+
+    main_keys = [perf_tuple[1]]
+    red_keys = [perf_tuple[2]]
+
+    #if keys is None:
+    #    #keys = list( sorted( table_info_per_perf_type.keys() ) )
+    #    if perf_kind == 'XGB':
+    #        keys = ['perfs_XGB', 'perfs_XGB_red' ]
+    #    elif perf_kind == 'LDA':
+    #        keys = ['all_present_features', 'strongest_features_LDA_selMinFeatSet']
+    #    else:
+    #        raise ValueError('wrong perf_kind')
+    #else:
+    #    assert perf_kind is None
+
+    keys = perf_tuple[1],perf_tuple[2]
+
+
+    pvec_summary_per_prefix_per_key = {}
+    pvec_summary_red_per_prefix_per_key = {}
+
+
+    # cycle to plot both perf
+    #for ci,clf_type in enumerate( keys ):
+    #pvec_summary_per_prefix = {}
+    #pvec_summary_red_per_prefix = {}
+
+    axind = 0
+
+    str_per_pref_per_rowname = {}
+    if pveclen == 3:
+        #perftype = '(spec + sens + F1) / 3'
+        perftype = 'min(spec,sens,F1)'
+    elif pveclen == 2:
+        perftype = 'min(spec,sens)'
+    else:
+        raise ValueError('wrong pveclen')
+
+    for rowid_tuple,rowinfo in info_per_rn_pref.items():
+        xs, xs_red, xs_red2 = [],[],[]
+        ys, ys_red, ys_add = [],[],[]
+        nums_red = []
+        if prefixes_sorted is None:
+            prefixes_sorted = list(sorted(rowinfo.keys()))
+        prefixes_wnums = []
+        str_per_pref = {}
+        for prefix in prefixes_sorted:
+            prefinfo = rowinfo[prefix]
+            if np.isnan(prefinfo['sens']):
+                continue
+
+
+            num = prefinfo.get('num',-1)
+            num_red = prefinfo.get('num_red',-1)
+            num_red2 = prefinfo.get('num_red2',-1)
+            if num is None:
+                num = -1
+            if num_red is None:
+                num_red = -1
+            if num_red2 is None:
+                num_red2 = -1
+            xs += [ num]
+            xs_red += [ num_red]
+            xs_red2 += [ num_red2]
+
+            order = ['sens', 'spec', 'F1']
+            if use_recalc_perf:
+                pvec = [prefinfo.get(os + '_recalc',np.nan) for os in order]
+                pvec_red = [prefinfo.get(os + '_red' + '_recalc',np.nan) for os in order]
+                pvec_add = [prefinfo.get(os + '_add' + '_recalc',np.nan) for os in order]
+                #print(pvec_red)
+            else:
+                pvec = [prefinfo[os] for os in order]
+                pvec_red = [prefinfo.get(os + '_red' , np.nan) for os in order]
+                pvec_add = [prefinfo.get(os + '_add' , np.nan) for os in order]
+            pvec = pvec[:pveclen]
+            pvec_red = pvec_red[:pveclen]
+            pvec_add = pvec_add[:pveclen]
+            #pvec_red = [prefinfo['sens_red'], prefinfo['spec_red'] , prefinfo['F1_red']]
+            assert pveclen in [2,3]
+            str_to_put_ = utsne.sprintfPerfs(pvec)
+            str_to_put_red = utsne.sprintfPerfs(pvec_red)
+            str_to_put_add = utsne.sprintfPerfs(pvec_add)
+            #if pveclen == 3:
+            #    str_to_put_ =  '{:.0f}%,{:.0f}%,{:.0f}%'.format(100*pvec[0],100*pvec[1],100*pvec[2])
+            #    str_to_put_red =  '{:.0f}%,{:.0f}%,{:.0f}%'.format(100*pvec_red[0],100*pvec_red[1],100*pvec_red[2])
+            #elif pveclen == 2:
+            #    pvec = [pvec[0], pvec[1] ]
+            #    str_to_put_ =  '{:.0f}%,{:.0f}%'.format(100*pvec[0],100*pvec[1])
+            #    str_to_put_red =  '{:.0f}%,{:.0f}%'.format(100*pvec_red[0],100*pvec_red[1])
+            #else:
+            #    raise ValueError('wrong pveclen')
+
+
+            str_to_put = str_to_put_
+            pvec = np.array(pvec)
+            pvec_red = np.array(pvec_red)
+
+            #print(clf_type,str_to_put)
+            if prefix2final_name is not None:
+                prefix_like = prefix2final_name[prefix]
+            else:
+                prefix_like = prefix
+            prefixes_wnums += [prefix_like + f'# {num} : {str_to_put}']
+
+            #p = np.mean(pvec)
+            p     = np.min(pvec)
+            p_red = np.min(pvec_red)
+            p_add = np.min(pvec_add)
+            #ys += [prefinfo[perftype]]
+            ys += [p]
+            ys_red += [p_red]
+            ys_add += [p_add]
+
+            #print(ys_add)
+
+        print( prefixes_wnums )
+
+        #print(ys_red)
+        str_per_pref_per_rowname[rowid_tuple] = str_per_pref
+
+        rowind_bars = 0
+        rn = rowid_tuple[0]
+        #rncrp = rn[crop_rawname]
+        if crop_rawname == 'last':
+            rncrp = rn.split('_')[-1]
+        else:
+            rncrp = rn[crop_rawname]
+        #rowid_tuple_to_show = (rncrp ,*rowid_tuple[1:] )
+        rowid_tuple_to_show = rncrp.upper()
+
+        ax = axs[axind,rowind_bars]
+        if len(xs):
+            #ax.set_title(str(rowid_tuple_to_show)  + ';  order=' + ','.join(order[:pveclen] ) )
+            ax.set_title(str(rowid_tuple_to_show) ) # + ';  order=' + ','.join(order[:pveclen] ) )
+        ax.yaxis.tick_right()
+        if sort_by_featnum:
+            sis = np.argsort(xs)
+        else:
+            sis = np.arange(len(prefixes_wnums) )
+        ax.barh(np.array(prefixes_wnums)[sis], np.array(ys)[sis], color = color_full,    alpha=alpha_bar)
+        ax.barh(np.array(prefixes_wnums)[sis], np.array(ys_red)[sis],
+                color = color_red, alpha=alpha_bar)
+        ax.barh(np.array(prefixes_wnums)[sis], np.array(ys_add)[sis],
+                color = color_add, alpha=alpha_bar)
+        ax.set_xlabel(perftype)
+        ax.set_xlim(0,1)
+        #ax.tick_params(axs=)
+
+        axind += 1
+        #str_per_pref_per_rowname_per_clftype[clf_type] = str_per_pref_per_rowname
+
+        #pvec_summary_per_prefix_per_key[clf_type] = pvec_summary_per_prefix
+        #pvec_summary_red_per_prefix_per_key[clf_type] = pvec_summary_red_per_prefix
+
+    plt.suptitle( str( perf_tuple ) + f' recalc perf {use_recalc_perf}', y=0.995, fontsize=14  )
+    plt.tight_layout()
+    #keystr = ','.join(keys)
+    #figfname = f'Performances_perf_tuple={perf_tuple}_pveclen={pveclen}.pdf'
+    #dirfig = pjoin(gv.dir_fig, output_subdir)
+    #if not os.path.exists(dirfig):
+    #    os.mkdir(dirfig)
+    #plt.savefig(pjoin(gv.dir_fig, output_subdir,figfname))
+
 
 def plotFeatNum2Perf(output_per_raw, perflists, prefixes=None, balance_level = 0.75, skip_plot=False, xlim=None ):
     import matplotlib.pyplot as plt
@@ -4269,15 +4505,15 @@ def plotImportantFeatLocations(sind_str, multi_clf_output,
         nice_ch1 = utils.nicenMEGsrc_chnames(r['ch1'], labels_dict,tmp, prefix='')
         nice_ch2 = utils.nicenMEGsrc_chnames(r['ch2'], labels_dict,tmp, prefix='', allow_empty=1)
 
+        # set codes for each parcel present
         roi_lab_codes = [0] * len(roi_labels)
-
-        lcr = len('_c0')
+        lcr = len('_c0')  # crop len
         # over ROIs found in feature_names
         for rli,roi_lab in enumerate(roi_labels):
             roi_lab_codes[rli] = []
             for ci in range(len(tuples)):
-                c1 = roi_lab == nice_ch1[ci][:-lcr]
-                c2 = nice_ch2[ci] is not None
+                c1 = roi_lab == nice_ch1[ci][:-lcr]  # condition 1
+                c2 = nice_ch2[ci] is not None  # condition 2
                 if c2:
                     c2 = roi_lab == nice_ch2[ci][:-lcr]
                 if c1 or c2:
@@ -4873,3 +5109,300 @@ def EBMlocExpl2scores(loc_expls, inc_interactions=False):
     print(scores.shape, intercepts.shape)
     res = np.concatenate([scores,intercepts[:,:,None]],axis=-1)
     return res,true_labels,predicted_labels, featnames
+
+# confmats from EBM
+def confinfo_from_EBM(tpll):
+    Ms_full = []
+    matnames = []
+    matdicts = []
+    for tpl in tpll:
+        rn,prefix,g,it = tpl[:-1]
+        d = tpl[-1]
+        matnames += [f'{rn[-3:]}:{prefix}']
+        revdict_lenc = d['revdict_lenc']
+        r = d['featsel_per_method']['interpret_EBM']['all']
+        Ms_full += [r['confmat_normalized']]
+
+        matdicts += [r['perf_per_cp']]
+    colnames = [None]*len(revdict_lenc)
+    for k in sorted(revdict_lenc.keys() ):
+        colnames[k] = revdict_lenc[k]
+
+    main_colind = 0
+
+    return Ms_full, matnames, matdicts, colnames, revdict_lenc, main_colind
+
+# confmats from XGB
+def confinfo_from_XGB(tpll):
+    Ms_full = []
+    matnames = []
+    matdicts = []
+    for tpl in tpll[:2]:
+        rn,prefix,g,it = tpl[:-1]
+        print(rn)
+        d = tpl[-1]
+        subrn = rn.split('_')[-1]
+        matnames += [f'{subrn}:{prefix}']
+        revdict_lenc = d['revdict_lenc']
+        r = d['XGB_analysis_versions']['all_present_features']
+        Ms_full += [r['perf_dict']['confmat_aver']]
+
+        matdicts += [r['perf_per_cp']]
+    colnames = [None]*len(revdict_lenc)
+    for k in sorted(revdict_lenc.keys() ):
+        colnames[k] = revdict_lenc[k]
+
+
+    main_colind = 0
+    return Ms_full, matnames, matdicts, colnames, revdict_lenc, main_colind
+
+def computeImprovementsPerParcelgroup(output_per_raw, mode = 'only',
+                                      inv_exclude = True, printLog = False):
+     #exclude
+    #mode = 'exclude'
+
+    import utils_postprocess as pp
+    tpll = pp.multiLevelDict2TupleList(output_per_raw,4,3)
+    tpll_reshaped = list( zip(*tpll) )
+    len(tpll_reshaped)
+
+    runCID = dict( tpll[0][-1]['cmd'][0] )['--runCID']
+    import json
+    with open( pjoin(gv.code_dir,'run',f'___run_corresp_{runCID}.txt'), 'r') as f:
+        corresp = json.load( f )
+    #___run_corresp_16381692938201.txt
+
+    n_chars = len('onlyH_act_')
+
+    #perfs_per_medcond = {'on':[],'off':[]}
+    perfs_per_medcond = {'on':{},'off':{}}
+    for prefix in corresp:
+        ind,pgn,nice_name = corresp[prefix]
+        part = prefix[n_chars:]
+        if not part.startswith(mode):
+            continue
+
+        cur_prefix_inds = np.where( np.array(tpll_reshaped[1]) == prefix )[0]
+        for cpi in cur_prefix_inds:
+            output = tpll[cpi][-1]
+            rn = tpll[cpi][0]
+            medcond = rn.split('_')[-1]
+            r = output['XGB_analysis_versions']['all_present_features']
+            perf_cur = r['perf_dict']['perf_aver']
+            perf_one_number = min( perf_cur[0], perf_cur[1] )
+            perfs_per_medcond[medcond][prefix] = perf_one_number
+        #print(prefix,pgn, perf_cur)
+
+    ######################################
+    perfs_aver_per_medcond = {}
+    for p in perfs_per_medcond:
+        vs = []
+        # I don't want to averge over LFP
+        for pgn,v in perfs_per_medcond[p].items():
+            if pgn != 'LFP':
+                vs += [v]
+        #list(perfs_per_medcond[p].values() )
+        perfs_aver_per_medcond[p]  = np.mean( vs )
+
+    #####################################
+
+
+    impr_per_medcond_per_pgn = {'on':{}, 'off':{}}
+    impr_wrtLFP_per_medcond_per_pgn = {'on':{}, 'off':{}}
+    for prefix in corresp:
+        ind,pgn,nice_name = corresp[prefix]
+        part = prefix[n_chars:]
+        if not part.startswith(mode):
+            continue
+
+        cur_prefix_inds = np.where( np.array(tpll_reshaped[1]) == prefix )[0]
+        for cpi in cur_prefix_inds:
+            output = tpll[cpi][-1]
+            rn = tpll[cpi][0]
+            medcond = rn.split('_')[-1]
+            if pgn != 'LFP':
+                if mode == 'only':
+                    assert dict( output['cmd'][0] )['--parcel_group_names'] == pgn
+                elif mode == 'exclude':
+                    assert dict( output['cmd'][0] )['--parcel_group_names'] == '!'+pgn
+
+            #output[]
+            r = output['XGB_analysis_versions']['all_present_features']
+            perf_cur = r['perf_dict']['perf_aver']
+            perf_one_number = min( perf_cur[0], perf_cur[1] )
+            improvement = perf_one_number  - perfs_aver_per_medcond[p]   # prob (range is 0 to 1)
+            improvement_wrt_LFP = perf_one_number - perfs_per_medcond[medcond][f'onlyH_act_{mode}15']
+
+            #if mode == 'exclude':
+            #    improvement = perf_one_number  - perfs_aver_per_medcond[p]   # prob (range is 0 to 1)
+
+            if inv_exclude and mode == 'exclude':
+                improvement = -improvement
+                improvement_wrt_LFP =- improvement_wrt_LFP
+
+            impr_per_medcond_per_pgn[medcond][pgn] = improvement * 100  # now in pct
+            impr_wrtLFP_per_medcond_per_pgn[medcond][pgn] = improvement_wrt_LFP * 100
+            if printLog:
+                print(prefix,pgn, medcond,improvement * 100)
+    return impr_per_medcond_per_pgn, impr_wrtLFP_per_medcond_per_pgn, perfs_aver_per_medcond
+
+def plotTableInfoBrain(impr_per_medcond_per_pgn , medcond, multi_clf_output, head_subj_ind=None, inv_exclude=True, mode='only',
+                       subdir=''):#, perf_tuple):
+    from utils import vizGroup2
+    from globvars import gp
+
+    import pymatreader
+
+    #rncur = rawnames[0] + '_off_hold'
+    #sind_str,mc,tk  = utils.getParamsFromRawname(rncur)
+    sind_str = 'S01'
+    if head_subj_ind is None:
+        rncur = sind_str + '_off_hold'
+    else:
+        rncur = head_subj_ind + '_off_hold'
+    sources_type=multi_clf_output['info']['sources_type']
+    src_file_grouping_ind = multi_clf_output['info']['src_grouping_fn']
+    src_rec_info_fn = '{}_{}_grp{}_src_rec_info'.format(rncur,
+                                                        sources_type,src_file_grouping_ind)
+    src_rec_info_fn_full = os.path.join(gv.data_dir, src_rec_info_fn + '.npz')
+    rec_info = np.load(src_rec_info_fn_full, allow_pickle=True)
+
+
+    labels_dict = rec_info['label_groups_dict'][()]
+    srcgroups_dict = rec_info['srcgroups_dict'][()]
+    coords = rec_info['coords_Jan_actual'][()]
+
+    if head_subj_ind is None:
+        rncur = sind_str + '_off_hold'
+    else:
+        rncur = head_subj_ind + '_off_hold'
+    sources_type=multi_clf_output['info']['sources_type']
+    src_file_grouping_ind = multi_clf_output['info']['src_grouping_fn']
+    src_rec_info_fn = '{}_{}_grp{}_src_rec_info'.format(rncur,
+                                                        sources_type,src_file_grouping_ind)
+    src_rec_info_fn_full = os.path.join(gv.data_dir, src_rec_info_fn + '.npz')
+    rec_info = np.load(src_rec_info_fn_full, allow_pickle=True)
+    sgdn = 'all_raw'
+
+    roi_labels_ = np.array(  labels_dict[sgdn] )
+    parcel_indices_all = np.arange(1,len(roi_labels_))
+    roi_labels = ['unlabeled'] + list( roi_labels_[parcel_indices_all] )
+
+    srcgrp = np.zeros( srcgroups_dict[sgdn].shape, dtype=srcgroups_dict[sgdn].dtype)
+    for pii,pi in enumerate(parcel_indices_all):
+        srcgrp[srcgroups_dict[sgdn] == pi] = pii + 1 #list(roi_labels).index( rls[pii])
+
+
+
+    #############################
+    brain_area_labels = ['unlabeled'] + list( sorted( gp.parcel_groupings_post.keys() ) )
+    intensities = [np.nan] * len(brain_area_labels)
+    srcgrp_new = np.nan * np.ones( len(srcgrp) )
+    for pgn in impr_per_medcond_per_pgn[medcond]:
+        if pgn == 'LFP':
+            continue
+
+        parcel_labels = gp.parcel_groupings_post[pgn] #without side information
+        if pgn == 'Cerebellum':
+            sidestr = '_R'
+        else:
+            sidestr = '_L'
+        parcel_inds = [ roi_labels.index(pl + sidestr) for pl in parcel_labels ]
+        #parcel_inds += [ roi_labels.index(pl + '_R') for pl in parcel_labels ]
+
+        ind = brain_area_labels.index(pgn)
+        for pi in parcel_inds:
+            srcgrp_new[srcgrp==pi]  = ind
+
+        #brain_area_labels += [pgn]
+
+        intensity_cur = impr_per_medcond_per_pgn[medcond][pgn] / 10
+        #print(pgn,ind, intensity_cur)
+        intensities[ind ]= intensity_cur #cmap(intensity_cur)  #* len(parcel_inds)
+    #intensities = np.zeros(len(roi_labels))
+    #intensities
+    ###########################################
+    #%matplotlib inline
+
+
+
+
+
+
+    roi_lab_codes = [0] * len(roi_labels)
+    color_group_labels = list( gp.parcel_groupings_post.keys()   )
+
+    roi_lab_codes = None
+    #color_group_labels = np.arange(len())
+
+
+    cmap = plt.cm.get_cmap('inferno')
+
+    # clrs =  utils.vizGroup2(sind_str,coords,roi_labels,srcgrp, show=False,
+    #                         def_alpha=.1, figsize_mult=1.5,msz=30, printLog=0,
+    #                         color_grouping=roi_lab_codes, intensities = intensities,
+    #                         color_group_labels= color_group_labels,
+    #                         sizes=None, msz_mult=0.3, seed=0, cmap=cmap)
+    fig,axs, clrs, scatters = utils.vizGroup2(sind_str,coords,
+                    brain_area_labels,srcgrp_new, show=False,
+                    show_legend = False, def_alpha=.1, figsize_mult=1.5,msz=30,
+                    printLog=0, color_grouping=roi_lab_codes, intensities =
+                    intensities, color_group_labels= color_group_labels,
+                    sizes=None, msz_mult=0.3, seed=0, cmap=cmap, projections =
+                    ['top','side'])
+
+
+    intensities = np.array(intensities)
+    gm = ~np.isnan(np.array(intensities) )
+    mii,mai = np.min(intensities[gm]), np.max(intensities[gm])
+    print(mii,mai)
+
+    #bc = np.ones(4)
+    #bc[:3] = 0.5
+    #bc = tuple(bc)
+    #axs[0].w_xaxis.set_pane_color(bc)
+
+    # axs[1].w_xaxis.set_pane_color(bc)
+    #plt.gcf().
+    plt.colorbar(scatters['top'])
+
+
+
+    impr_lfp = impr_per_medcond_per_pgn[medcond]['LFP']
+    if inv_exclude and mode == 'exclude':
+        plt.title(f'H_act {mode} areas relative performance -difference / 10, LFP={impr_lfp/10:.2f}')
+    else:
+        plt.title(f'H_act {mode} areas relative performance difference / 10, LFP={impr_lfp/10:.2f}')
+
+    figname_full = pjoin(gv.dir_fig,subdir,f'brain_map_area_strength_medcond={medcond}_mode={mode}.pdf')
+    plt.savefig(figname_full)
+    #plt.colorbar();
+    #plotTableInfoBrain(impr_per_medcond_per_pgn, output)
+
+def getLogFname(mco,folder = '$OSCBAGDIS_DATAPROC_CODE/slurmout'):
+    jobid = dict(mco['cmd'][0] )['--SLURM_job_id']
+    fname = f'ML_{jobid}.out'
+    folder = os.path.expandvars(folder)
+    fname_full = pjoin(folder, fname)
+    return fname_full
+
+def copyLogFname(mco, newfname = '_logfile_to_observe.out' ):
+    # maybe add filename data or maybe sacct info (inc how much it took to run)
+    fname_full = getLogFname(mco)
+    import gv
+    newname_full = pjoin(gv.code_dir, newfname)
+    shutil.copy(fname_full, newname_full )
+    print(f'copied to {newname_full}')
+
+def printLogPart(mco, text_to_find = 'Start classif' ):
+    fname_full = getLogFname(mco)
+
+    with open(fname_full,'r') as f:
+        lines = f.readlines()
+
+    lineind = 0
+    for linei,line in enumerate(lines):
+        if line.startswith(text_to_find):
+            lineind = linei
+
+    print(lines[lineind, :] )

@@ -1636,7 +1636,16 @@ def mergeAnnBinArrays(ivalis_tb_indarrays):
 #    spec = TN / len(Neg)
 #    return spec
 
-def sprintfPerfs(perfs):
+def sprintfPerfs(perfs, perfs_to_show = ['sens', 'spec',
+                                         'F1', 'accuracy',
+                                         'balanced_accuracy']):
+    if isinstance(perfs,dict):
+        pr = []
+        for pts in perfs_to_show:
+            pr += [ perfs[pts] ]
+        perfs = pr
+    else:
+        assert isinstance(perfs,list) or isinstance(perfs,np.ndarray)
     p = np.array(list(perfs) ) * 100
     perfs_str = '{:.2f}%'.format(p[0])
     if len(perfs) > 1:
@@ -1747,10 +1756,12 @@ def getClfPredPower(clf,X,class_labels,class_ind, label_ids_order = None,
     # of samples with true label being i-th class and predicted label being j-th
     # class.   confmat[i,j] -- true i'th predicted being j'th
     # ordering: sorted(set()+set())
+    res = {}
     confmat = confusion_matrix(class_labels, preds, labels=label_ids_order)
 
+    res['confmat'] = confmat
     ##tn, fp, fn, tp = confusion_matrix([0, 1, 0, 1], [1, 1, 1, 0]).ravel()
-    from sklearn.metrics import recall_score
+    from sklearn.metrics import recall_score, accuracy_score, balanced_accuracy_score, precision_score
     #sens_sk = recall_score(class_labels, preds)
 
     #recall_per_class = recall_score(class_labels, preds,
@@ -1772,6 +1783,14 @@ def getClfPredPower(clf,X,class_labels,class_ind, label_ids_order = None,
     ## yes, I want 1,0
     recall_per_class_bin = recall_score(bin_ver, bin_ver_pred,
                                     average = None, labels=[1,0])
+
+
+    #recall_score
+    res['recall_per_class_bin'] = recall_per_class_bin
+    res['precision'] = precision_score(class_labels,preds)
+    res['balanced_accuracy'] = balanced_accuracy_score(class_labels,preds)
+    res['accuracy'] = accuracy_score(class_labels,preds)
+
 
     if np.sum(pos_actual) == 0 or np.sum(neg_actual) == 0:
         s = f'one of masks is bad {np.sum(pos_actual)}, {np.sum(neg_actual)}'
@@ -1824,7 +1843,12 @@ def getClfPredPower(clf,X,class_labels,class_ind, label_ids_order = None,
     #    #KFold(n_splits=2, random_state=None, shuffle=False)
     #    for train_index, test_index in res:
 
-    return sens,spec, F1, confmat
+    res['sens'] = sens
+    res['spec'] = spec
+    res['F1'] = spec
+
+    #return sens,spec, F1, confmat
+    return res
 
 def _getPredPower_singleFold(arg):
     from xgboost import XGBClassifier
@@ -1851,6 +1875,29 @@ def _getPredPower_singleFold(arg):
 
     return split_ind, fold_type, model_cur,perf_cur
 
+
+def averPerfDicts(perf_dicts):
+    not_nan_fold_inds = []
+    for indp,pdict in enumerate(perf_dicts):
+        wasnan = False
+        for k,v in pdict.items():
+            wasnan = wasnan | np.any( np.isnan(v) )
+        if not wasnan:
+            not_nan_fold_inds += [indp]
+
+    assert len(not_nan_fold_inds) > 0
+    perfs_CV_valid = [ perf_dicts[indp] for indp in not_nan_fold_inds  ]
+    ##############
+    perf_aver = {}
+    for k in perfs_CV_valid[0].keys():
+        perf_aver[k] = perfs_CV_valid[0][k] * 0.
+        for p in perf_dicts:
+            if k == 'confmat':
+                vv = confmatNormalize(p[k], 'true')
+            else:
+                vv = p[k] / len(perfs_CV_valid)
+            perf_aver[k] += vv
+    return perf_aver, not_nan_fold_inds
 
 def getPredPowersCV(clf,X,class_labels,class_ind, printLog = False, n_splits=None,
                     ret_clf_obj=False, skip_noCV =False, add_fitopts={},
@@ -1945,7 +1992,8 @@ def getPredPowersCV(clf,X,class_labels,class_ind, printLog = False, n_splits=Non
             arg = (fold_type, clf,add_clf_creopts,add_fitopts,X_train,X_test,y_train,y_test,class_ind, n_classes, -1, printLog)
             args += [arg]
 
-        retcur['test_indices_list'] =  [0]*len(args)
+        retcur['test_indices_list'] =  [ [] ]*len(args)
+        print(len(args))
 
         res_fold_type_spec = None
         if n_jobs_perrun > 1:
@@ -1958,7 +2006,7 @@ def getPredPowersCV(clf,X,class_labels,class_ind, printLog = False, n_splits=Non
                 else:
                     models += [model_cur]
                     perfs_CV += [perfs_cur]
-                retcur['test_indices_list'][split_ind] = test_indices[split_ind]
+                    retcur['test_indices_list'][split_ind] = test_indices[split_ind]
         else:
             n_jobs = max(1, min(len(args) , mpr.cpu_count()-gp.n_free_cores) )
 
@@ -1983,26 +2031,31 @@ def getPredPowersCV(clf,X,class_labels,class_ind, printLog = False, n_splits=Non
                         perfs_CV += [perfs_cur]
                         #indcv_indset += 1
 
-                retcur['test_indices_list'][split_ind] = test_indices[split_ind]
+                        retcur['test_indices_list'][split_ind] = test_indices[split_ind]
 
 
         # convert three performance measures to a single matrix for further
         # averaging
-        perfarr = np.vstack( [ (p[0],p[1],p[2])  for p in perfs_CV]  )
-        confmats = [ p[-1]  for p in perfs_CV]
-        not_nan_fold_inds = np.where(  np.max( np.isnan(perfarr).astype(int) , axis= 1) == 0 )[0]
-        assert len(not_nan_fold_inds) > 0
-        perf_aver = np.mean(perfarr[not_nan_fold_inds] , axis = 0)
+        perf_aver, not_nan_fold_inds = averPerfDicts(perfs_CV)
+
+
+
+        #perfarr = np.vstack( [ (p[0],p[1],p[2])  for p in perfs_CV]  )
+        #confmats = [ p[-1]  for p in perfs_CV]
+        #not_nan_fold_inds = np.where(  np.max( np.isnan(perfarr).astype(int) , axis= 1) == 0 )[0]
+        #assert len(not_nan_fold_inds) > 0
+        #perf_aver = np.mean(perfarr[not_nan_fold_inds] , axis = 0)
         # it is bad to averge non-normalized confmat. But I still keep full
         # ones as well
-        confmats = [ confmatNormalize(cm, 'true') for cm in np.array(confmats)[not_nan_fold_inds] ]
-        confmat_aver =  np.mean( np.array(confmats), axis=0 )
+        #confmats = [ confmatNormalize(cm, 'true') for cm in np.array(confmats)[not_nan_fold_inds] ]
+        #confmat_aver =  np.mean( np.array(confmats), axis=0 )
         #ret = [perf_nocv, perfs_CV, perf_aver, confmat_aver ]
         retcur['good_fold_inds'] = not_nan_fold_inds
-        retcur['bad_fold_inds'] = np.setdiff1d(np.arange(len(perfarr)) , not_nan_fold_inds )
+        retcur['bad_fold_inds'] = \
+            np.setdiff1d(np.arange(len(perfs_CV)) , not_nan_fold_inds )
         retcur['perfs_CV'] = perfs_CV
         retcur['perf_aver'] = perf_aver
-        retcur['confmat_aver'] = confmat_aver
+        retcur['confmat_aver'] = perf_aver['confmat']
         if ret_clf_obj:
             #ret += [models]
             retcur['clf_objs'] = models
@@ -2046,36 +2099,39 @@ def calcLDAVersions(X_to_fit, X_to_transform, class_labels,n_components_LDA,
     #classification_report(y_true, y_pred, target_names=target_names)
 
     # Compute prediction on training (separability)
-    sens_train,spec_train,F1_train, confmat_train = getClfPredPower(lda,X_to_fit, class_labels, class_ind_to_check)
-    print('-- LDA on train sens {:.2f} spec {:.2f} F1 {:.2f}'.format(sens_train,spec_train,F1_train) )
+    cpp_train = getClfPredPower(lda,X_to_fit, class_labels, class_ind_to_check)
+    print('-- LDA on train sens {:.2f} spec {:.2f} F1 {:.2f}'.
+          format(cpp_train['sens'],cpp_train['spec'],cpp_train['F1']) )
 
     subres = {}
     subres['ldaobj'] = lda
     subres['X_transformed'] = X_LDA
-    subres['perfs'] = sens_train,spec_train,F1_train,confmat_train
+    subres['perfs'] = cpp_train
     res['fit_to_all_data'] = subres
 
     # Compute prediction on training, shuffled labels
     class_labels_shuffled = class_labels.copy()
     np.random.shuffle(class_labels_shuffled)
-    sens,spec,F1,confmat = getClfPredPower(lda,X_to_fit, class_labels_shuffled,
+    cpp = getClfPredPower(lda,X_to_fit, class_labels_shuffled,
                                            class_ind_to_check)
+    sens,spec,F1,confmat = cpp['sens'],cpp['spec'],cpp['F1'],cpp['confmat']
     print('-- LDA check_on_shuffle sens {:.2f} spec {:.2f} F1 {:.2f}'.format(sens,spec,F1) )
 
     subres = {}
-    subres['perfs'] = sens,spec,F1,confmat
+    subres['perfs'] = cpp
     res['fit_to_all_data_check_on_shuffle'] = subres
 
     ##################
     lda_shuffled = type(lda)()
     lda_shuffled.fit(X_to_fit, class_labels_shuffled)
-    sens,spec,F1,confmat = getClfPredPower(lda_shuffled,X_to_fit,
+    cpp = getClfPredPower(lda_shuffled,X_to_fit,
                                            class_labels_shuffled,
                                            class_ind_to_check)
+    sens,spec,F1,confmat = cpp['sens'],cpp['spec'],cpp['F1'],cpp['confmat']
     print('-- LDA train_on_shuffle labels sens {:.2f} spec {:.2f} F1 {:.2f}'.format(sens,spec,F1) )
 
     subres = {}
-    subres['perfs'] = sens,spec,F1,confmat
+    subres['perfs'] = cpp
     res['fit_to_all_data_train_on_shuffle'] = subres
 
     ########## Compute with CV
@@ -2085,7 +2141,8 @@ def calcLDAVersions(X_to_fit, X_to_transform, class_labels,n_components_LDA,
 
     #perf_noCV, perfs_CV, res_aver_LDA, confmat_aver_LDA, ldas_CV = \
 
-    sens_cv,spec_cv,F1_cv = r['perf_aver'] #res_aver_LDA
+    cpp_cv = r['perf_aver'] #res_aver_LDA
+    sens_cv,spec_cv,F1_cv,confmat_cv = cpp_cv['sens'],cpp_cv['spec'],cpp_cv['F1'],cpp_cv['confmat']
     ldas_CV = r['clf_objs']
 
     subres = {}
@@ -2094,7 +2151,7 @@ def calcLDAVersions(X_to_fit, X_to_transform, class_labels,n_components_LDA,
     #subres['CV_perf_aver'] = sens_cv,spec_cv,F1_cv, confmat_aver_LDA
     subres['ldaobjs']     = ldas_CV
     subres['CV_perfs']     = r['perfs_CV']
-    subres['CV_perf_aver'] = sens_cv,spec_cv,F1_cv, r['confmat_aver']
+    subres['CV_perf_aver'] = cpp_cv #sens_cv,spec_cv,F1_cv, r['confmat_aver']
 
     subres['n_splits'] = n_splits
     res['CV'] = subres
@@ -2118,15 +2175,19 @@ def calcLDAVersions(X_to_fit, X_to_transform, class_labels,n_components_LDA,
     lda_aver.coef_ = coef_aver
     lda_aver.intercept_ = intercept_aver
 
-    sens_avCV,spec_avCV,F1_avCV, confmat_avCV = \
+    cpp_avCV = \
         getClfPredPower(lda_aver,X_to_fit, class_labels, class_ind_to_check)
+    sens_avCV,spec_avCV,F1_avCV, confmat_avCV = \
+        cpp_avCV['sens'],cpp_avCV['spec'],cpp_avCV['F1'],cpp_avCV['confmat']
     print('-- LDA avCV on train sens {:.2f} spec {:.2f} F1 {:.2f}'.format(sens_avCV,spec_avCV,F1_avCV) )
 
     #perf_nocv_LDA_avCV, results_LDA_avCV, res_aver_LDA_avCV, confmat_av_avCV, ldas_CV_avCV = \
     r2 = getPredPowersCV(lda_aver, X_to_fit,class_labels, class_ind_to_check,
                          printLog=False, n_splits=n_splits, ret_clf_obj=True,
                          skip_noCV=1, train_on_shuffled = False)
-    sens_cv_avCV,spec_cv_avCV,F1_cv_avCV = r2['perf_aver'] #res_aver_LDA_avCV
+    cpp_cv_avCV = r2['perf_aver'] #res_aver_LDA_avCV
+    sens_cv_avCV,spec_cv_avCV,F1_cv_avCV = \
+        cpp_cv_avCV['sens'],cpp_cv_avCV['spec'],cpp_cv_avCV['F1']
 
     print('-- LDA CV _avCV sens {:.2f} spec {:.2f} F1 {:.2f}'.format(sens_cv_avCV,spec_cv_avCV,F1_cv_avCV) )
     if X_to_transform is not None:
@@ -2139,7 +2200,7 @@ def calcLDAVersions(X_to_fit, X_to_transform, class_labels,n_components_LDA,
     subres['X_transformed'] = X_LDA_CV
     #subres['perfs'] = sens_avCV,spec_avCV,F1_avCV, confmat_avCV
     # here we save CV-performance of averaged LDA
-    subres['perfs'] = sens_cv_avCV,spec_cv_avCV,F1_cv_avCV, r2['confmat_aver'] #_av_avCV
+    subres['perfs'] = cpp_cv_avCV
     res['CV_aver'] = subres
 
     return res
@@ -3334,8 +3395,9 @@ def classSubsetInds(y,cid):
     return inds_per_class
 
 
-def _computeEBM(X,y,EBM,ebm_creopts,revdict, class_ind_to_check_lenc,
-                class_labels_good_nm, revdict_nm,
+def _computeEBM(X,y,EBM,ebm_creopts,revdict_lenc, revdict_lenc_nm,
+                class_ind_to_check_lenc,
+                class_labels_good_nm,
                 n_splits=5,
                EBM_CV=0, featnames_ebm=None, tune_params = False,
                 params_space = None, max_evals = 20, balancing='weighting'):
@@ -3349,13 +3411,16 @@ def _computeEBM(X,y,EBM,ebm_creopts,revdict, class_ind_to_check_lenc,
     from interpret.glassbox import ExplainableBoostingClassifier as _EBM
     from interpret.privacy import DPExplainableBoostingClassifier as _DPEBM
 
-    assert len(class_labels_good_nm) == len(y)
+    assert len(class_labels_good_nm) == len(y), ( len(class_labels_good_nm), len(y)  )
 
     if balancing == 'oversample':
         from imblearn.over_sampling import RandomOverSampler
-        oversample = RandomOverSampler(sampling_strategy='minority')
+        oversample = RandomOverSampler(sampling_strategy='minority', random_state=0)
         X_orig,y_orig = X,y
         X,y = oversample.fit_resample(X,y)
+        sample_indices = oversample.sample_indices_
+    else:
+        sample_indices = np.arange(len(y))
 
     if tune_params:
         ebm_creopts_loc = dict(ebm_creopts.items())  # make a copy
@@ -3391,12 +3456,17 @@ def _computeEBM(X,y,EBM,ebm_creopts,revdict, class_ind_to_check_lenc,
         best_detailed = trials.results[ trial_ind ]['creopts']
         ebm_creopts_loc.update(best_detailed )
         ebm_creopts = ebm_creopts_loc
+        print( 'Found best parameters to be ', ebm_creopts )
     else:
         trials = None
+
+    assert revdict_lenc[class_ind_to_check_lenc] == revdict_lenc_nm[class_ind_to_check_lenc]
+    class_id_nm = class_ind_to_check_lenc
 
     r0_ebm = None
     perf_per_cp = None
     ebm_merged = None
+    expl_datas = None
     if EBM_CV:
         ebm = EBM(**ebm_creopts)
         if balancing == 'oversample' or balancing == 'none':
@@ -3411,63 +3481,67 @@ def _computeEBM(X,y,EBM,ebm_creopts,revdict, class_ind_to_check_lenc,
                 ret_clf_obj=True, skip_noCV =False, add_fitopts={},
                 add_clf_creopts =ebm_creopts, train_on_shuffled =False, seed=0,
                 group_labels=None )
-        sens,spec, F1 = r0_ebm['perf_aver']
-        confmat  = r0_ebm['confmat_aver']
+        # not CV
+        #sens,spec, F1 = r0_ebm['perf_aver']
+        #confmat  = r0_ebm['confmat_aver']
 
-        ks,vs = zip(*revdict_nm.items() )
-        directdict_nm = dict( zip(vs,ks) )
-        class_id_nm = directdict_nm [ revdict[class_ind_to_check_lenc] ]
+        #ks,vs = zip(*revdict_lenc_nm.items() )
+        #directdict_nm = dict( zip(vs,ks) )
+        #class_id_nm = directdict_nm [ revdict[class_ind_to_check_lenc] ]
 
-        ks,vs = zip(*revdict.items() )
-        directdict = dict( zip(vs,ks) )
+        #ks,vs = zip(*revdict_lenc.items() )
+        #directdict = dict( zip(vs,ks) )
 
-        perf_per_cp = {}
-        uls = list(set(y))
-        if len( uls  ) == 2:
-            for icv,ebm_cur in enumerate(r0_ebm['clf_objs']):
-                inds_cur = r0_ebm['test_indices_list' ][icv]
+        perf_per_cp = extractSubperfs(X,y,class_labels_good_nm, revdict_lenc, revdict_lenc_nm,
+                            class_ind_to_check_lenc, r0_ebm['clf_objs'],
+                                      r0_ebm['test_indices_list'] )
+        #perf_per_cp = {}
+        #uls = list(set(y))
+        #if len( uls  ) == 2:
+        #    for icv,ebm_cur in enumerate(r0_ebm['clf_objs']):
+        #        inds_cur = r0_ebm['test_indices_list' ][icv]
 
-                inds_per_cp = classSubsetInds(class_labels_good_nm[inds_cur], class_id_nm)
-                #inds_per_cp = classSubsetInds(y[inds_cur], class_ind_to_check_lenc)
-                for cp,inds_cur_cp in inds_per_cp.items():
-                    #cpstr = revdict[cp[0] ], revdict[cp[1] ]
-                    cpstr = revdict_nm[cp[0] ], revdict_nm[cp[1] ]
-                    if cpstr not in perf_per_cp:
-                        perf_per_cp[cpstr] =  {'perfs':[] }
+        #        inds_per_cp = classSubsetInds(class_labels_good_nm[inds_cur], class_id_nm)
+        #        #inds_per_cp = classSubsetInds(y[inds_cur], class_ind_to_check_lenc)
+        #        for cp,inds_cur_cp in inds_per_cp.items():
+        #            #cpstr = revdict[cp[0] ], revdict[cp[1] ]
+        #            cpstr = revdict_nm[cp[0] ], revdict_nm[cp[1] ]
+        #            if cpstr not in perf_per_cp:
+        #                perf_per_cp[cpstr] =  {'perfs':[] }
 
-                    XX,yy = X[inds_cur_cp],y[inds_cur_cp]
-                    #print('fdsfs')
-                    perf_cur = getClfPredPower(ebm_cur,XX,yy,
-                        class_ind_to_check_lenc, printLog=False)
-                    #import pdb; pdb.set_trace()
-                    perf_per_cp[cpstr]['perfs'] += [ perf_cur ]
-                    perf_per_cp[cpstr]['bininds'] = inds_cur_cp
-                    perf_per_cp[cpstr]['bininds_glob'] = inds_cur[inds_cur_cp]
+        #            XX,yy = X[inds_cur_cp],y[inds_cur_cp]
+        #            #print('fdsfs')
+        #            perf_cur = getClfPredPower(ebm_cur,XX,yy,
+        #                class_ind_to_check_lenc, printLog=False)
+        #            #import pdb; pdb.set_trace()
+        #            perf_per_cp[cpstr]['perfs'] += [ perf_cur ]
+        #            perf_per_cp[cpstr]['bininds'] = inds_cur_cp
+        #            perf_per_cp[cpstr]['bininds_glob'] = inds_cur[inds_cur_cp]
 
-            for cpstr,perf_cur_cp in perf_per_cp.items():
-                confmats = [p[-1] for p in perf_cur_cp['perfs'] ]
-                confmats = [ confmatNormalize(cm, 'true') for cm in np.array(confmats) ]
-                confmat_aver =  np.mean( np.array(confmats), axis=0 )
+        #    for cpstr,perf_cur_cp in perf_per_cp.items():
+        #        confmats = [p[-1] for p in perf_cur_cp['perfs'] ]
+        #        confmats = [ confmatNormalize(cm, 'true') for cm in np.array(confmats) ]
+        #        confmat_aver =  np.mean( np.array(confmats), axis=0 )
 
-                perfarr = np.vstack( [ (p[0],p[1],p[2])  for p in perf_cur_cp['perfs'] ]  )
-                perf_aver = np.mean(perfarr , axis = 0)
+        #        perfarr = np.vstack( [ (p[0],p[1],p[2])  for p in perf_cur_cp['perfs'] ]  )
+        #        perf_aver = np.mean(perfarr , axis = 0)
 
-                d = {'confmat_aver':confmat_aver, 'perf_aver':perf_aver }
-                perf_per_cp[cpstr].update(  d  )
-        else:
-            from utils_postprocess_HPC import perfFromConfmat
-            class_pairs = list(itertools.combinations(uls, 2))
-            perf_per_cp = {}
-            for cp in class_pairs:
-                c1,c2 = cp
-                confmat_aver = confmat[[c1,c2],:][:,[c1,c2] ]
-                ind = c1
-                if c2 == class_ind_to_check_lenc:
-                    ind = c2
-                perf_aver = perfFromConfmat(confmat,ind)
-                d = {'confmat_aver':confmat_aver, 'perf_aver':perf_aver }
-                cpstr = revdict[cp[0] ], revdict[cp[1] ]
-                perf_per_cp[cpstr] = [ d  ]
+        #        d = {'confmat_aver':confmat_aver, 'perf_aver':perf_aver }
+        #        perf_per_cp[cpstr].update(  d  )
+        #else:
+        #    from utils_postprocess_HPC import perfFromConfmat
+        #    class_pairs = list(itertools.combinations(uls, 2))
+        #    perf_per_cp = {}
+        #    for cp in class_pairs:
+        #        c1,c2 = cp
+        #        confmat_aver = confmat[[c1,c2],:][:,[c1,c2] ]
+        #        ind = c1
+        #        if c2 == class_ind_to_check_lenc:
+        #            ind = c2
+        #        perf_aver = perfFromConfmat(confmat,ind)
+        #        d = {'confmat_aver':confmat_aver, 'perf_aver':perf_aver }
+        #        cpstr = revdict[cp[0] ], revdict[cp[1] ]
+        #        perf_per_cp[cpstr] = [ d  ]
 
 
         merge_EBMs = 0
@@ -3478,27 +3552,31 @@ def _computeEBM(X,y,EBM,ebm_creopts,revdict, class_ind_to_check_lenc,
                 EBMlocExpl2scores(local_exp.data(), inc_interactions=False)
             scores = np.mean(scores_cur)
         else:
-            scores_list = []
-            for ebm_cur in r0_ebm['clf_objs']:
-                # don't forget that we explain model, not data
-                local_exp = ebm_cur.explain_local(X,y)
-                #local_exp = ebm_cur.explain_local(X,y)
-                expl_data = local_exp.data()
-                if expl_data is None:
-                    expl_data = ebm_cur.explain_local(X,y)._internal_obj['specific']
-                #return ebm_cur,expl_data
-                scores_cur,true_labels,predicted_labels, featnames_out = \
-                    EBMlocExpl2scores(expl_data, inc_interactions=False)
-                assert tuple(featnames_out) == tuple(featnames_ebm)
-                scores_list += [scores_cur]
-                assert scores_cur.shape[0] == X.shape[0]
-            scores = np.mean(np.array(scores_list), axis=0)
+            #scores_list = []
+            #for ebm_cur in r0_ebm['clf_objs']:
+            #    # don't forget that we explain model, not data
+            #    local_exp = ebm_cur.explain_local(X,y)
+            #    #local_exp = ebm_cur.explain_local(X,y)
+            #    expl_data = local_exp.data()
+            #    if expl_data is None:
+            #        expl_data = ebm_cur.explain_local(X,y)._internal_obj['specific']
+            #    #return ebm_cur,expl_data
+            #    scores_cur,true_labels,predicted_labels, featnames_out = \
+            #        EBMlocExpl2scores(expl_data, inc_interactions=False)
+            #    assert tuple(featnames_out) == tuple(featnames_ebm)
+            #    scores_list += [scores_cur]
+            #    assert scores_cur.shape[0] == X.shape[0]
+            #scores = np.mean(np.array(scores_list), axis=0)
+            scores_from_loc,expl_datas = getMutiClfScores(r0_ebm['clf_objs'], X,y, featnames_ebm )
+            local_exp = expl_datas[0]
 
         confmat_normalized = r0_ebm['confmat_aver']
         #print('scores cur shape ', scores_cur.shape)
         #print('scores ', scores_cur.shape)
         #import pdb; pdb.set_trace()
     else:
+        raise ValueError('Need to redebug!')
+        r0_ebm = None
         from sklearn.model_selection import ShuffleSplit
         sss = ShuffleSplit(n_splits=1, test_size=0.2, random_state = 0)
         sss.get_n_splits(X, y)
@@ -3515,17 +3593,17 @@ def _computeEBM(X,y,EBM,ebm_creopts,revdict, class_ind_to_check_lenc,
             class_weights_cur = compute_sample_weight('balanced',y_train)
         ebm.fit(X_train, y_train, sample_weight=class_weights_cur)
         local_exp = ebm.explain_local(X,y)
-        if expl_data is None:
-            expl_data = ebm_cur.explain_local(X,y)._internal_obj['specific']
+        if local_exp is None:
+            local_exp = ebm.explain_local(X,y)._internal_obj['specific']
 
-        sens,spec, F1, confmat  = \
-            getClfPredPower(ebm,X_test,y_test,class_ind_to_check_lenc, printLog=False)
+        r0  = getClfPredPower(ebm,X_test,y_test,class_ind_to_check_lenc, printLog=False)
+        confmat = r0['confmat']
         confmat_normalized = confmatNormalize(confmat) * 100
         print(f'confmat_normalized_true (pct) = {confmat_normalized}')
 
-        ks,vs = zip(*revdict_nm.items() )
-        directdict_nm = dict( zip(vs,ks) )
-        class_id_nm = directdict_nm [ revdict[class_ind_to_check_lenc] ]
+        #ks,vs = zip(*revdict_nm.items() )
+        #directdict_nm = dict( zip(vs,ks) )
+        #class_id_nm = directdict_nm [ revdict[class_ind_to_check_lenc] ]
 
         #inds_per_cp = classSubsetInds(y_test, class_ind_to_check_lenc)
         inds_per_cp = classSubsetInds(class_labels_good_nm[test_index], class_id_nm)
@@ -3538,18 +3616,20 @@ def _computeEBM(X,y,EBM,ebm_creopts,revdict, class_ind_to_check_lenc,
             perf_cur = getClfPredPower(ebm,XX,yy,
                 class_ind_to_check_lenc, printLog=False)
             perfs += [perf_cur]
-            cpstr = revdict_nm[cp[0] ], revdict_nm[cp[1] ]
+            cpstr = revdict_lenc_nm[cp[0] ], revdict_lenc_nm[cp[1] ]
             perf_per_cp[cpstr] = perfs
 
         # compute confmat aver for each of the class pairs
         for cp,inds_cur_cp in inds_per_cp.items():
-            confmats = [p[-1] for p in perf_per_cp[cp] ]
-            confmats = [ confmatNormalize(cm, 'true') for cm in np.array(confmats) ]
-            confmat_aver =  np.mean( np.array(confmats), axis=0 )
+            perf_aver, _ = averPerfDicts(perf_per_cp[cp] )
+            #confmats = [p[-1] for p in perf_per_cp[cp] ]
+            #confmats = [ confmatNormalize(cm, 'true') for cm in np.array(confmats) ]
+            #confmat_aver =  np.mean( np.array(confmats), axis=0 )
 
-            perfarr = np.vstack( [ (p[0],p[1],p[2])  for p in perf_per_cp[cp]]  )
-            perf_aver = np.mean(perfarr , axis = 0)
+            #perfarr = np.vstack( [ (p[0],p[1],p[2])  for p in perf_per_cp[cp]]  )
+            #perf_aver = np.mean(perfarr , axis = 0)
 
+            confmat_aver = perf_aver['confmat']
             d = {'confmat_aver':confmat_aver, 'perf_aver':perf_aver }
             perf_per_cp[cp] += [  d  ]
 
@@ -3568,26 +3648,102 @@ def _computeEBM(X,y,EBM,ebm_creopts,revdict, class_ind_to_check_lenc,
 
 
     info_cur = {}
-    info_cur['scores'] = scores
+    # glob_scores
+    info_cur['scores_glob'] = scores
+    #info_cur['scores_from_loc'] = scores_from_loc
+    info_cur['scores'] = scores_from_loc
     info_cur['ebmobj'] = ebm
     info_cur['ebm_mergedobj'] = ebm_merged
     info_cur['explainer'] = global_exp
     info_cur['explainer_loc'] = local_exp
-    info_cur['perf'] = sens,spec, F1, confmat
+    info_cur['expl_datas'] = expl_datas
+    #info_cur['perf'] = sens,spec, F1, confmat
     info_cur['perf_dict'] = r0_ebm
     info_cur['confmat_normalized'] = confmat_normalized
     info_cur['feature_names']= names
     info_cur['perf_per_cp' ] = perf_per_cp
     info_cur['ebm_creopts'] = ebm_creopts
     info_cur['hyperopt_trials'] = trials
+    info_cur['sample_indices'] = sample_indices
     res = info_cur
 
         #featsel_info.update(info_cur)
     return res
 
+def extractSubperfs(X,y,y_nm, revdict_lenc, revdict_lenc_nm, class_ind_to_check_lenc,
+                    clf_objs, test_indices_list):
+    assert revdict_lenc[class_ind_to_check_lenc] == revdict_lenc_nm[class_ind_to_check_lenc]
+    class_id_nm = class_ind_to_check_lenc
+    #perf_per_cp = {}
+    #ks,vs = zip(*revdict_nm.items() )
+    #directdict_nm = dict( zip(vs,ks) )
+    #class_id_nm = directdict_nm [ revdict_lenc[ class_ind_to_check_lenc ] ]
+    if len(test_indices_list[-1] ) == 0:
+        test_indices_list = test_indices_list[:-1]
+    assert len(test_indices_list) == len(clf_objs), (len(test_indices_list), len(clf_objs) )
 
-def computeEBM(X,y,EBM,ebm_creopts,revdict, class_ind_to_check_lenc,
-               class_labels_good_mn, revdict_mn,
+    perf_per_cp = {}
+    uls = list(set(y))
+    if len( uls  ) == 2:
+        # r0_ebm['clf_objs']
+        for icv,ebm_cur in enumerate(clf_objs):
+            inds_cur = test_indices_list[icv]
+
+            inds_per_cp = classSubsetInds(y_nm[inds_cur], class_id_nm)
+            #inds_per_cp = classSubsetInds(y[inds_cur], class_ind_to_check_lenc)
+            for cp,inds_cur_cp in inds_per_cp.items():
+                #cpstr = revdict[cp[0] ], revdict[cp[1] ]
+                #cpstr = revdict_nm[cp[0] ], revdict_nm[cp[1] ]
+                cpstr = revdict_lenc_nm[cp[0] ],revdict_lenc_nm[cp[1] ]
+                if cpstr not in perf_per_cp:
+                    perf_per_cp[cpstr] =  {'perfs':[] }
+
+                XX,yy = X[inds_cur_cp],y[inds_cur_cp]
+                #print('fdsfs')
+                perf_cur = getClfPredPower(ebm_cur,XX,yy,
+                    class_ind_to_check_lenc, printLog=False)
+                #import pdb; pdb.set_trace()
+                perf_per_cp[cpstr]['perfs'] += [ perf_cur ]
+                perf_per_cp[cpstr]['bininds'] = inds_cur_cp
+                perf_per_cp[cpstr]['bininds_glob'] = inds_cur[inds_cur_cp]
+
+        for cpstr,perf_cur_cp in perf_per_cp.items():
+            perf_aver, not_nan_fold_inds = averPerfDicts(perf_cur_cp['perfs'])
+
+            #confmats = [p['confmat'] for p in perf_cur_cp['perfs'] ]
+            #confmats = [ confmatNormalize(cm, 'true') for cm in np.array(confmats) ]
+            #confmat_aver =  np.mean( np.array(confmats), axis=0 )
+
+            #perfarr = np.vstack( [ (p[0],p[1],p[2])  for p in perf_cur_cp['perfs'] ]  )
+            #perf_aver = np.mean(perfarr , axis = 0)
+            confmat_aver = perf_aver['confmat']
+
+            d = {'confmat_aver':confmat_aver, 'perf_aver':perf_aver }
+            perf_per_cp[cpstr].update(  d  )
+    else:
+        from utils_postprocess_HPC import perfFromConfmat
+        import itertools
+        class_pairs = list(itertools.combinations(uls, 2))
+        perf_per_cp = {}
+        for cp in class_pairs:
+            c1,c2 = cp
+            confmat = None  # TODO: need to put something meaningful!
+            confmat_aver = confmat[[c1,c2],:][:,[c1,c2] ]
+            ind = c1
+            if c2 == class_ind_to_check_lenc:
+                ind = c2
+            perf_aver = perfFromConfmat(confmat,ind)
+            d = {'confmat_aver':confmat_aver, 'perf_aver':perf_aver }
+            cpstr = revdict_lenc[cp[0]],revdict_lenc[cp[1] ]
+            perf_per_cp[cpstr] = [ d  ]
+
+    return perf_per_cp
+
+
+
+def computeEBM(X,y,EBM,ebm_creopts,revdict_lenc, revdict_lenc_nm,
+               class_ind_to_check_lenc,
+               class_labels_good_nm,
                n_splits=5,
                EBM_compute_pairwise=0,EBM_CV=0, featnames_ebm=None,
                tune_params = False, params_space = None, max_evals = 20, balancing='weighting' ):
@@ -3607,7 +3763,8 @@ def computeEBM(X,y,EBM,ebm_creopts,revdict, class_ind_to_check_lenc,
             inds2 = np.where(y == c2)[0]
 
             inds = np.append(inds1,inds2)
-            indpair_names = revdict[c1],revdict[c2]
+            indpair_names = revdict_lenc[ c1  ],\
+                revdict_lenc[ c2]
 
             print(f'Starting computing EBM for class pair {indpair_names}, in total {len(inds)}'+
                 f'=({len(inds1)}+{len(inds2)}) data points')
@@ -3615,12 +3772,13 @@ def computeEBM(X,y,EBM,ebm_creopts,revdict, class_ind_to_check_lenc,
             X_cur_cp = X[inds]
             y_cur_cp = y[inds]
 
-            info_cur_cp = _computeEBM(X,y,EBM,ebm_creopts,revdict, class_ind_to_check_lenc,
-                class_labels_good_mn[inds], revdict_mn,
+            info_cur_cp = _computeEBM(X,y,EBM,ebm_creopts,
+                revdict_lenc, revdict_lenc_nm, class_ind_to_check_lenc,
+                class_labels_good_nm[inds],
                 n_splits=n_splits, EBM_CV=EBM_CV, featnames_ebm=featnames_ebm,
-                                      tune_params = tune_params,
-                                      params_space = params_space, max_evals = max_evals,
-                                      balancing=balancing)
+                tune_params = tune_params,
+                params_space = params_space, max_evals = max_evals,
+                balancing=balancing)
 
             #global_exp = info_cur_cp['explainer']
             ## extracting data from explainer
@@ -3639,8 +3797,9 @@ def computeEBM(X,y,EBM,ebm_creopts,revdict, class_ind_to_check_lenc,
 
         # filter classes
 
-        info_cur = _computeEBM(X,y,EBM,ebm_creopts,revdict, class_ind_to_check_lenc,
-            class_labels_good_mn, revdict_mn,
+        info_cur = _computeEBM(X,y,EBM,ebm_creopts,
+            revdict_lenc, revdict_lenc_nm,
+            class_ind_to_check_lenc, class_labels_good_nm,
             n_splits=n_splits, EBM_CV=EBM_CV, featnames_ebm=featnames_ebm,
                         tune_params = tune_params, params_space = params_space, max_evals = max_evals,
                         balancing=balancing)
@@ -3648,3 +3807,32 @@ def computeEBM(X,y,EBM,ebm_creopts,revdict, class_ind_to_check_lenc,
 
         #featsel_info.update(info_cur)
     return res
+
+def getMutiClfScores(clfs, X,y, featnames_ebm ):
+    '''
+    averages scores from a list of classifiers
+    '''
+    from utils_postprocess_HPC import EBMlocExpl2scores
+    local_exps = []
+    scores_list = []
+    expl_datas = []
+    for ebm_cur in clfs:
+        local_exp = ebm_cur.explain_local(X,y)
+        local_exps += [local_exp]
+        #local_exp = ebm_cur.explain_local(X,y)
+        expl_data = local_exp.data()
+        if expl_data is None:
+            expl_data = ebm_cur.explain_local(X,y)._internal_obj['specific']
+
+        expl_datas += [expl_data]
+        #return ebm_cur,expl_data
+        scores_cur,true_labels,predicted_labels, featnames_out = \
+            EBMlocExpl2scores(expl_data, inc_interactions=False)
+        if np.min(scores_cur) < 0:
+            print('getMutiClfScores: NEG SCORES_CUR: ', np.min(scores_cur) )
+        assert tuple(featnames_out) == tuple(featnames_ebm)
+        scores_list += [scores_cur]
+        assert scores_cur.shape[0] == X.shape[0]
+    scores = np.mean(np.array(scores_list), axis=0)
+
+    return scores,expl_datas

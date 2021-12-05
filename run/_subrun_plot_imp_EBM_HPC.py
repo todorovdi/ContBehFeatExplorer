@@ -31,7 +31,7 @@ max_nfeats_to_sum = None
 markers_mean = ['o','*']
 markers_max = ['x','+']
 
-markers_per_subj = True
+markers_per_subj = subdir.find('joint') < 0
 #markers_mean = [r'$\mathbf{' +f'{int(subj[0][1:])}' + r'}$' for subj in outputs_grouped.keys()]
 #markers_max = [r'$\tilde{' + f'{int(subj[0][1:])  }' + r'}$' for subj in outputs_grouped.keys()]
 
@@ -77,7 +77,7 @@ for tpl_ in pref_hh_tuples:
                 s =  r'$\mathbf{' +f'{si}' + r'}^o$'
                 s2 = r'$\tilde{'  +f'{si}' + r'}^o$'
             else:
-                raise ValueError
+                raise ValueError(str(keystr_tpl ) )
             markers_mean += [ s ]
             markers_max  += [ s2 ]
 
@@ -194,7 +194,7 @@ for tpl_ in pref_hh_tuples:
     kind = ';  '.join( list( outputs_grouped.values() )[0][0] )
     plt.suptitle(kind)
     pdf.savefig();    plt.close();    pdf.close()
-    print('saved to ',subdir,out_name_plot)
+    print('saved to ',figfname_full)
 
 #             break+
 #         break

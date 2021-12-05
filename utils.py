@@ -4020,12 +4020,17 @@ def vizGroup2(sind_str, positions, labels, srcgroups,
              show_legend=True, alpha_surf=0.1, seed=None, figsize_mult = 1, msz=15,
               printLog=0, color_grouping = None,
              color_group_labels = None, sizes=None, def_alpha = 0.9,
-              msz_mult=0.25, roi_labels_all = None):
+              intensities = None,
+              msz_mult=0.25, roi_labels_all = None, cmap=None,
+              projections = ['top', 'side'], background_color = None):
     '''
-    visualize src group. Slower than vizGroup, but allows to save things normally and legends as well
+    visualize src group, 2 projections. Slower than vizGroup, but allows to save things normally and legends as well
     positions -- 3D coords of ALL sources (not just subgroups)
     srcgroups -- for each coord index an index from the list of an item in the labels list
     [!] labels -- which labels we actually plot
+    color_grouping --
+    color_group_labels --
+    intensities -- per label
     '''
     import pymatreader as pymr
     import os
@@ -4039,7 +4044,7 @@ def vizGroup2(sind_str, positions, labels, srcgroups,
 
 
 
-    nc = 2
+    nc = len(projections)
     if show_legend:
         nc += 1
     nr = 1
@@ -4047,8 +4052,18 @@ def vizGroup2(sind_str, positions, labels, srcgroups,
                            figsize=(14*figsize_mult,5*figsize_mult),
                            subplot_kw={'projection':'3d', 'proj_type':'ortho'})
     plt.subplots_adjust(wspace=0.01)
-    ax_top  = axs[0]
-    ax_side = axs[1]
+
+    from collections import Iterable
+    if not isinstance(axs, Iterable):
+        axs = [axs]
+
+    ax_per_proj = {}
+    for pri,pr in enumerate(projections):
+        ax_per_proj[pr] =  axs[pri]
+        if background_color is not None:
+            ax_per_proj[pr].w_xaxis.set_pane_color(background_color)
+    #ax_top  = axs[0]
+    #ax_side = axs[1]
     if show_legend:
         ax_leg  = axs[-1]
 
@@ -4078,24 +4093,18 @@ def vizGroup2(sind_str, positions, labels, srcgroups,
 #                         opacity = 0.3, transparent=False)
     print(tris.shape)
     #x,y,z = positions[inds].T
-    ax_top.view_init(90,-90)
-    ax_top.plot_trisurf(rr_mm[:,0], rr_mm[:,1], rr_mm[:,2], triangles=tris-1,
+    for projection,ax in ax_per_proj.items():
+        if projection == 'top':
+            ax.view_init(90,-90)
+        elif projection == 'side':
+            ax.view_init(0,0)
+        ax.plot_trisurf(rr_mm[:,0], rr_mm[:,1], rr_mm[:,2], triangles=tris-1,
                     alpha=alpha_surf)
-    ax_top.set_zticks([])
-    #
-    ax_top.set_yticks([])
-    ax_top.set_xticks([])
-    #ax_top.set_top_view()
-
-    ax_side.view_init(0,0)
-    ax_side.plot_trisurf(rr_mm[:,0], rr_mm[:,1], rr_mm[:,2], triangles=tris-1,
-                    alpha=alpha_surf)
-    ax_side.set_xticks([])
-    #
-    ax_side.set_yticks([])
-    ax_side.set_zticks([])
-    #ax_side.set_top_view()
-
+        ax.set_zticks([])
+        #
+        ax.set_yticks([])
+        ax.set_xticks([])
+        #ax_top.set_top_view()
 
     if seed is not None:
         np.random.seed(seed)
@@ -4108,7 +4117,9 @@ def vizGroup2(sind_str, positions, labels, srcgroups,
 
         clrs = np.hstack([clrs,alphas ]   )
     else:
+        # we color each label separaterly
         clrs = np.random.uniform(low=0.3,size=(len(labels_cur),3) )
+
     # for clri in range(len(clrs) ):
     #     colcur= clrs[clri]
     #     ii = np.argmin(colcur)
@@ -4124,8 +4135,10 @@ def vizGroup2(sind_str, positions, labels, srcgroups,
     msz = msz * figsize_mult
     color_list = []
     marker_sizes = []
+    intensities_ext = []
     # plot positions acoording to scrgroups
     for grpi,lab in enumerate(labels_cur):
+        # grpi -- index of parcel
         if printLog:
             print(lab)
         #inds = np.where(srcgroups_dict[sgdn] == grpi)
@@ -4147,17 +4160,23 @@ def vizGroup2(sind_str, positions, labels, srcgroups,
         ys += [y]
         zs += [z]
 
+
         if sizes is not None:
             marker_sizes +=  [ msz + sizes[grpi]  * (msz * msz_mult) ] * len(z)
 
-        if color_group_labels is None:
-            color_list += [  tuple(clrs[grpi]) ] * len(z)
+        if intensities is not None and cmap is not None:
+            color_list += [  cmap( intensities[grpi] )  ] * len(z)
+            intensities_ext += [  intensities[grpi]  ] * len(z)
         else:
-            cur_col = np.zeros(4)
-            for ci in color_grouping[grpi]:
-                cur_col += clrs[ ci ]
-            cur_col  /=  len(color_grouping[grpi] )
-            color_list += [  tuple(cur_col) ] * len(z)
+            if color_group_labels is None:
+                color_list += [  tuple(clrs[grpi]) ] * len(z)
+            else:
+                # take average color and set if for all the
+                cur_col = np.zeros(4)
+                for ci in color_grouping[grpi]:
+                    cur_col += clrs[ ci ]
+                cur_col  /=  len(color_grouping[grpi] )
+                color_list += [  tuple(cur_col) ] * len(z)
     #if color_group_labels is not None:
     #    color_list = np.array(clrs)[ color_grouping ]
     xs = np.hstack(xs)
@@ -4170,8 +4189,17 @@ def vizGroup2(sind_str, positions, labels, srcgroups,
     #print(color_list)
     #print(marker_sizes)
 
-    ax_top.scatter(xs,ys,zs,color=color_list,  s=marker_sizes)
-    ax_side.scatter(xs,ys,zs,color=color_list, s=marker_sizes)
+    scatters = {}
+    if cmap is not None:
+        for projection,ax in ax_per_proj.items():
+            scatters[projection] = ax.scatter(xs,ys,zs,c=intensities_ext,  s=marker_sizes, cmap=cmap)
+        #scatters['top'] = ax_top.scatter(xs,ys,zs,c=intensities_ext,  s=marker_sizes, cmap=cmap)
+        #scatters['side'] = ax_side.scatter(xs,ys,zs,c=intensities_ext, s=marker_sizes, cmap=cmap)
+    else:
+        for projection,ax in ax_per_proj.items():
+            scatters[projection] = ax.scatter(xs,ys,zs,color=color_list,  s=marker_sizes)
+        #scatters['top'] = ax_top.scatter(xs,ys,zs,color=color_list,  s=marker_sizes)
+        #scatters['side'] = ax_side.scatter(xs,ys,zs,color=color_list, s=marker_sizes)
 
     if show_legend:
         legels = []
@@ -4197,7 +4225,7 @@ def vizGroup2(sind_str, positions, labels, srcgroups,
         ax_leg.view_init(90,-90)
         ax_leg.grid(0)
 
-    return axs, clrs
+    return fig, axs, clrs, scatters
 
 def parseMEGsrcChnamesShortList(chnames):
     sides = []
@@ -4550,3 +4578,19 @@ def pcaica2featCoef(pca,ica):
     mix_large[:ica.n_components, :ica.n_components]  = ica.mixing_
     mix_appl = pca.components_.T @ mix_large  #np.dot(mix_large,   ica.pca_components_ ) [ sel]
     return mix_appl
+
+def loadLabelsDict(rncur = 'S01_off_hold'):
+    ## load labels (not important where from exactly)
+
+    sind_str,mc,tk  = getParamsFromRawname(rncur)
+    sources_type='parcel_aal'
+    src_file_grouping_ind = 10
+    src_rec_info_fn = '{}_{}_grp{}_src_rec_info'.format(rncur,
+                                                        sources_type,src_file_grouping_ind)
+    src_rec_info_fn_full = os.path.join(gv.data_dir, src_rec_info_fn + '.npz')
+    rec_info = np.load(src_rec_info_fn_full, allow_pickle=True)
+    print('rec_info.keys() = ', list(rec_info.keys()) )
+
+    labels_dict = rec_info['label_groups_dict'][()]
+    del rec_info
+    return labels_dict

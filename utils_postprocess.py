@@ -642,7 +642,7 @@ def removeLargeItems(res_cur, keep_featsel='all',
                 from sklearn import preprocessing
                 lab_enc = preprocessing.LabelEncoder()
                 # just skipped class_labels_good
-                if ('scores' in fspm_cur) and ( fsh not in [ 'interpret_EBM', 'interpret_DPEBM' ] ):
+                if isinstance(fspm_cur,dict) and ('scores' in fspm_cur) and ( fsh not in [ 'interpret_EBM', 'interpret_DPEBM' ] ):
                     if 'scores_av' not in fspm_cur:
                         scores = fspm_cur['scores']
 
@@ -661,13 +661,15 @@ def removeLargeItems(res_cur, keep_featsel='all',
 
             if fsh not in ['interpret_EBM' , 'interpret_DPEBM', 'XGB_Shapley']:
                 continue
+            if not isinstance(fspm_cur,dict):
+                continue
             print(fsh, ffsn, 'fspm_cur.keys() = ', fspm_cur.keys())
             #for ts in ['explainer', 'explainer_loc', 'ebmobj', 'ebm_mergeobj']:
 
             if 'perf_dict' in fspm_cur.keys():
                 if 'clf_objs' in fspm_cur['perf_dict']:
                     del fspm_cur['perf_dict']['clf_objs']
-            for ts in ['explainer', 'explainer_loc', 'ebmobj', 'ebm_mergedobj']:
+            for ts in ['explainer', 'explainer_loc', 'ebmobj', 'ebm_mergedobj', 'expl_datas']:
                 if ts in fspm_cur.keys():
                     del fspm_cur[ts]
                 info_per_cp = fspm_cur.get('info_per_cp',None)

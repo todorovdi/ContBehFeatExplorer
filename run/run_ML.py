@@ -145,7 +145,8 @@ parcel_group_names = []
 
 subskip_fit = 1   # > 1 means that I fit to subsampled dataset
 #feat_variance_q_thr = [0.6, 0.75, 0.9]  # I will select only features that have high variance according to PCA (high contributions to highest components)
-feat_variance_q_thr = [0.87, 0.92, 0.99, 0.995, 0.999, 0.9999]  # I will select only features that have high variance according to PCA (high contributions to highest components)
+#feat_variance_q_thr = [0.87, 0.92, 0.99, 0.995, 0.999, 0.9999]  # I will select only features that have high variance according to PCA (high contributions to highest components)
+feat_variance_q_thr = [0.99, 0.999, 0.9999]  # I will select only features that have high variance according to PCA (high contributions to highest components)
 use_low_var_feats_for_heavy_fits = True # whether I fit XGB and min feat sel only to highly varing features (according to feat_variance_q_thr)
 search_best_LFP = ['LDA', 'XGB']
 featsel_only_best_LFP = 1
@@ -194,6 +195,7 @@ EBM_tune_max_evals = 30
 EBM_balancing = 'auto'
 EBM_balancing_numfeats_thr = 120
 EBM_seed = 0
+load_EBM_params_auto = 1
 
 XGB_featsel_feats = ['VIFsel']
 
@@ -251,13 +253,16 @@ opts, args = getopt.getopt(effargv,"hr:n:s:w:p:",
           "selMinFeatSet_drop_perf_pct=", "selMinFeatSet_conv_perf_pct=",
           "savefile_rawname_format=",
          "selMinFeatSet_after_featsel=", "n_jobs=", "label_groups_to_use=",
-         "SLURM_job_id=", "featsel_only_best_LFP=",
+         "SLURM_job_id=", "runCID=", "featsel_only_best_LFP=",
          "XGB_max_depth=", "XGB_min_child_weight=", "XGB_tune_param=",
          "EBM_tune_param=", "EBM_tune_max_evals=",
-         "EBM_compute_pairwise=", "EBM_featsel_feats=", 'XGB_featsel_feats=',
+         "EBM_compute_pairwise=", "EBM_featsel_feats=",
+         "EBM_balancing=", "EBM_balancing_numfeats_thr=",
+         'XGB_featsel_feats=',
          "featsel_on_VIF=", "custom_rawname_str=",
          "do_cleanup=", "VIF_thr=", "VIF_search_worst=", "compute_ICA=",
-         "use_ICA_for_classif=", "load_XGB_params_auto=", "EBM_CV="])
+         "use_ICA_for_classif=", "load_XGB_params_auto=",
+        "load_EBM_params_auto=", "EBM_CV="])
 print(sys.argv)
 print('Argv str = ',' '.join(sys.argv ) )
 print(opts)
@@ -289,6 +294,8 @@ for opt,arg in pars.items():
         n_channels = int(arg)
     elif opt == "SLURM_job_id":
         SLURM_job_id = arg # str
+    elif opt == "runCID":
+        runCID  = int(arg)
     elif opt == "n_feats":
         n_feats = int(arg)
         n_feats_set_explicitly = True
@@ -316,6 +323,8 @@ for opt,arg in pars.items():
         do_LDA = not bool(int(arg))
     elif opt == "load_XGB_params_auto":
         load_XGB_params_auto = int(arg)
+    elif opt == "load_EBM_params_auto":
+        load_EBM_params_auto = int(arg)
     elif opt == "EBM_CV":
         EBM_CV = int(arg)
     elif opt == "VIF_thr":
@@ -1278,6 +1287,7 @@ if do_Classif:
                         rem_neut = discard_remaining_int_types_during_fit)
 
                 # same but without merging (will need for EBM)
+                # nm means "not merged"
                 class_labels_nm, class_labels_good_nm, revdict_nm, class_ids_grouped_nm,inds_not_neut_nm  = \
                     utsne.makeClassLabels(sides_hand, gp.groupings['merge_nothing'],
                         int_types_to_distinguish,
@@ -1494,11 +1504,36 @@ if do_Classif:
             class_weights = compute_sample_weight('balanced',class_labels_good_for_classif)
             class_label_ids = lab_enc.inverse_transform( np.arange( len(set(class_labels_good_for_classif)) ) )
             class_label_names_ordered = [revdict[cli] for cli in class_label_ids]
+            class_ind_to_check_lenc = lab_enc.transform([class_ind_to_check])[0]
+
+
+            lab_enc_nm = preprocessing.LabelEncoder()
+            lab_enc_nm.fit(class_labels_good_nm)
+            class_ind_to_check_lenc_nm = lab_enc_nm.transform([class_ind_to_check])[0]
+            assert class_ind_to_check_lenc_nm == class_ind_to_check_lenc  # otherwise we'll struggle
+            class_labels_good_for_classif_nm = lab_enc_nm.transform(class_labels_good_nm)
+            #assert  np.all( (class_labels_good_for_classif == class_ind_to_check_lenc) & \
+            #    (class_labels_good_for_classif_nm == class_ind_to_check_lenc)
+            revdict_lenc = {}
+            for k,v in revdict.items():
+                newk = lab_enc.transform([k])[0]
+                revdict_lenc[ newk  ] = v
+
+
+            revdict_lenc_nm = {}
+            for k,v in revdict_nm.items():
+                newk = lab_enc_nm.transform([k])[0]
+                revdict_lenc_nm[ newk  ] = v
 
             results_cur['class_labels_good_for_classif'] = class_labels_good_for_classif
+            results_cur['class_labels_good_for_classif_nm'] = class_labels_good_for_classif_nm
             results_cur['class_label_ids'] = class_label_ids
             results_cur['class_label_names_ordered'] = class_label_names_ordered
             results_cur['class_weights'] = class_weights
+            results_cur['revdict_lenc_nm'] = revdict_lenc_nm
+            results_cur['revdict_lenc'] = revdict_lenc
+            results_cur['revdict_nm'] = revdict_nm
+            results_cur['revdict'] = revdict
 
 
             #indlist = fip_fs
@@ -1793,12 +1828,6 @@ if do_Classif:
 
                 featnames_heavy = list(np.array(featnames_for_fit)[feat_inds_for_heavy] )
                 featnames_nice_heavy = list( np.array(featnames_nice_for_fit)[feat_inds_for_heavy] )
-                class_ind_to_check_lenc = lab_enc.transform([class_ind_to_check])[0]
-
-                revdict_lenc = {}
-                for k,kn in revdict.items():
-                    revdict_lenc[ lab_enc.transform([k] )[0]  ] = kn
-                ##########################3
 
                 add_fitopts = { 'eval_metric':'mlogloss' }
 
@@ -1948,7 +1977,7 @@ if do_Classif:
                         class_ind_to_check_lenc, printLog = 0,
                         n_splits=n_splits, add_fitopts=add_fitopts,
                         add_clf_creopts=add_clf_creopts,
-                        ret_clf_obj=False, seed=0)
+                        ret_clf_obj=True, seed=0)
                     rc = {'perf_dict':r0, 'importances':clf_XGB.feature_importances_}
                     rc['add_clf_creopts'] = add_clf_creopts
                     rc['add_fitopts'] = add_fitopts
@@ -1956,6 +1985,12 @@ if do_Classif:
                     perfstr = utsne.sprintfPerfs(r0['perf_aver'])
                     print(f'<!>  XGB {XGB_version_name} perfs are {perfstr}')
                     print( r0['confmat_aver'] * 100 )
+
+                    from utils_tSNE import extractSubperfs
+                    perf_per_cp = extractSubperfs(X_cur,class_labels_good_for_classif, class_labels_good_for_classif_nm,
+                                    revdict_lenc, revdict_lenc_nm,
+                                class_ind_to_check_lenc, r0['clf_objs' ] , r0['test_indices_list'] )
+                    rc['perf_per_cp' ] =  perf_per_cp
 
                     # here we do NO want the main interval typ to be of
                     # 'dataset' kind
@@ -1971,16 +2006,20 @@ if do_Classif:
                                 continue
 
                             ngroups = len( set(group_labels) )
-                            r0_across = utsne.getPredPowersCV(clf_XGB,X_cur,y_cur,
-                                class_ind_to_check_lenc, printLog = 0,
-                                n_splits=ngroups, add_fitopts=add_fitopts,
-                                add_clf_creopts=add_clf_creopts,
-                                ret_clf_obj=False, seed=0, group_labels=group_labels[::subskip_fit])
-                            rc['across'][label_group_name] = r0_across
+                            try:
+                                r0_across = utsne.getPredPowersCV(clf_XGB,X_cur,y_cur,
+                                    class_ind_to_check_lenc, printLog = 0,
+                                    n_splits=ngroups, add_fitopts=add_fitopts,
+                                    add_clf_creopts=add_clf_creopts,
+                                    ret_clf_obj=False, seed=0, group_labels=group_labels[::subskip_fit])
+                                rc['across'][label_group_name] = r0_across
 
-                            perfstr = utsne.sprintfPerfs(r0_across['perf_aver'])
-                            print(f'{label_group_name} label grouping gave perf {perfstr}')
-                            print( r0_across['confmat_aver'] * 100 )
+                                perfstr = utsne.sprintfPerfs(r0_across['perf_aver'])
+                                print(f'{label_group_name} label grouping gave perf {perfstr}')
+                                print( r0_across['confmat_aver'] * 100 )
+                            except AssertionError as e:
+                                print(f'!!! Error during across {label_group_name} computation! {str(e)}' )
+                                rc['across'][label_group_name] = None
 
                     #r0_across_medcond = utsne.getPredPowersCV(clf_XGB,X_cur,y_cur,
                     #    class_ind_to_check_lenc, printLog = 0,
@@ -2287,7 +2326,6 @@ if do_Classif:
                             'PCA_XGBfeats': pca_XGBfeats,
                             'perf_red_XGB':perf_red_XGB,
                            'MI_per_feati':MI_per_feati,
-                           'revdict':revdict,
                            'counts':numpoints_per_class_id,
                            'class_ids_grouped':class_ids_grouped,
                    'class_labels_good_for_classif': class_labels_good_for_classif,
@@ -2607,12 +2645,26 @@ if do_Classif:
                                 else:
                                     EMB_balancing_cur = 'oversample'
 
-                            info_cur = utsne.computeEBM(X_EBM,y_EBM,EBM,ebm_creopts,revdict_lenc,
-                                    class_ind_to_check_lenc, class_labels_good_nm, revdict_nm,
+                            EBM_tune_param_cur = EBM_tune_param
+                            if EBM_tune_param and load_EBM_params_auto \
+                                and os.path.exists(fname_ML_full_intermed_light):
+                                fe = np.load(fname_ML_full_intermed_light, allow_pickle=True)
+                                resc_ = fe['results_light'][()]
+                                rc = resc_['featsel_per_method'][fsh][featsel_feat_subset_name]
+                                ebm_creopts_tuned  = rc.get('ebm_creopts',None)
+
+                                if (ebm_creopts_tuned is not None):
+                                    print('-------- Loaded EBM parameters from file!')
+                                    assert tuple(ebm_creopts_tuned['feature_names'] ) == tuple(ebm_creopts['feature_names'] )
+                                    ebm_creopts = ebm_creopts_tuned
+                                    EBM_tune_param_cur = False
+                            info_cur = utsne.computeEBM(X_EBM,y_EBM,EBM,ebm_creopts,revdict_lenc,  revdict_lenc_nm,
+                                    class_ind_to_check_lenc,
+                                    class_labels_good_for_classif_nm[::subskip_fit],
                                     n_splits=n_splits,
                                     EBM_compute_pairwise=EBM_compute_pairwise,
                                     EBM_CV=EBM_CV, featnames_ebm=featnames_ebm,
-                                    tune_params = EBM_tune_param, params_space=params_space,
+                                    tune_params = EBM_tune_param_cur, params_space=params_space,
                                                         max_evals=EBM_tune_max_evals)
                             info_cur['feature_indices_used'] = featis
                             featsel_info[featsel_feat_subset_name] = info_cur
