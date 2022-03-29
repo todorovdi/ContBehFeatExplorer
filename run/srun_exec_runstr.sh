@@ -4,6 +4,7 @@ set -e
 RUNSTRINGS_FN=$1
 JOBID=$2
 RUNSTRING_IND=$3
+JOB_ARRAY_IND=$4
 mapfile -t RUNSTRINGS < $RUNSTRINGS_FN
 echo ----------
 echo    "Runstring ind = $RUNSTRING_IND"
@@ -43,4 +44,5 @@ echo $RUNSTRING_CUR
 py=python
 export PYTHONPATH=$OSCBAGDIS_DATAPROC_CODE:$PYTHONPATH
 $py -c "import os; print('cwd for $py=',os.getcwd() );"
-$py $CODE/run/$RUNSTRING_CUR --SLURM_job_id "$JOBID"_"$RUNSTRING_IND" --calc_MI 0
+#$py $CODE/run/$RUNSTRING_CUR --SLURM_job_id "$JOBID"_"$RUNSTRING_IND"  --calc_MI 0
+$py $CODE/run/$RUNSTRING_CUR --SLURM_job_id "$JOBID"_"$JOB_ARRAY_IND" --runstring_ind $RUNSTRING_IND 

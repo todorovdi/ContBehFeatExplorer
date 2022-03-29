@@ -1787,10 +1787,17 @@ def getClfPredPower(clf,X,class_labels,class_ind, label_ids_order = None,
 
     #recall_score
     res['recall_per_class_bin'] = recall_per_class_bin
-    res['precision'] = precision_score(class_labels,preds)
-    res['balanced_accuracy'] = balanced_accuracy_score(class_labels,preds)
+    res['recall_micro']    = recall_score(class_labels, preds, average = 'micro'   )
+    res['recall_macro']    = recall_score(class_labels, preds, average = 'macro'   )
+    res['recall_weighted'] = recall_score(class_labels, preds, average = 'weighted')
+    res['precision_micro']    = precision_score(class_labels, preds, average = 'micro'   )
+    res['precision_macro']    = precision_score(class_labels, preds, average = 'macro'   )
+    res['precision_weighted'] = precision_score(class_labels, preds, average = 'weighted')
+    res['balanced_accuracy'] = balanced_accuracy_score(class_labels,preds,adjusted=False)
+    res['balanced_accuracy_adj'] = balanced_accuracy_score(class_labels,preds,adjusted=True) # adjustment for chance level
     res['accuracy'] = accuracy_score(class_labels,preds)
-
+    #res['auc'] = np.nan
+    #res['chance'] = np.nan
 
     if np.sum(pos_actual) == 0 or np.sum(neg_actual) == 0:
         s = f'one of masks is bad {np.sum(pos_actual)}, {np.sum(neg_actual)}'
@@ -3400,7 +3407,8 @@ def _computeEBM(X,y,EBM,ebm_creopts,revdict_lenc, revdict_lenc_nm,
                 class_labels_good_nm,
                 n_splits=5,
                EBM_CV=0, featnames_ebm=None, tune_params = False,
-                params_space = None, max_evals = 20, balancing='weighting'):
+                params_space = None, max_evals = 20, balancing='weighting',
+                savedict = None):
     assert balancing in ['oversample' , 'weighting', 'none' ]
     import itertools
     from interpret.glassbox.ebm.utils import EBMUtils
@@ -3412,6 +3420,10 @@ def _computeEBM(X,y,EBM,ebm_creopts,revdict_lenc, revdict_lenc_nm,
     from interpret.privacy import DPExplainableBoostingClassifier as _DPEBM
 
     assert len(class_labels_good_nm) == len(y), ( len(class_labels_good_nm), len(y)  )
+    uls = list(set(y))
+    multiclass = False
+    if len(uls) > 2:
+        multiclass = True
 
     if balancing == 'oversample':
         from imblearn.over_sampling import RandomOverSampler
@@ -3432,8 +3444,11 @@ def _computeEBM(X,y,EBM,ebm_creopts,revdict_lenc, revdict_lenc_nm,
             privacy_schema['target'] = (0,0)  # it will not be used
             ebm_creopts_loc['composition'] = 'gdp'
             ebm_creopts_loc['privacy_schema'] = privacy_schema
+        elif params_space is not None and multiclass:
+            del params_space['interactions']
 
         from sklearn.model_selection import cross_val_score
+        #import pdb; pdb.set_trace()
 
         def objective(space_loc):
             import time
@@ -3445,9 +3460,22 @@ def _computeEBM(X,y,EBM,ebm_creopts,revdict_lenc, revdict_lenc_nm,
             model = EBM(**ebm_creopts_locloc)
             accuracy = cross_val_score(model,X,y,cv=4, scoring='balanced_accuracy').mean()
 
-            return {'loss':-accuracy, 'status':STATUS_OK,
+            d = {'loss':-accuracy, 'status':STATUS_OK,
                     'creopts':ebm_creopts_locloc, 'effparams':space_loc,
                     'time':time.time() - st_time}
+
+            if savedict is not None:
+                f = savedict['save_fun']
+
+                s0 = ''
+                for k,v in space_loc.items():
+                    s0 += f'{k}:{v};'
+                #s0
+
+                f(d, None, savedict['subsubdir'], s0 )
+                #print('fdsfdsfd ',savedict['subsubdir'], str(space_loc) )
+
+            return d
 
         trials = Trials()
         best = fmin(fn=objective, space=params_space, algo=tpe.suggest, max_evals=max_evals, trials=trials)
@@ -3494,7 +3522,7 @@ def _computeEBM(X,y,EBM,ebm_creopts,revdict_lenc, revdict_lenc_nm,
 
         perf_per_cp = extractSubperfs(X,y,class_labels_good_nm, revdict_lenc, revdict_lenc_nm,
                             class_ind_to_check_lenc, r0_ebm['clf_objs'],
-                                      r0_ebm['test_indices_list'] )
+                                      r0_ebm['test_indices_list'], confmat=r0_ebm['confmat_aver'] )
         #perf_per_cp = {}
         #uls = list(set(y))
         #if len( uls  ) == 2:
@@ -3671,7 +3699,7 @@ def _computeEBM(X,y,EBM,ebm_creopts,revdict_lenc, revdict_lenc_nm,
     return res
 
 def extractSubperfs(X,y,y_nm, revdict_lenc, revdict_lenc_nm, class_ind_to_check_lenc,
-                    clf_objs, test_indices_list):
+                    clf_objs, test_indices_list, confmat=None):
     assert revdict_lenc[class_ind_to_check_lenc] == revdict_lenc_nm[class_ind_to_check_lenc]
     class_id_nm = class_ind_to_check_lenc
     #perf_per_cp = {}
@@ -3721,13 +3749,13 @@ def extractSubperfs(X,y,y_nm, revdict_lenc, revdict_lenc_nm, class_ind_to_check_
             d = {'confmat_aver':confmat_aver, 'perf_aver':perf_aver }
             perf_per_cp[cpstr].update(  d  )
     else:
+        assert confmat is not None,  'You need to provide confmat for multiclass'
         from utils_postprocess_HPC import perfFromConfmat
         import itertools
         class_pairs = list(itertools.combinations(uls, 2))
         perf_per_cp = {}
         for cp in class_pairs:
             c1,c2 = cp
-            confmat = None  # TODO: need to put something meaningful!
             confmat_aver = confmat[[c1,c2],:][:,[c1,c2] ]
             ind = c1
             if c2 == class_ind_to_check_lenc:
@@ -3746,7 +3774,8 @@ def computeEBM(X,y,EBM,ebm_creopts,revdict_lenc, revdict_lenc_nm,
                class_labels_good_nm,
                n_splits=5,
                EBM_compute_pairwise=0,EBM_CV=0, featnames_ebm=None,
-               tune_params = False, params_space = None, max_evals = 20, balancing='weighting' ):
+               tune_params = False, params_space = None, max_evals = 20, balancing='weighting',
+              savedict = None ):
     import itertools
     from interpret.glassbox.ebm.utils import EBMUtils
     from sklearn.utils.class_weight import compute_sample_weight
@@ -3772,13 +3801,17 @@ def computeEBM(X,y,EBM,ebm_creopts,revdict_lenc, revdict_lenc_nm,
             X_cur_cp = X[inds]
             y_cur_cp = y[inds]
 
+            savedict_cur = None
+            if savedict is not None:
+                os.path.join(savedict_cur['subsubdir'], str(indpair_names) )
+
             info_cur_cp = _computeEBM(X,y,EBM,ebm_creopts,
                 revdict_lenc, revdict_lenc_nm, class_ind_to_check_lenc,
                 class_labels_good_nm[inds],
                 n_splits=n_splits, EBM_CV=EBM_CV, featnames_ebm=featnames_ebm,
                 tune_params = tune_params,
                 params_space = params_space, max_evals = max_evals,
-                balancing=balancing)
+                balancing=balancing, savedict=savedict_cur)
 
             #global_exp = info_cur_cp['explainer']
             ## extracting data from explainer
@@ -3802,7 +3835,7 @@ def computeEBM(X,y,EBM,ebm_creopts,revdict_lenc, revdict_lenc_nm,
             class_ind_to_check_lenc, class_labels_good_nm,
             n_splits=n_splits, EBM_CV=EBM_CV, featnames_ebm=featnames_ebm,
                         tune_params = tune_params, params_space = params_space, max_evals = max_evals,
-                        balancing=balancing)
+                        balancing=balancing, savedict=savedict)
         res = info_cur
 
         #featsel_info.update(info_cur)

@@ -28,20 +28,26 @@ if [ $DIRECT_SSH -ne 0 ]; then
   echo "Using rsync -e ssh"
   SSH_FLAG="-e ssh"
   JUSUF="judac:data_proc_code"
+  JUSUF_BASE="judac:ju_oscbagdis"
   SLEEP="sleep 1s"
 else
   mountpath="$HOME/ju_oscbagdis"
   numfiles=`ls $mountpath | wc -l`
-  if [ $numfiles -eq 0 ]; then
-    echo "not mounted! trying to remount"
+  MQR=`mountpoint -q "$mountpath"`
+  while [ $numfiles -eq 0 ] || ! mountpoint -q "$mountpath"; do
+    echo "not mounted! trying to remount; numfiles=$numfiles MQR=$MQR"
     sudo umount -l $mountpath # would not work if I run on cron
     sshfs judac:/p/project/icei-hbp-2020-0012/OSCBAGDIS $mountpath
     #exit 1
-  fi
+    sleep 3s
+    numfiles=`ls $mountpath | wc -l`
+    MQR=`mountpoint -q "$mountpath"`
+  done
 
   echo "Using mounted sshfs"
   SSH_FLAG=""
   JUSUF="$HOME/ju_oscbagdis/data_proc_code"
+  JUSUF_BASE="$HOME/ju_oscbagdis"
   SLEEP=""
 fi
 
@@ -54,6 +60,8 @@ subdir=run
 echo "  rsync run files (excluding sh, only py)"
 #rsync $FLAGS $SSH_FLAG --exclude="*HPC.sh" --exclude="sbatch*" --exclude=srun_pipeline.sh --exclude=srun_exec_runstr.sh $ZBOOK_DIR/$subdir/*.{py,sh}  $JUSUF/$subdir/
 rsync $FLAGS $SSH_FLAG $ZBOOK_DIR/$subdir/*.py --exclude=indtool.py  $JUSUF/$subdir/
+echo "  rsync matlab_compiled"
+rsync $FLAGS $SSH_FLAG $ZBOOK_DIR/matlab_compiled/  $JUSUF/matlab_compiled 
 $SLEEP
 echo "  rev rsync run files (excluding sh, only py)"
 rsync $FLAGS $SSH_FLAG  $JUSUF/$subdir/*.sh  $ZBOOK_DIR/$subdir/
@@ -74,6 +82,14 @@ echo "  rsync test data"
 rsync $FLAGS $SSH_FLAG $ZBOOK_DIR/test_data/*.py $JUSUF/test_data/
 echo "  rev rsync helper_scripts"
 rsync $FLAGS $SSH_FLAG $JUSUF/helper_scripts/*.sh $ZBOOK_DIR/helper_scripts/ 
+echo "  rev rsync EXPORT"
+sd=joint_noskip
+mkdir $DATA_DUSS/$sd  
+rsync $FLAGS $SSH_FLAG $JUSUF_BASE/data_duss/$sd/EXPORT*.npz $DATA_DUSS/$sd 
+sd=per_subj_per_medcond_best_LFP
+mkdir $DATA_DUSS/$sd  
+rsync $FLAGS $SSH_FLAG $JUSUF_BASE/data_duss/$sd/EXPORT*.npz $DATA_DUSS/$sd 
+rsync $FLAGS $SSH_FLAG $JUSUF_BASE/data_duss/$sd/beh_states_durations.npz $DATA_DUSS/$sd 
 
 
 # save current code version and make it transferable to HPC (we don't have git there)

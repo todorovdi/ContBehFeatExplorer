@@ -129,6 +129,9 @@ def plotDataAnnStat(rawnames,dat_pri,times_pri,chnames_pri,
                    dat_dict=None,band=None,pdf=None, legend_loc = 'lower right',
                     chis_to_show = None, q_thr = 1e-3, mult_std = 3.5,
                     artif_height_prop = 0.3, ww=6, hh=2):
+    '''
+    plot data with annotations
+    '''
 
     import utils_tSNE as utsne
     import matplotlib.pyplot as plt
@@ -298,8 +301,11 @@ def plotFeatsAndRelDat(rawnames,featnames_sel, dat_pri,chnames_all_pri,
     #    attrs_per_descr[it] = cmap()
 
 
-    nr = len(chnames_involved) + len(featnames_sel)
-    hratios = [0.75] * len(chnames_involved) + [1] * len(featnames_sel)
+    nr = len(featnames_sel)
+    hratios =  [1] * len(featnames_sel)
+    if dat_pri is not None:
+        nr += len(chnames_involved)
+        hratios = [0.75] * len(chnames_involved) + hratios
     if extdat_pri is not None:
         hratios = [0.4] + hratios
         nr += 1
@@ -347,31 +353,34 @@ def plotFeatsAndRelDat(rawnames,featnames_sel, dat_pri,chnames_all_pri,
 
     print('Plotting rawdata')
     # plot raw data
-    for rawi,rawn in enumerate(rawnames):
-        print(rawn)
-        # LFP main chan would be 007
-        for chni,chn in enumerate(chnames_involved):
-            ax = axs[chni + rowi_offset, rawi]
+    if dat_pri is not None or dat_hires_pri is not None:
+        for rawi,rawn in enumerate(rawnames):
+            print(rawn)
+            # LFP main chan would be 007
+            for chni,chn in enumerate(chnames_involved):
+                ax = axs[chni + rowi_offset, rawi]
 
-            if chn.startswith('LFP') and mainLFP_per_rawn is not None:
-                mainLFP_cur = mainLFP_per_rawn[rawn]
-                chn = mainLFP_cur
+                if chn.startswith('LFP') and mainLFP_per_rawn is not None:
+                    mainLFP_cur = mainLFP_per_rawn[rawn]
+                    chn = mainLFP_cur
 
-            if chnames_all_newsrcgrp_pri is not None:
-                orig_ind  = chnames_all_newsrcgrp_pri[rawi].index(chn)
-            else:
-                orig_ind  = chnames_all_pri[rawi].index(chn)
+                if chnames_all_newsrcgrp_pri is not None:
+                    orig_ind  = chnames_all_newsrcgrp_pri[rawi].index(chn)
+                else:
+                    orig_ind  = chnames_all_pri[rawi].index(chn)
 
 
-            if chn.startswith('LFP') and dat_hires_pri is not None:
-                ax.plot(times_hires_pri[rawi], dat_hires_pri[rawi][chnames_all_hires_pri[rawi].index(chn)], alpha=alpha, c=main_color )
-                ax.set_xlim( (times_hires_pri[rawi][0],times_hires_pri[rawi][-1] ) )
-            else:
-                ax.plot(times_pri[rawi], dat_pri[rawi][orig_ind],  alpha=alpha, c=main_color)
-                ax.set_xlim( (times_pri[rawi][0],times_pri[rawi][-1] ) )
+                if chn.startswith('LFP') and dat_hires_pri is not None:
+                    assert dat_hires_pri is not None
+                    ax.plot(times_hires_pri[rawi], dat_hires_pri[rawi][chnames_all_hires_pri[rawi].index(chn)], alpha=alpha, c=main_color )
+                    ax.set_xlim( (times_hires_pri[rawi][0],times_hires_pri[rawi][-1] ) )
+                else:
+                    assert dat_pri is not None
+                    ax.plot(times_pri[rawi], dat_pri[rawi][orig_ind],  alpha=alpha, c=main_color)
+                    ax.set_xlim( (times_pri[rawi][0],times_pri[rawi][-1] ) )
 
-            if xlim is not None:
-                ax.set_xlim(xlim)
+                if xlim is not None:
+                    ax.set_xlim(xlim)
 
 
 
@@ -431,9 +440,11 @@ def plotFeatsAndRelDat(rawnames,featnames_sel, dat_pri,chnames_all_pri,
                 #labels, handles = zip(*sorted(zip(labels, handles), key=lambda t: t[0]))
                 ax.legend(handles_reord, descr_order, loc=legend_loc)
 
+
+        rowi_offset += len(chnames_involved)
+
     # plot features
     print('Plotting features')
-    rowi_offset += len(chnames_involved)
     for rawi,rawn in enumerate(rawnames):
         print(rawn)
         for feati,featn in enumerate(featnames_sel):
@@ -1060,3 +1071,261 @@ def plotComponents(components, feature_names_all, comp_inds, nfeats_show, q,
 #
 #    compinds =  range( ica.get_components().shape[1] )  #all components
 #    icacomp = ica.get_sources(filt_raw)
+
+def array2png(im, figname_full):
+    from imageio import imwrite
+    imwrite(figname_full, im )
+
+def saveRenderVisBrainScene(sc, figname_full, resolution = 300,
+                            render_only = False, crop_out = None):
+    # This hack is needed when running visbrain in jupyter
+    import matplotlib.pyplot as plt
+    from mpl_render import RenderingImShow
+
+    ww,hh = sc.canvas.size
+    x,y=0,0
+    if crop_out is not None:
+        x += crop_out[0]
+        y += crop_out[1]
+        ww -= crop_out[2]
+        hh -= crop_out[3]
+    render_result = sc.render()
+    region = x,y,ww,hh
+
+    render_result =  render_result[y:y+hh,:][:,x:x+ww]
+    #render_result = np.flip(render_result, axis = 0)
+
+    #from imageio import imwrite
+    #imwrite(figname_full, render_result )
+    if not render_only:
+        array2png(render_result, figname_full)
+    return render_result
+
+    # produces wierd stuff that needs to be cropped
+    #fig, ax = plt.subplots(1, 1)
+    #ax = plt.gca()
+    #fig = plt.gcf()
+    ## |  The `user_render()` method is expected to return an image with
+    ## |  size `self.size`, representing area `self.extent`, where `extent`
+    ## |  describes a rectangle `(x0, x1, y0, y1)`
+    ## size is just size of the image (in pixels)
+    #extent = (0, 7, 0, 5)
+    #extent = (-5, 0, 0, 5)
+    #p = RenderingImShow( ax, extent = extent, render_callback = (lambda size, extent: render_result))
+
+    ## here I delete axis and colorbar, which somehow get added while applying mpl_render
+    #plt.axis('off')
+    #plt.delaxes(fig.axes[1])
+
+    ## save the figure in high resolution now possible
+    #fig.savefig(figname_full, dpi=resolution)
+
+
+def plot3DValPerParcel(vals_per_source, val_LFP, vis_info, title,
+                       show_supp=True, sources_visible=False,
+                       radius_project=1.2, bgcolor='lightgrey',
+                       brain_translucent=False,
+                      cblabel='performance', fit_to_brain = True, fit_supp_to_brain = False,
+                       views=['left','right'], clim = None, ww=None, hh=None,
+                      use_mod_sourcegrid = True, colorbar = True, cmap='plasma' ):
+    import numpy as np
+    from visbrain.objects import BrainObj, ColorbarObj, SceneObj, SourceObj, RoiObj
+    # Scene creation
+    if ww is None:
+        ww = 300 * len(views) + 200
+
+    if hh is None:
+        hh = 500
+        if show_supp:
+            hh = 1000
+    sc = SceneObj(bgcolor=bgcolor, size=(ww, hh))
+    # Colorbar default arguments. See `visbrain.objects.ColorbarObj`
+    cbrect = (-0.15, -2., 1., 4.)
+    CBAR_STATE = dict(cbtxtsz=12, txtsz=10., width=.1, cbtxtsh=2.,
+                      rect=cbrect)
+
+    zoom_STN_area = 2.
+    zoom_brain = 2.5
+    zoom_brain = 10.
+    KW = dict(title_size=16., zoom=zoom_brain)
+    if bgcolor in ['lightgrey', 'white']:
+        KW['title_color'] = 'black'
+        CBAR_STATE['txtcolor'] = 'black'
+        CBAR_STATE['bgcolor'] = 'white'
+
+
+    from os.path import join as pjoin
+    import globvars as gv
+
+    sind_str = ''
+    vi = vis_info
+    tris = vi['headsurf_tris']
+    verts =  vi['headsurf_verts']  #- 1.
+    # Translucent inflated BrainObj with both hemispheres displayed
+    #tc = True;
+    tc = brain_translucent
+    #hemisphere = 'left'
+    hemisphere = 'both'
+
+    colids = {}
+    brain_obj_per_rot = {}
+    for i,v in enumerate(views):
+        b_obj = BrainObj(f'{sind_str}_brainsurf', translucent=tc, vertices=verts,
+                            faces=tris,  hemisphere=hemisphere)
+        brain_obj_per_rot[v] = b_obj
+        colids[v] = i
+
+    #b_obj_left = BrainObj(f'{sind_str}_brainsurf', translucent=tc, vertices=verts,
+    #                     faces=tris,  hemisphere=hemisphere)
+
+    #colids = {'back':0, 'left':1}
+    # Add the brain to the scene. Note that `row_span` means that the plot will
+    # occupy two rows (row 0 and 1);  row_span=1
+    was = False
+    for rot,colid in colids.items():
+        title_cur = title
+        if was:
+            title_cur = ''
+        sc.add_to_subplot(brain_obj_per_rot[rot], row=0, col=colid,
+                          title=title_cur, **KW, rotate=rot)
+        was = True
+
+    if show_supp:
+        tc_supp = True
+        brain_obj_per_rot_supp = {}
+        for v,colid in colids.items():
+            b_obj = BrainObj(f'{sind_str}_brainsurf', translucent=tc_supp, vertices=verts,
+                                faces=tris,  hemisphere=hemisphere)
+            brain_obj_per_rot_supp[v] = b_obj
+
+            sc.add_to_subplot(brain_obj_per_rot_supp[v], row=1, col=colid,
+                          title=f'{title} supp', **KW, rotate=v)
+
+
+    # verticesarray_like | None
+    # Mesh vertices to use for the brain. Must be an array of shape (n_vertices, 3).
+
+    # facesarray_like | None
+    # Mesh faces of shape (n_faces, 3).
+    ################################################################
+    #if vals_per_source is None:
+    #    import utils
+    #    #vals = np.arange(len(roi_labels))
+    #    vals_per_source = utils.dupValsWithinParcel(roi_labels,srcgroups, vals)
+
+    if use_mod_sourcegrid:
+        xyz = vi['headsurfgrid_mod_verts']
+    else:
+        xyz = vi['headsurfgrid_verts']
+            #headsurfgrid_mod_verts
+    #xyz = xyz * 10 / 3
+#     data = np.zeros( xyz.shape[0]  )
+#     #data = np.random.uniform(size=data.shape[0])
+#     data[10:100] = 1
+    data = vals_per_source
+    data_bad_mask = np.isnan(data)
+
+    data_good_mask = ~data_bad_mask
+    print( xyz.shape, data.shape )
+
+    mask_nan = True  # DEBUG ONLY!
+    if mask_nan:
+        xyz = xyz[data_good_mask]
+        data_good = data[data_good_mask]
+    else:
+        data[data_bad_mask] = -100
+        data_good = data
+
+    #%debug
+    radius_supp = 6
+    RADINFO = dict(radius_min=radius_supp, radius_max = radius_supp)
+
+    verts = brain_obj_per_rot[views[0] ].vertices
+
+    source_obj_per_rot = {}
+    for v,colid in colids.items():
+        s_obj  = SourceObj ('mysrc', xyz, data=data_good, cmap=cmap, **RADINFO)
+        # mask=~data_bad_mask, mask_color='gray'
+        if fit_to_brain:
+            s_obj.fit_to_vertices(verts)
+        source_obj_per_rot[v] = s_obj
+
+        #mask=mask, mask_color='gray'
+
+
+    if show_supp:
+        source_obj_per_rot_supp = {}
+        data_supp = data_good
+        data_supp = None
+        for v,colid in colids.items():
+            s_obj_unfit  = SourceObj('mysrc',  xyz, data=data_supp, cmap=cmap, **RADINFO )
+
+            if fit_supp_to_brain:
+                s_obj_unfit.fit_to_vertices(verts)
+
+            source_obj_per_rot_supp[v] = s_obj_unfit
+
+    # Just for fun, color sources according to the data :)
+    #s_obj.color_sources(data=data)
+
+
+    #s_obj_unfit.project_sources(b_obj_back, cmap='plasma', radius=20)
+    # s_obj2_unfit.project_sources(b_obj_left, cmap='plasma', radius=4)
+
+    # Finally, add the source and brain objects to the subplot
+    for rot,colid in colids.items():
+        # Project source's activity
+        source_obj_per_rot[rot].project_sources(brain_obj_per_rot[rot], cmap=cmap,
+                                                radius=radius_project)
+
+        if not sources_visible:
+            source_obj_per_rot[rot].set_visible_sources('none')
+        sc.add_to_subplot(source_obj_per_rot[rot],  row=0, col=colid, title='', **KW, rotate=rot)
+        #sc.add_to_subplot(s_obj2, row=0, col=2, title='', **KW, rotate='right')
+
+    if show_supp:
+        for rot,colid in colids.items():
+            sc.add_to_subplot(source_obj_per_rot_supp[rot],  row=1,
+                              col=colid, title='', **KW, rotate=rot, )
+
+
+    #sc.add_to_subplot(b_obj_proj, row=0, col=2, rotate='left', use_this_cam=True)
+    # Finally, add the colorbar :
+
+    colorbar_colind = len(colids)
+    if val_LFP is not None:
+        colorbar_colind = len(colids) + 1
+    if clim is None:
+        dd = data[ ~data_bad_mask ]
+        clim = np.min(dd),np.max(dd)
+
+    if colorbar:
+        cb_proj = ColorbarObj(s_obj, cblabel=cblabel, **CBAR_STATE, clim=clim )
+        sc.add_to_subplot(cb_proj, row=0, col=colorbar_colind)#, width_max=100)
+
+    #########################
+    if val_LFP is not None:
+        b_obj = BrainObj('brtr', translucent=True, vertices=verts*10,
+                        faces=tris,  hemisphere=hemisphere)
+        roi_aal = RoiObj('aal')
+        idx_th = roi_aal.where_is('Thalamus (L)')
+        r = roi_aal.select_roi(select=idx_th)
+        mean_v = np.mean(roi_aal.vertices, axis=0)
+        xyz = mean_v[None,:]
+        radius_supp = 2
+        RADINFO = dict(radius_min=radius_supp, radius_max = radius_supp)
+        s_obj  = SourceObj ('mysrc', xyz, data=[val_LFP], cmap=cmap, **RADINFO)
+
+        s_obj.project_sources(roi_aal, cmap=cmap, radius = 20, clim=clim)
+        #, clim=(-1., 1.), vmin=-.5, vmax=.7, under='gray', over='red', radius = 5
+
+
+        stn_colid = len(colids)
+        #sc = SceneObj(bgcolor='white', size=(1500, 500))
+        sc.add_to_subplot(b_obj,   row=0, col = stn_colid, rotate='left', zoom=zoom_STN_area,
+                          title='STN LFP')
+        sc.add_to_subplot(roi_aal, row=0, col = stn_colid, rotate='left')
+        sc.add_to_subplot(s_obj,   row=0, col = stn_colid, rotate='left')
+
+
+    return sc

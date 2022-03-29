@@ -196,6 +196,15 @@ class globparams:
         else:
             self.n_free_cores = 0
 
+        fn = os.path.join(code_dir, 'subj_corresp.json')
+        if os.path.exists(fn):
+            with open(fn, 'r') as f:
+                svd = json.load(f)
+            self.subj_corresp = svd
+        else:
+            self.subj_corresp = None
+
+
         self.tremcolor = 'r'
         self.notremcolor = 'g'
         self.movecolor = 'b'  #c,y

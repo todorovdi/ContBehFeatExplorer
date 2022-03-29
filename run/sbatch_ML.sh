@@ -9,8 +9,9 @@
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=128
 
-#SBATCH --time=23:00:00
+#SBATCH --time=10:00:00
 #SBATCH --partition=batch
+##SBATCH --mem=60G
 #SBATCH --mem=128G
 
 ##SBATCH --mem=80G
@@ -49,13 +50,14 @@
 ###  sbatch <jobscript> 
 ## srun <executable>
 
+#srun --exclusive -n 128 ./mpi-prog1 &
+#srun --exclusive -n 128 ./mpi-prog2 &
+#wait
+
 jutil env activate -p icei-hbp-2020-0012
 
 JOBID=$SLURM_JOB_ID
 ID=$SLURM_ARRAY_TASK_ID
-SHIFT_ID=0
-EFF_ID=$((ID+SHIFT_ID))
-echo "Running job array number: ${ID} (effctive_id = $EFF_ID) on $HOSTNAME,  $SLURM_JOB_ID, $SLURM_ARRAY_JOB_ID"
 
 
 ##export PROJECT=$HOME/shared/OSCBAGDIS/data_proc
@@ -73,12 +75,39 @@ export PATH=$PATH:$HOME/.local/bin
 #module load scikit
 #module load Python-Neuroimaging
 #module load SciPy-Stack
+module load Stages/2022
+module load GCC
 module load R
+module load Python
 
 echo "DATA_DUSS=$DATA_DUSS"
 
 source $CODE/__workstart.sh
 pwd
 
+export PYTHONPATH=$PYTHONPATH:$PROJECT/OSCBAGDIS/LOCAL/lib/python3.9/site-packages
+
 RUNSTRINGS_FN="$CODE/run/_runstrings_ML.txt"
-$OSCBAGDIS_DATAPROC_CODE/run/srun_exec_runstr.sh $RUNSTRINGS_FN $SLURM_ARRAY_JOB_ID $EFF_ID
+
+SHIFT_ID=0
+#EFF_ID=$((ID+SHIFT_ID))
+#echo "Running job array number: ${ID} (effctive_id = $EFF_ID) on $HOSTNAME,  $SLURM_JOB_ID, $SLURM_ARRAY_JOB_ID"
+#$OSCBAGDIS_DATAPROC_CODE/run/srun_exec_runstr.sh $RUNSTRINGS_FN $SLURM_ARRAY_JOB_ID $EFF_ID
+
+MAXJOBS=256
+
+NUMRS=`wc -l $RUNSTRINGS_FN | awk '{print $1;}'`
+echo "Start now"
+while [ $NUMRS -gt $SHIFT_ID ]; do
+  EFF_ID=$((ID+SHIFT_ID))
+  if [ $EFF_ID -ge $NUMRS ]; then
+    break
+  fi
+  echo "Running job array number: ${ID} (effctive_id = $EFF_ID) on $HOSTNAME,  $SLURM_JOB_ID, $SLURM_ARRAY_JOB_ID"
+  $OSCBAGDIS_DATAPROC_CODE/run/srun_exec_runstr.sh $RUNSTRINGS_FN $SLURM_ARRAY_JOB_ID $EFF_ID $ID
+  SHIFT_ID=$((SHIFT_ID + MAXJOBS))
+
+  ##########################  ONLY FOR RUNNING OF INDIVID JOBS
+  break
+  ##########################
+done

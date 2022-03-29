@@ -59,3 +59,9 @@ linear ramp and faster nonlin decay (first lin decay and then plato)
 several tremor episodes
 in the beginning as well, it ends starngely -- fist tremr per se ends, and then for 5 more secs there is some activity in the EMG
 linear ramp and nonlin decay
+
+-------
+
+
+
+S001_OFF_01    left     tremor always, some movement (with tremor)

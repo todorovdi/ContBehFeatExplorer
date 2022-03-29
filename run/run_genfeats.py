@@ -772,7 +772,10 @@ n_channels_str = ','.join(map(str, n_channels_pri) )
 #roi_labels = roi_labels_pri[0]
 rec_info = rec_info_pri[0]
 roi_labels = rec_info['label_groups_dict'][()]
-srcgrouping_names_sorted = rec_info['srcgroups_key_order'][()]  # order of grouping names
+# order of grouping names, usually there is just one element "all_raw" meaning
+# that I don't do any grouping of sources to perform post source reconstruction
+# processing (like PCA, ICA, mean, etc)
+srcgrouping_names_sorted = rec_info['srcgroups_key_order'][()]
 assert set(roi_labels.keys() ) == set(srcgrouping_names_sorted )
 assert len(roi_labels) == 1, 'several groupings in single run -- not implmemented'
 # assuming we have only one grouping present

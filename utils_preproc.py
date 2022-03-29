@@ -2138,12 +2138,19 @@ def readInfo(rawname, raw, sis=[1,2], check_info_diff = 1, bandpass_info=0 ):
 
     return mod_info, infos
 
-def extractEMGData(raw, rawname_=None, skip_if_exist = 1, tremfreq = 9):
+def extractEMGData(raw, rawname_=None, skip_if_exist = 1, tremfreq = 9, save_dir = None):
     # highpass and convolve
+    # tremfreq should be max tremfreq found in the analyzed data (max over all
+    # subjects)
     import globvars as gv
     raw.info['bads'] = []
 
     chis = mne.pick_channels_regexp(raw.ch_names, 'EMG.*old')
+    if len(chis) == 0:
+        print('WARNING: there are not EMG.*old channels ,trying to select EMG.*')
+        chis = mne.pick_channels_regexp(raw.ch_names, 'EMG.*')
+        if len(chis) == 0:
+            raise ValueError('ERROR: there are not EMG channels at all')
     restr_names = np.array( raw.ch_names )[chis]
 
     emgonly = raw.copy()
@@ -2178,7 +2185,9 @@ def extractEMGData(raw, rawname_=None, skip_if_exist = 1, tremfreq = 9):
     rectconvraw.apply_function( lambda x: x / 100 ) # 100 is just empirical so that I don't have to scale the plot
 
     if rawname_ is not None:
-        rectconv_fname_full = os.path.join(gv.data_dir, '{}_emg_rectconv.fif'.format(rawname_) )
+        if save_dir is None:
+            save_dir = gv.data_dir
+        rectconv_fname_full = os.path.join(save_dir, '{}_emg_rectconv.fif'.format(rawname_) )
         if not (skip_if_exist and os.path.exists(rectconv_fname_full) ):
             print('EMG raw saved to ',rectconv_fname_full)
             rectconvraw.save(rectconv_fname_full, overwrite=1)

@@ -922,7 +922,7 @@ def printSynInfo(synlist,indlist,featnames,ftypes_print = ['bpcorr'],minlen_prin
             print(featnames_syns_cur)
 
 
-def multiLevelDict2TupleList(d,min_depth=0,max_depth=99999, cur_depth = 0):
+def multiLevelDict2TupleList(d,min_depth=0,max_depth=99999, cur_depth = 0, prefix_sort = None):
     '''
     max_depth  -- depth after which I return dict instead of leafs
     min_dpeht  -- depth before which I don't save leaves
@@ -947,6 +947,17 @@ def multiLevelDict2TupleList(d,min_depth=0,max_depth=99999, cur_depth = 0):
                 r += [(k,subd)]
                 #print('leaf')
             continue
+
+    if prefix_sort is not None:
+        assert isinstance(prefix_sort, list)
+        prefix_ind = 1
+        # in case we sort only some prefixes
+        all_prefixes = set( [tpl[prefix_ind] for tpl in r] )
+        rest_prefixes = set(all_prefixes) - set(prefix_sort)
+        rest_prefixes = list(sorted(rest_prefixes))
+        prefixes_all_sorted = prefix_sort + rest_prefixes
+        r = sorted( r, key = lambda x: prefixes_all_sorted.index( x[1] ) )
+        r = list(r)
     return r
 
 def groupOutputs(output_per_raw, prefixes = None, label_groupings=None,

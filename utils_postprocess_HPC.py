@@ -19,7 +19,7 @@ def collectPerformanceInfo3(rawnames, prefixes, ndays_before = None,
                            allow_multi_fn_same_prefix = False, use_light_files=True,
                             rawname_regex_full =False,
                            start_time=None,end_time=None,
-                           lighter_light = False ):
+                           lighter_light = False, load=True, verbose=1 ):
     '''
     rawnames can actually be just subject ids (S01  etc)
     red means smallest possible feat set as found by XGB
@@ -212,12 +212,14 @@ def collectPerformanceInfo3(rawnames, prefixes, ndays_before = None,
     #################3
     for s in fn_per_fntype:
         tuples = fn_per_fntype[s]
-        print(f'   {s}: {len( tuples ) } tuples')
+        if verbose > 1:
+            print(f'   {s}: {len( tuples ) } tuples')
     ####################
 
     if not list_only:
         for s in fn_per_fntype:
-            print(f'!!!!!!!!!!   Start loading files for {s}')
+            if verbose > 0:
+                print(f'!!!!!!!!!!   Start loading files for {s}')
             tuples = fn_per_fntype[s]
             #print(f'   {s}: {len( tuples ) } tuples')
             for tpli,tpl in enumerate(tuples ):
@@ -239,43 +241,55 @@ def collectPerformanceInfo3(rawnames, prefixes, ndays_before = None,
                 fnf,mod_time = tpl
                 fname_full = os.path.join(dir_to_use,fnf )
 
-                t0 = time()
-                f = np.load(fname_full, allow_pickle=1)
-
-                if use_light_files:
-                    res_cur = f['results_light'][()]
-                else:
-                    res_cur = f['results_cur'][()]
+                res_cur = {}
+                res_cur['_fname_full'] = fname_full
                 res_cur['filename_full'] = fname_full
+                if load:
+                    t0 = time()
+                    from zipfile import BadZipFile
+                    try:
+                        f = np.load(fname_full, allow_pickle=1)
 
-                if 'featsel_shap_res' in f and 'featsel_shap_res' not in res_cur:
-                    print('Moving Shapley values')
-                    res_cur['featsel_shap_res'] = f['featsel_shap_res'][()]
+                        if use_light_files:
+                            res_cur = f['results_light'][()]
+                        else:
+                            res_cur = f['results_cur'][()]
 
-                from utils_postprocess import removeLargeItems
-                if (not use_light_files) or lighter_light:
-                    if 'class_labels_good' in f:
-                        res_cur['class_labels_good'] = f['class_labels_good']
-                    else:
-                        print('class_labels_good is not in the archive!')
-                    res_cur = removeLargeItems(res_cur)
+                        if 'featsel_shap_res' in f and 'featsel_shap_res' not in res_cur:
+                            print('Moving Shapley values')
+                            res_cur['featsel_shap_res'] = f['featsel_shap_res'][()]
 
-                    if remove_large_items:
-                        newfn = fnf
-                        if not use_light_files:
-                            newfn = '_!' + fnf
-                        fname_light = pjoin( dir_to_use, newfn)
-                        print('resaving LIGHT file ',fname_light)
-                        np.savez(fname_light, results_light=res_cur)
+                        from utils_postprocess import removeLargeItems
+                        if (not use_light_files) or lighter_light:
+                            if 'class_labels_good' in f:
+                                res_cur['class_labels_good'] = f['class_labels_good']
+                            else:
+                                print('class_labels_good is not in the archive!')
+                            res_cur = removeLargeItems(res_cur)
 
-                ######################
+                            if remove_large_items:
+                                newfn = fnf
+                                if not use_light_files:
+                                    newfn = '_!' + fnf
+                                fname_light = pjoin( dir_to_use, newfn)
+                                print('resaving LIGHT file ',fname_light)
+                                np.savez(fname_light, results_light=res_cur)
+                        del f
+                        t1 = time()
+                        import gc; gc.collect()
+                        tnow=time()
+                        print(f'------- Loading and processing {fnf} took {tnow-t0:.2f}s, of it gc={tnow-t1:.2f}')
 
-                del f
-                t1 = time()
-                import gc; gc.collect()
+                    except BadZipFile as e:
+                        print(f'!!!! BadZipFile Error reading file {fname_full}')
+                        print(str(e) )
+                        res_cur['ERROR'] = ('BadZipFile', str(e) )
+                        #continue
 
-                tnow=time()
-                print(f'------- Loading and processing {fnf} took {tnow-t0:.2f}s, of it gc={tnow-t1:.2f}')
+
+                    ######################
+
+
 
                 if rawstrid not in output_per_raw:
                     output_per_raw[rawstrid] = {}
@@ -289,7 +303,8 @@ def collectPerformanceInfo3(rawnames, prefixes, ndays_before = None,
 
                 output_per_raw[rawstrid][prefix_eff][int_grouping][intset] \
                     = res_cur
-                output_per_raw[rawstrid][prefix_eff]['feature_names_filtered'] = res_cur['feature_names_filtered']
+                output_per_raw[rawstrid][prefix_eff]['feature_names_filtered'] = \
+                    res_cur.get('feature_names_filtered', None)
 
                 #if fnf.find('S07') >= 0:
                 #    import pdb;pdb.set_trace()
@@ -314,8 +329,116 @@ def collectPerformanceInfo3(rawnames, prefixes, ndays_before = None,
 
     return output_per_raw,Ximputed_per_raw, good_bininds_per_raw
 
+def checkTupleListTableCompleteness(arg, grouping_to_check=None, it_to_check=None , prefixes_ignore=[]):
+    if isinstance(arg,(list,np.ndarray) ):
+        tpll_reshaped = arg
+    elif isinstance(arg,dict):
+        import utils_postprocess as pp
+        tpll = pp.multiLevelDict2TupleList(arg,4,3)
+        tpll_reshaped = list( zip(*tpll) ) # it is a tuple of lists
+    rawnames_found = set(tpll_reshaped[0])
+    prefixes_found = set(tpll_reshaped[1])
+    grps_found = set(tpll_reshaped[2])
+    its_found = set(tpll_reshaped[3])
+    complen = len(rawnames_found) * len(prefixes_found) * len(grps_found) * len(its_found)
+    ll = len(tpll_reshaped[0])
+    print(f'Total len {ll}, complete table would be of len {complen}')
 
-def collectPerformanceInfo2(rawnames, prefixes, ndays_before = None,
+    prefixes_a  = np.array( tpll_reshaped[1] )
+    rns_a       = np.array( tpll_reshaped[0] )
+    groupings_a = np.array( tpll_reshaped[2] )
+    its_a       = np.array( tpll_reshaped[3] )
+
+    has_errors = [ ('ERROR' in res) for res in tpll_reshaped[-1] ]
+    has_errors = np.array(has_errors)
+    has_no_errors = ~has_errors
+
+    if grouping_to_check is None:
+        grouping_to_check = groupings_a [0 ]
+    if it_to_check is None:
+        it_to_check = its_a [0 ]
+    prefixes_missing = {}
+    for rn in sorted(rawnames_found):
+        cond = (rns_a == rn) & (groupings_a == grouping_to_check) & (its_a == it_to_check)
+        prefixes_cur = prefixes_a[cond & has_no_errors]
+        prefixes_missing_cur = set(prefixes_found) - set(prefixes_cur) - set(prefixes_ignore)
+        #print(len(prefixes_cur))
+        prefixes_missing[rn] = prefixes_missing_cur
+        nmiss = len(prefixes_missing_cur)
+        s = f'{rn:8} npresent={len(prefixes_cur)}, nmissing={nmiss}'
+        if nmiss:
+            s = '* ' + s
+        print(s)
+
+    return complen == ll, prefixes_missing
+
+
+def checkPrefixCollectionConsistencty(subdir,prefixes,start_time, end_time,
+                                      grouping_to_check, it_to_check,
+                                      use_main_LFP_chan=1, light_only=1,
+                                     prefixes_ignore  = None, preloaded = None):
+    import utils_postprocess as pp
+    sources_type ='parcel_aal'
+    ndaysBefore = None
+    if preloaded is not None:
+        output_per_raw_notload = preloaded
+    else:
+        r = collectPerformanceInfo3(None,prefixes, nraws_used='[0-9]+',
+                                                sources_type = sources_type,
+                                                printFilenames=0,
+                                                    ndays_before=ndaysBefore,
+                                                    use_main_LFP_chan=use_main_LFP_chan,
+                                                    subdir=subdir, remove_large_items = 1,
+                                        list_only=0, allow_multi_fn_same_prefix=0,
+                                        use_light_files = light_only, rawname_regex_full=0,
+                                        start_time=start_time,
+                                        end_time=end_time, load=False, verbose=0)
+
+        output_per_raw_notload = r[0]
+    tpll_notload = pp.multiLevelDict2TupleList(output_per_raw_notload,4,3)
+    tpll_notload_reshaped = list(zip(*tpll_notload))
+
+    rawnames_found = list(sorted(set(tpll_notload_reshaped[0] ) ));
+    groupings_found = list(sorted(set(tpll_notload_reshaped[2] ) ));
+    its_found = list(sorted(set(tpll_notload_reshaped[3] ) ));
+    prefixes_found = list(sorted(set(tpll_notload_reshaped[1] ) ));
+
+#     print(rawnames_found)
+#     print(groupings_found)
+#     print(its_found)
+#     print(prefixes_found)
+
+    if prefixes_ignore is None:
+        prefixes_ignore = ['LFPrel_noself',
+          'allb_beta_noH',
+          'allb_gamma_noH',
+          'allb_tremor_noH',
+          'modSrc',
+          'modSrc_self',
+          'onlyH']
+
+    prefixes_a  = np.array( tpll_notload_reshaped[1] )
+    rns_a       = np.array( tpll_notload_reshaped[0] )
+    groupings_a = np.array( tpll_notload_reshaped[2] )
+    its_a       = np.array( tpll_notload_reshaped[3] )
+    prefixes_missing = {}
+    for rn in rawnames_found:
+        cond = (rns_a == rn) & (groupings_a == grouping_to_check) & (its_a == it_to_check)
+        prefixes_cur = prefixes_a[cond]
+        prefixes_missing_cur = set(prefixes_found) - set(prefixes_cur) - set(prefixes_ignore)
+        #print(len(prefixes_cur))
+        prefixes_missing[rn] = prefixes_missing_cur
+        print(f'{rn:8} npresent={len(prefixes_cur)}, nmissing={len(prefixes_missing_cur)}')
+
+        #if rn == 'S02_on':
+        #    #print(tpll_notload_reshaped,
+        #    assert 'onlyH_act_only15' in  prefixes_cur
+
+
+    return prefixes_missing, output_per_raw_notload
+
+
+def _old_collectPerformanceInfo2_(rawnames, prefixes, ndays_before = None,
                            n_feats_PCA=None,dim_PCA=None, nraws_used=None,
                            sources_type = None, printFilenames = False,
                            group_fn = 10, group_ind=0, subdir = '', old_file_format=False,
@@ -811,7 +934,7 @@ def collectFeatNums(output_per_raw, clf_types=None):
     return feat_nums_perraw, feat_nums_perraw0, feat_nums_red_perraw, feat_nums_red2_perraw, feat_numdict_perraw
 
 
-def prepTableInfo2(output_per_raw, prefixes=None, perf_to_use_list = [('perfs_XGB','perfs_XGB_red') ],
+def _old_prepTableInfo2_(output_per_raw, prefixes=None, perf_to_use_list = [('perfs_XGB','perfs_XGB_red') ],
                   to_show = [('allsep','merge_nothing','basic')],
                   show_F1=False, use_CV_perf=True, rname_crop = slice(0,3), save_csv = True,
                   sources_type='parcel_aal', subdir=''):
@@ -1015,10 +1138,36 @@ def prepTableInfo2(output_per_raw, prefixes=None, perf_to_use_list = [('perfs_XG
 
     return table_info_per_perf_type, table_per_perf_type
 
+def confmat2bacc(C, mean_per_class=True, adjusted = False):
+    if isinstance(C,list):
+        Cs = C
+        baccs = [ confmat2bacc(oneC, mean_per_class, adjusted) for oneC in Cs]
+        assert mean_per_class  # when not a more accurate mean is needed
+        score = np.mean(baccs)
+        return score
+    import warnings
+    with np.errstate(divide="ignore", invalid="ignore"):
+        per_class = np.diag(C) / C.sum(axis=1)  # this sum is normally = 1 for normalized confmat
+    if np.any(np.isnan(per_class)):
+        warnings.warn("y_pred contains classes not in y_true")
+        per_class = per_class[~np.isnan(per_class)]
+
+    if mean_per_class:
+        score = np.mean(per_class)
+    else:
+        score = per_class
+    if adjusted:
+        n_classes = len(per_class)
+        chance = 1 / n_classes
+        score -= chance
+        score /= 1 - chance
+    return score
+
 def prepTableInfo3(output_per_raw, prefixes=None, perf_to_use_list = [('perfs_XGB','perfs_XGB_red') ],
                   to_show = [('allsep','merge_nothing','basic')],
                   show_F1=False, use_CV_perf=True, rname_crop = slice(0,3), save_csv = True,
-                  sources_type='parcel_aal', subdir=''):
+                  sources_type='parcel_aal', subdir='',
+                   scores = ['sens','spec','F1'] ):
 
     #perf_to_use is either 'perfs_XGB', 'perfs_XGB_red' or one of lda versions
     # Todo: pert_to_use_list -- is list of couples -- one and list ot feat
@@ -1076,13 +1225,19 @@ def prepTableInfo3(output_per_raw, prefixes=None, perf_to_use_list = [('perfs_XG
                     perfs_add_CV=None
                     perfs_red_CV_recalc,perfs_CV_recalc=None,None
                     perf_add_cur = perf_add
+                    corresp = None
+                    all_runstr_info = None
                     if r is None:
                         print(f'  Warning: no prefix {prefix} for {rn}')
                         prefix_missing = True
                     else:
                         prefix_missing = False
                         mult_clf_results = r[it_grp][it_set]
+
+
                         if mult_clf_results is not None:
+                            corresp, all_runstr_info = loadRunCorresp(mult_clf_results)
+
                             class_label_names = mult_clf_results.get('class_label_names_ordered',None)
                             if class_label_names is not None:
                                 lblind_trem = class_label_names.index('trem_L')
@@ -1106,9 +1261,11 @@ def prepTableInfo3(output_per_raw, prefixes=None, perf_to_use_list = [('perfs_XG
                                         ps = anver_cur['perf_dict'].get('perfs_CV', None)
                                     perfs_CV_recalc = recalcPerfFromCV(ps,lblind_trem)
 
+                                    confmats_cur = [p['confmat'] for p in ps]
+
                                     if perf_add is not None:
                                         if perf_add == 'across_subj':
-                                            pdict = anver_cur['across']['subj']
+                                            pdict = anver_cur['across'].get('subj',None)
                                             if pdict is not None:
                                                 perfs_add_CV = pdict['perf_aver']
                                                 perfs_add_noCV = pdict['perf_nocv']
@@ -1148,7 +1305,7 @@ def prepTableInfo3(output_per_raw, prefixes=None, perf_to_use_list = [('perfs_XG
                                 elif perf_red_to_use in ['interpret_EBM', 'interpret_DPEBM']:
                                     featsubset_name = 'all'
                                     EBM_dict = mult_clf_results['featsel_per_method'][perf_red_to_use][featsubset_name]
-                                    perfs_red = EBM_dict['perf']
+                                    perfs_red = EBM_dict['perf_dict']['perf_nocv']
                                     perfs_red_CV = EBM_dict['perf_dict']['perf_aver']
                                 else:
                                     print(f'perf_red_to_use (={perf_to_use}): None!')
@@ -1224,43 +1381,76 @@ def prepTableInfo3(output_per_raw, prefixes=None, perf_to_use_list = [('perfs_XG
                                 perfs = perfs_noCV
                                 perfs_red = perfs_red_noCV
 
+                    acc,bacc = np.nan,np.nan
                     if perfs is None:
                         print('Warning :',rn,prefix,lt)
                         sens,spec,F1 = np.nan, np.nan, np.nan
                     else:
                         #print([type( p) for p in perfs])
                         # sometimes perfs has confmat but sometimes not
-                        sens,spec,F1 = perfs[:3]
+                        if isinstance(perfs,(tuple,list,np.ndarray) ):
+                            sens,spec,F1 = perfs[:3]
+                        else:
+                            sens,spec,F1 = perfs['sens'],perfs['spec'],perfs['F1']
+                            acc,bacc    = perfs['accuracy'],perfs['balanced_accuracy']
+                        if np.isnan(bacc):
+                            bacc = confmat2bacc(confmats_cur)
                         was_valid = True
 
                     if perfs_red is None:
                         sens_red,spec_red,F1_red = np.nan, np.nan, np.nan
                     else:
                         #print([type( p) for p in perfs_red])
-                        sens_red,spec_red,F1_red = perfs_red[:3]
+                        if isinstance(perfs_red, (list,tuple,np.ndarray) ):
+                            sens_red,spec_red,F1_red = perfs_red[:3]
+                        else:
+                            sens_red,spec_red,F1_red = perfs_red['sens'],perfs_red['spec'],perfs_red['F1']
                         was_red_valid = True
 
                     if num is not None and num_red is not None:
                         assert num >= num_red, f'{rn},{lt},{it_grp},{it_set},{tpl}:{prefix}  {num},{num_red}'
 
                     if perfs_CV_recalc is not None:
-                        info_cur['sens_recalc'] = perfs_CV_recalc[0]
-                        info_cur['spec_recalc'] = perfs_CV_recalc[1]
+                        if isinstance(perfs_CV_recalc, (list,tuple,np.ndarray) ):
+                            info_cur['sens_recalc'] = perfs_CV_recalc[0]
+                            info_cur['spec_recalc'] = perfs_CV_recalc[1]
+                        else:
+                            info_cur['sens_recalc'] = perfs_CV_recalc['sens']
+                            info_cur['spec_recalc'] = perfs_CV_recalc['spec']
+                    if corresp is not None and prefix in corresp:
+                        info_cur['descr'] = corresp[prefix][-1]
+                    else:
+                        info_cur['descr'] = None
+                    if all_runstr_info is not None:
+                        info_cur['comment_from_runstrings'] = all_runstr_info.get('comment','')
+                    else:
+                        info_cur['comment_from_runstrings'] = None
                     info_cur['sens'] = sens
                     info_cur['spec'] = spec
                     info_cur['F1'] = F1
+                    info_cur['acc']  = acc
+                    info_cur['bacc'] = bacc
                     info_cur['sens_red'] = sens_red
                     info_cur['spec_red'] = spec_red
                     if perfs_red_CV_recalc is not None:
-                        info_cur['sens_red_recalc'] = perfs_red_CV_recalc[0]
-                        info_cur['spec_red_recalc'] = perfs_red_CV_recalc[1]
+                        if isinstance(perfs_CV_recalc, (list,tuple,np.ndarray) ):
+                            info_cur['sens_red_recalc'] = perfs_red_CV_recalc[0]
+                            info_cur['spec_red_recalc'] = perfs_red_CV_recalc[1]
+                        else:
+                            info_cur['sens_red_recalc'] = perfs_red_CV_recalc['sens']
+                            info_cur['spec_red_recalc'] = perfs_red_CV_recalc['spec']
                     else:
                         info_cur['sens_red_recalc'] = np.nan
                         info_cur['spec_red_recalc'] = np.nan
                     if perf_add is not None and perfs_add_CV is not None:
-                        info_cur['sens_add'] = perfs_add_CV[0]
-                        info_cur['spec_add'] = perfs_add_CV[1]
-                        info_cur['F1_add'] = perfs_add_CV[2]
+                        if isinstance(perfs_add_CV, (list,tuple,np.ndarray) ):
+                            info_cur['sens_add'] = perfs_add_CV[0]
+                            info_cur['spec_add'] = perfs_add_CV[1]
+                            info_cur['F1_add'] = perfs_add_CV[2]
+                        else:
+                            info_cur['sens_add'] = perfs_add_CV['sens']
+                            info_cur['spec_add'] = perfs_add_CV['spec']
+                            info_cur['F1_add']   = perfs_add_CV['F1']
                         info_cur['sens_add_recalc'] = perfs_add_CV_recalc[0]
                         info_cur['spec_add_recalc'] = perfs_add_CV_recalc[1]
                     #print('sens_add',info_cur.get('sens_add',None))
@@ -3811,7 +4001,21 @@ def prepareFeatGroups(featnames_sub,body_side, roi_labels,cmap, chnames_LFP=None
 
 
 def plotTableInfoBrain(table_info_per_perf_type, perf_tuple):
+    raise ValueError('not implemented')
     from utils import vizGroup2
+    # just to avoid error messages from pymode
+    rec_info = None
+    head_subj_ind = None
+    multi_clf_output = None
+    sind_str = None
+    color_group_labels = None
+    roi_lab_codes = None
+    parcel_indices_all = None
+    sizes_list = None
+    srcgrp = None
+    seed = 0
+    import shutil
+
 
     labels_dict = rec_info['label_groups_dict'][()]
     srcgroups_dict = rec_info['srcgroups_dict'][()]
@@ -3841,8 +4045,9 @@ def plotTableInfoBrain(table_info_per_perf_type, perf_tuple):
 def plotTableInfos2(table_info_per_perf_type, perf_tuple,
                       output_subdir='', alpha_bar = 0.7,
                     use_recalc_perf = True, prefixes_sorted = None,
+                    prefix2final_name = None,
                     crop_rawname=slice(None,None),
-                   sort_by_featnum = 0 ):
+                   sort_by_featnum = 0, set_nice_names = True ):
     import matplotlib.pyplot as plt
 
     info_per_rn_pref = table_info_per_perf_type[perf_tuple]
@@ -3906,6 +4111,9 @@ def plotTableInfos2(table_info_per_perf_type, perf_tuple,
         nums_red = []
         if prefixes_sorted is None:
             prefixes_sorted = list(sorted(rowinfo.keys()))
+        else:
+            # I want it to display same way as in jupyter, otherwise first goes below
+            prefixes_sorted = prefixes_sorted[::-1]
         prefixes_wnums = []
         str_per_pref = {}
         for prefix in prefixes_sorted:
@@ -3960,8 +4168,17 @@ def plotTableInfos2(table_info_per_perf_type, perf_tuple,
             pvec = np.array(pvec)
             pvec_red = np.array(pvec_red)
 
+            prefix_like = prefix
+            if set_nice_names:
+                descr = prefinfo['descr']
+                if descr is not None:
+                    prefix_like = descr
+
+            if prefix2final_name is not None:
+                prefix_like = prefix2final_name[prefix]
+
             #print(clf_type,str_to_put)
-            prefixes_wnums += [prefix + f'# {num} : {str_to_put} (min-> {num_red} : {str_to_put_red})']
+            prefixes_wnums += [prefix_like + f'# {num} : {str_to_put} (min-> {num_red} : {str_to_put_red})']
 
             #p = np.mean(pvec)
             p     = np.min(pvec)
@@ -4055,20 +4272,30 @@ def plotTableInfos_onlyBar(table_info_per_perf_type, perf_tuple,
                     use_recalc_perf = True, prefixes_sorted = None,
                            prefix2final_name = None,
                     crop_rawname='last',
-                   sort_by_featnum = 0 ):
+                   sort_by_featnum = 0, show_add_info ='none', percents=True,
+                           score= 'special:min(sens,spec)', per_medcond=False,
+                           rawnames = None, expand_best = 0,
+                          allow_missing_prefixes=0, hh =2, ww=5 ):
+    # rawnames argument is mainly to specify order
     import matplotlib.pyplot as plt
 
     info_per_rn_pref = table_info_per_perf_type[perf_tuple]
     rns = list( info_per_rn_pref.values() )
     nrpef = len( rns[0].keys() )
 
-    nr = len(rns)
-    nc = 1
-    ww = 12; hh = 4 *  nrpef / 20
-    fig,axs = plt.subplots(nr,nc, figsize = (ww*nc, hh*nr))
+    if not per_medcond:
+        nr = len(rns)
+        nc = 1
+    else:
+        nc = 2
+        nr = int( np.ceil( len(rns) / nc ) )
+    fig,axs = plt.subplots(nr,nc, figsize = (ww*nc, hh*nr), sharex = 'col')
     axs = axs.reshape((nr,nc))
 
-    pveclen = 2
+    if score.startswith('special'):
+        pveclen = 2
+    else:
+        pveclen = 1
     colors = ['blue', 'red', 'purple', 'green']
     color_full = colors[0]
     color_red = colors[1]
@@ -4111,7 +4338,18 @@ def plotTableInfos_onlyBar(table_info_per_perf_type, perf_tuple,
     elif pveclen == 2:
         perftype = 'min(spec,sens)'
     else:
-        raise ValueError('wrong pveclen')
+        perftype = score
+    #else:
+    #    raise ValueError('wrong pveclen')
+    sind_strs = []
+    for rowid_tuple,rowinfo in info_per_rn_pref.items():
+        rn = rowid_tuple[0]
+        sind_str,medcond = rn.split('_')
+        sind_strs += [sind_str]
+    sind_strs = list(sorted(set(sind_strs)))
+    print('sind strs = ',sind_strs)
+    label_fontsize = 14
+    #label_fontsize = None
 
     for rowid_tuple,rowinfo in info_per_rn_pref.items():
         xs, xs_red, xs_red2 = [],[],[]
@@ -4122,7 +4360,9 @@ def plotTableInfos_onlyBar(table_info_per_perf_type, perf_tuple,
         prefixes_wnums = []
         str_per_pref = {}
         for prefix in prefixes_sorted:
-            prefinfo = rowinfo[prefix]
+            prefinfo = rowinfo.get(prefix,None)
+            if prefinfo is None and allow_missing_prefixes:
+                continue
             if np.isnan(prefinfo['sens']):
                 continue
 
@@ -4140,7 +4380,10 @@ def plotTableInfos_onlyBar(table_info_per_perf_type, perf_tuple,
             xs_red += [ num_red]
             xs_red2 += [ num_red2]
 
-            order = ['sens', 'spec', 'F1']
+            if score.startswith('special'):
+                order = ['sens', 'spec', 'F1']
+            else:
+                order = [score]
             if use_recalc_perf:
                 pvec = [prefinfo.get(os + '_recalc',np.nan) for os in order]
                 pvec_red = [prefinfo.get(os + '_red' + '_recalc',np.nan) for os in order]
@@ -4154,7 +4397,7 @@ def plotTableInfos_onlyBar(table_info_per_perf_type, perf_tuple,
             pvec_red = pvec_red[:pveclen]
             pvec_add = pvec_add[:pveclen]
             #pvec_red = [prefinfo['sens_red'], prefinfo['spec_red'] , prefinfo['F1_red']]
-            assert pveclen in [2,3]
+            #assert pveclen in [2,3]
             str_to_put_ = utsne.sprintfPerfs(pvec)
             str_to_put_red = utsne.sprintfPerfs(pvec_red)
             str_to_put_add = utsne.sprintfPerfs(pvec_add)
@@ -4176,14 +4419,33 @@ def plotTableInfos_onlyBar(table_info_per_perf_type, perf_tuple,
             #print(clf_type,str_to_put)
             if prefix2final_name is not None:
                 prefix_like = prefix2final_name[prefix]
+                bai = prefix_like.find('best area')
+                if expand_best and bai >= 0:
+                    print(prefix_like,prefinfo['name_nice_best'])
+                    #prefix_like = prefix_like[:bai] + \
+                    #    prefinfo['name_nice_best'].split()[-1].split('+')[-1]
+                    area = prefinfo['name_nice_best'].split()[-1].split('+')[-1]
+                    prefix_like = prefix_like.replace('best area',area)
             else:
                 prefix_like = prefix
-            prefixes_wnums += [prefix_like + f'# {num} : {str_to_put}']
+
+            if show_add_info == 'num':
+                prefixes_wnums += [prefix_like + f'. #features={num}']
+            elif show_add_info == 'num_and_strperf':
+                prefixes_wnums += [prefix_like + f'. #features={num} : {str_to_put}']
+            elif show_add_info == 'none':
+                prefixes_wnums += [prefix_like]
+            else:
+                raise ValueError('unk val of show_add_info = {show_add_info}')
 
             #p = np.mean(pvec)
             p     = np.min(pvec)
             p_red = np.min(pvec_red)
             p_add = np.min(pvec_add)
+            if percents:
+                p *= 100
+                p_red *= 100
+                p_add *= 100
             #ys += [prefinfo[perftype]]
             ys += [p]
             ys_red += [p_red]
@@ -4201,11 +4463,17 @@ def plotTableInfos_onlyBar(table_info_per_perf_type, perf_tuple,
         #rncrp = rn[crop_rawname]
         if crop_rawname == 'last':
             rncrp = rn.split('_')[-1]
+        elif crop_rawname == 'no':
+            rncrp = rn
         else:
-            rncrp = rn[crop_rawname]
+            raise ValueError('unk crop')
         #rowid_tuple_to_show = (rncrp ,*rowid_tuple[1:] )
         rowid_tuple_to_show = rncrp.upper()
 
+        if per_medcond:
+            sind_str,medcond = rn.split('_')
+            rowind_bars = ['off','on'].index(medcond)
+            axind = sind_strs.index(sind_str)
         ax = axs[axind,rowind_bars]
         if len(xs):
             #ax.set_title(str(rowid_tuple_to_show)  + ';  order=' + ','.join(order[:pveclen] ) )
@@ -4220,8 +4488,18 @@ def plotTableInfos_onlyBar(table_info_per_perf_type, perf_tuple,
                 color = color_red, alpha=alpha_bar)
         ax.barh(np.array(prefixes_wnums)[sis], np.array(ys_add)[sis],
                 color = color_add, alpha=alpha_bar)
-        ax.set_xlabel(perftype)
+
+        if per_medcond:
+            if axind == (len(sind_strs) - 1):
+                ax.set_xlabel(perftype, fontsize = label_fontsize)
+            else:
+                ax.set_xlabel('')
+        else:
+            ax.set_xlabel(perftype, fontsize = label_fontsize)
+
         ax.set_xlim(0,1)
+        if percents:
+            ax.set_xlim(0,100)
         #ax.tick_params(axs=)
 
         axind += 1
@@ -4238,6 +4516,7 @@ def plotTableInfos_onlyBar(table_info_per_perf_type, perf_tuple,
     #if not os.path.exists(dirfig):
     #    os.mkdir(dirfig)
     #plt.savefig(pjoin(gv.dir_fig, output_subdir,figfname))
+    return axs
 
 
 def plotFeatNum2Perf(output_per_raw, perflists, prefixes=None, balance_level = 0.75, skip_plot=False, xlim=None ):
@@ -4561,13 +4840,27 @@ def plotImportantFeatLocations(sind_str, multi_clf_output,
 
     plt.tight_layout()
 
-def plotConfmats(outputs_grouped, normalize_mode = 'true', best_LFP=False, common_norm = True,
-                 ww=3,hh=3):
+#def plotConfmats(outputs_grouped, normalize_mode = 'true', best_LFP=False, common_norm = True,
+#                 ww=3,hh=3):
+def plotConfmats(outputs_per_raw, normalize_mode = 'true', best_LFP=False, common_norm = True,
+                reaver_confmats = 0, ww=3,hh=3, keep_beh_state_sides = True,
+                 keep_subj_list_title = False, labelpad_cbar = 90, labelpad_x = 20, labelpad_y = 20,
+                colorbar_axes_bbox = [0.80, 0.1, 0.045, 0.8], rename_class_names = None):
     '''
     normalize_mode == true means that we start from real positives (nut just correctly predicted)
+    common_norm -- colorbar always has max 100 and min 0 (regardless of actual min and max vals)
     '''
-    nc = int( np.ceil( np.sqrt( len(outputs_grouped) ) ) );
-    nr = len(outputs_grouped) // nc; #nc= len(scores_stats) - 2;
+    import utils_postprocess as pp
+    #tpll = pp.multiLevelDict2TupleList(outputs_grouped,4,3)
+    tpll = pp.multiLevelDict2TupleList(outputs_per_raw,4,3)
+
+    # TODO: it will plot all confmats for all the outputs, I might want to restruct to just one
+    #nc = int( np.ceil( np.sqrt( len(outputs_grouped) ) ) );
+    #nr = len(outputs_grouped) // nc; #nc= len(scores_stats) - 2;
+    #nr = len(outputs_grouped) // nc; #nc= len(scores_stats) - 2;
+    nc = int( np.ceil( np.sqrt( len(outputs_per_raw) ) ) );
+    nr = len(outputs_per_raw) / nc; #nc= len(scores_stats) - 2;
+    nr = int(np.ceil(nr) )
     #print(nr,nc)
     fig,axs = plt.subplots(nr,nc, figsize = (nc*ww + ww*0.5,nr*hh))#, gridspec_kw={'width_ratios': [1,1,3]} );
     if nr == 1 and nc == 1:
@@ -4575,12 +4868,34 @@ def plotConfmats(outputs_grouped, normalize_mode = 'true', best_LFP=False, commo
     #plt.subplots_adjust(top=1-0.02)
     #normalize_mode = 'total'
 
+    #sind_strs = []
+    #for rn in outputs_per_raw.keys():
+    #    sind_str,medcond = rn.split('_')
+    #    sind_strs += [sind_str]
+    #sind_strs = list(sorted(set(sind_strs)))
+    #print('sind strs = ',sind_strs)
+    rawnames = list(sorted(outputs_per_raw.keys()) )
+
     axs = axs.flatten()
+    for ax in axs:
+        ax.set_visible(False)
     #mn,mn_diag,mn_off_diag = 1e10,1e10,1e10
     #mx_off_diag,mx = -1,-1
     #confmats = []
     confmats_normalized = []
-    for axi,(ax,(rn,(spec_key,mult_clf_output) ) ) in enumerate(zip(axs, outputs_grouped.items() ) ):
+    #aa = enumerate(zip(axs, outputs_grouped.items() ) )
+    #aa = list(aa)
+    #print(len(axs))
+    #print(len(list(aa[0] )) )
+    #for axi,yyy in aa:
+    #    (ax,yy ) = yyy
+    #    (rn,y ) = yy
+    #    y.items()
+    for axi,(ax,tpl) in enumerate(zip(axs, tpll ) ):
+        rn = tpl[0]
+        mult_clf_output = tpl[-1]
+        #print(y.keys() )
+        #(spec_key,mult_clf_output) = y
         #print(axi,k)
         if not best_LFP:
             pcm = mult_clf_output['XGB_analysis_versions']['all_present_features']['perf_dict']
@@ -4588,10 +4903,13 @@ def plotConfmats(outputs_grouped, normalize_mode = 'true', best_LFP=False, commo
             chn_LFP = mult_clf_output['best_LFP']['XGB']['winning_chan']
             pcm = mult_clf_output['XGB_analysis_versions'][f'all_present_features_only_{chn_LFP}']['perf_dict']
 
-        reaver_confmats = 1
+
         if reaver_confmats:
             ps = pcm.get('perfs_CV', None)
-            confmats_cur = [p[-1] for p in ps]
+            if isinstance(ps[0],list):
+                confmats_cur = [p[-1] for p in ps]
+            else:
+                confmats_cur = [p['confmat'] for p in ps]
             confmats_cur_normalized = [utsne.confmatNormalize(cm,normalize_mode) for cm in confmats_cur]
             confmat_normalized =  np.array(confmats_cur_normalized).mean(axis=0)*100
         else:
@@ -4636,7 +4954,11 @@ def plotConfmats(outputs_grouped, normalize_mode = 'true', best_LFP=False, commo
         norm = mpl.colors.Normalize(vmin=0, vmax=100)
     else:
         norm = mpl.colors.Normalize(vmin=mn, vmax=mx)
-    for axi,(ax,(rn,(spec_key,mult_clf_output) ) ) in enumerate(zip(axs, outputs_grouped.items() ) ):
+    #for axi,(ax,(rn,(spec_key,mult_clf_output) ) ) in enumerate(zip(axs, outputs_grouped.items() ) ):
+    xts2 = []
+    for tpli,tpl in enumerate(tpll):
+        rn = tpl[0]
+        mult_clf_output = tpl[-1]
 
         class_label_names              = mult_clf_output.get('class_label_names_ordered',None)
         if class_label_names is None:
@@ -4653,45 +4975,88 @@ def plotConfmats(outputs_grouped, normalize_mode = 'true', best_LFP=False, commo
         #        ## confmat_ratio[i,j] = ratio of true i-th predicted as j-th among total
         #confmat = confmats[axi]
         #confmat_normalized = utsne.confmatNormalize(confmat,normalize_mode) * 100
-        confmat_normalized = confmats_normalized[axi]
+        confmat_normalized = confmats_normalized[tpli]
 
-        ax = axs[axi]
-        ax.set_title(rn)
+        #sind_str = rn.split('_')[0]
+        #axind =  sind_strs.index(sind_str)
+        axind =  rawnames.index(rn)
+        ax = axs[axind]
+        ttl = rn
+        if not keep_subj_list_title:
+            end = rn.split('_')[-1]
+            ll = len(end)
+            #ttl = rn[:-ll-1].upper()
+            #ttl = end.upper()
+        ax.set_title(ttl.upper())
         pc = ax.pcolor(confmat_normalized, norm=norm)
 
-        rowi,coli = np.unravel_index(axi,(nr,nc))
+        rowi,coli = np.unravel_index(axind,(nr,nc))
+
+        if keep_beh_state_sides:
+            class_label_names_ticks = class_label_names
+        else :
+            class_label_names_ticks = [cln[:-2] for cln in class_label_names]
+
+        if rename_class_names is not None:
+            class_label_names_ticks2 = []
+            for cln in class_label_names_ticks:
+                if keep_beh_state_sides:
+                    cln_ = cln[:-2]
+                else:
+                    cln_ = cln
+
+                if cln_ in rename_class_names:
+                    cln_res = cln.replace( cln_, rename_class_names[cln_] )
+                else:
+                    cln_res = cln
+                class_label_names_ticks2 += [cln_res]
+            class_label_names_ticks = class_label_names_ticks2
 
         xts = ax.get_xticks()
-        shift  = (xts[1] - xts[0]) / 2
-        xtsd = (shift)  + xts[:-1]
+        print(xts)
+        mnxts,mxxts = np.min(xts), np.max(xts)
+        shift  = ( (mxxts - mnxts) / 4) / 2
+        #shift  = (xts[1] + xts[0]) / 2
+        #shift = 0 #debug
+        #xtsd = (shift)  + xts[:-1]
         if rowi == nr-1:
-            ax.set_xticks(shift +np.linspace(xts[0],xts[-1],len(class_label_names) ) )
-            ax.set_xticklabels( class_label_names,rotation=90)
-            ax.set_xlabel('predicted')
+            xts2 = shift + np.linspace(xts[0],xts[-1],len(class_label_names) + 1 )
+            xts2[-1] = xts[-1]
+            ax.set_xticks(xts2 )
+            ax.set_xticklabels( class_label_names_ticks + [''],rotation=90)
+            ax.set_xlabel('Predicted', labelpad=labelpad_x)
         else:
             ax.set_xticks([])
 
         if coli == 0:
-            ax.set_yticks(shift +np.linspace(xts[0],xts[-1],len(class_label_names) ))
-            ax.set_yticklabels( class_label_names)
-            ax.set_ylabel('true')
+            xts2 = shift + np.linspace(xts[0],xts[-1],len(class_label_names) + 1 )
+            xts2[-1] = xts[-1]
+            #if len(xts2):
+            ax.set_yticks(xts2)
+            ax.set_yticklabels( class_label_names_ticks + [''])
+            ax.set_ylabel('True', labelpad=labelpad_y)
         else:
             ax.set_yticks([])
 
+
+        ax.set_visible(True)
+
         del confmat_normalized
 
+
     plt.subplots_adjust(left = 0.15, bottom=0.26, right=0.75, top=0.9)
-    cax = plt.axes([0.80, 0.1, 0.045, 0.8])
+    cax = plt.axes(colorbar_axes_bbox)
     clrb = plt.colorbar(pc, cax=cax)
-    cax.set_ylabel(f'percent of _{normalize_mode}_ points (in a CV fold)', labelpad=90 )
+    #cax.set_ylabel(f'percent of {normalize_mode} points (in a CV fold)', labelpad=labelpad_cbar )
+    cax.set_ylabel(f'percent of {normalize_mode} points', labelpad=labelpad_cbar )
 
     ax2 = clrb.ax.twinx()
     y0,y1 = cax.get_ybound()  # they are from 0 to 1
     ticks       = [  mn_off_diag, mn_diag,  mx_off_diag, me_diag, me_off_diag]
     tick_labels = [ 'min_off_diag', 'min_diag',  'max_off_diag', 'mean_diag', 'mean_off_diag' ]
     if common_norm:
-        ticks       += [  mn_off_diag, mn_diag,  mx_off_diag, mx,mn]
-        tick_labels += [ 'min_off_diag', 'min_diag',  'max_off_diag', 'max' , 'min' ]
+        ticks       = [  mn_off_diag, mn_diag,  mx_off_diag, mx,mn ]
+        tick_labels = [ 'min off diag', 'min diag',  'max off diag', 'max' , 'min' ]
     desarr = np.array( ticks )
     #ax2.set_yticks( desarr/ (y1-y0) )
     ax2.set_yticks( desarr )
@@ -4705,7 +5070,12 @@ def plotConfmats(outputs_grouped, normalize_mode = 'true', best_LFP=False, commo
 def recalcPerfFromCV(perfs_CV,ind):
     #ps = pcm.get('perfs_CV', None)
     ps = perfs_CV
-    confmats_cur = [p[-1] for p in ps]
+    if isinstance(ps[0], tuple):
+        confmats_cur = [p[-1] for p in ps]
+    elif isinstance(ps[0], dict):
+        confmats_cur = [p['confmat'] for p in ps]
+    else:
+        raise ValueError(f'Wrong type {type(ps[0])}')
     return perfFromConfmat(confmats_cur,ind)
     #confmats_cur_normalized = [utsne.confmatNormalize(cm,normalize_mode) for cm in confmats_cur]
     #confmat_normalized =  np.array(confmats_cur_normalized).mean(axis=0)*100
@@ -5156,42 +5526,151 @@ def confinfo_from_XGB(tpll):
     main_colind = 0
     return Ms_full, matnames, matdicts, colnames, revdict_lenc, main_colind
 
-def computeImprovementsPerParcelgroup(output_per_raw, mode = 'only',
-                                      inv_exclude = True, printLog = False):
-     #exclude
+def loadRunCorresp(moc):
+    if 'cmd' not in moc:
+        return None,None
+    runCID = dict( moc['cmd'][0] ).get('--runCID', None)
+    corresp, all_info = None,None
+    if runCID is not None:
+        import json
+        with open( pjoin(gv.code_dir,'run',f'___run_corresp_{runCID}.txt'), 'r') as f:
+            corresp_file = json.load( f )
+
+        all_info = None
+        if 'correspondance' in corresp_file:
+            corresp = corresp_file['correspondance']
+            all_info = corresp_file
+        else:
+            corresp = corresp_file
+    else:
+        print('loadRunCorresp: corresp file not found')
+    return corresp, all_info
+
+# care about backward-compat
+def _extractPerfNumber( perf_dict, score):
+    if 'perf_aver' in perf_dict and 'sens' not in perf_dict:
+        perf_cur = perf_dict['perf_aver']
+    else:
+        perf_cur = perf_dict
+    if isinstance(perf_cur, (tuple, list, np.ndarray) ):
+        if score.startswith('special'):
+            perf_one_number = min( perf_cur[0], perf_cur[1] )
+        elif score == 'sens':
+            perf_one_number = perf_cur[0]
+        elif score == 'spec':
+            perf_one_number = perf_cur[1]
+        elif score == 'F1':
+            perf_one_number = perf_cur[2]
+    elif isinstance(perf_cur,dict):
+        if score.startswith('special'):
+            perf_one_number = min( perf_cur['sens'], perf_cur['spec'] )
+        else:
+            perf_one_number = perf_cur[score]
+    else:
+        raise ValueError( str(perf_cur) + str(type(perf_cur) ) )
+
+    return perf_one_number
+
+#base_perf_per_mode
+def computeImprovementsPerParcelGroup(output_per_raw, base_perf_prefix,
+                                      base_perf_low_prefix = None,
+                                      mode = 'only',
+                                      score = 'special:min_sens_spec',
+                                      inv_exclude = True, printLog = False,
+                                     ignore_base_prefix_missing = False  ):
+    #exclude
     #mode = 'exclude'
 
     import utils_postprocess as pp
     tpll = pp.multiLevelDict2TupleList(output_per_raw,4,3)
-    tpll_reshaped = list( zip(*tpll) )
-    len(tpll_reshaped)
+    tpll_reshaped = list( zip(*tpll) ) # it is a tuple of lists
 
-    runCID = dict( tpll[0][-1]['cmd'][0] )['--runCID']
-    import json
-    with open( pjoin(gv.code_dir,'run',f'___run_corresp_{runCID}.txt'), 'r') as f:
-        corresp = json.load( f )
+    #corresp,all_info = loadRunCorresp(tpll[0][-1])
+    #corresps = [loadRunCorresp(tpl[-1])[0] for tpl in tpll]
+    #k0 = set( corresp.keys() )
+    #for c in corresps:
+    #    kcur = set ( c.keys() )
+    #    assert set( kcur ) == set( k0 ),  kcur ^ k0
+    # check corresp consistency
+
+
     #___run_corresp_16381692938201.txt
 
     n_chars = len('onlyH_act_')
+    prefixes = set( tpll_reshaped[1] )
+    #print( list(sorted(prefixes) ) )
+    #prefixes2 = set( [ tpl[1] for tpl in tpll ]  )
+    #assert prefixes == prefixes2, prefixes ^ prefixes2
 
     #perfs_per_medcond = {'on':[],'off':[]}
     perfs_per_medcond = {'on':{},'off':{}}
-    for prefix in corresp:
-        ind,pgn,nice_name = corresp[prefix]
+    perfs_base_per_medcond = {'on':np.nan,'off':np.nan}
+    for prefix in prefixes:
+        #corresp,all_info = loadRunCorresp(tpll[0][-1])
+        #ind,pgn,nice_name = corresp[prefix]
         part = prefix[n_chars:]
         if not part.startswith(mode):
+            #print(f'skipping {part} for {mode}, prefix={prefix}')
             continue
 
         cur_prefix_inds = np.where( np.array(tpll_reshaped[1]) == prefix )[0]
+        if len(cur_prefix_inds) != 1:
+            print( f'Wrong number of prefix {prefix} instances {len(cur_prefix_inds) }' )
+            continue
         for cpi in cur_prefix_inds:
             output = tpll[cpi][-1]
             rn = tpll[cpi][0]
             medcond = rn.split('_')[-1]
             r = output['XGB_analysis_versions']['all_present_features']
-            perf_cur = r['perf_dict']['perf_aver']
-            perf_one_number = min( perf_cur[0], perf_cur[1] )
-            perfs_per_medcond[medcond][prefix] = perf_one_number
+            #perf_cur = r['perf_dict']['perf_aver']
+            #perf_one_number = min( perf_cur[0], perf_cur[1] )
+            perfs_per_medcond[medcond][prefix] = \
+                _extractPerfNumber (r['perf_dict'], score )
         #print(prefix,pgn, perf_cur)
+    if mode == 'exclude':
+        cur_prefix_inds = np.where( np.array(tpll_reshaped[1]) == base_perf_prefix )[0]
+        assert len(cur_prefix_inds) <= 2
+        for cpi in cur_prefix_inds:
+            output = tpll[cpi][-1]
+            rn = tpll[cpi][0]
+            medcond = rn.split('_')[-1]
+            r = output['XGB_analysis_versions']['all_present_features']
+            perfs_base_per_medcond[medcond] = \
+                _extractPerfNumber (r['perf_dict'], score )
+            #if mode == 'exclude':
+            #    perfs_base_per_medcond[medcond] = extractPerfNumber (r['perf_dict'] )
+            #else:
+            #    if base_perf_prefix is None:
+            #        perfs_base_per_medcond[medcond] = 0.
+            #    else:
+    else:
+        if base_perf_low_prefix is None:
+            # I still need to set zeros for all the medconds present
+            cur_prefix_inds = np.where( np.array(tpll_reshaped[1]) == base_perf_prefix )[0]
+            if len(cur_prefix_inds) != 1:
+                print('cur_prefix_inds =', [ tpll[ci][:-1] for ci in cur_prefix_inds ] )
+                if ignore_base_prefix_missing:
+                    perfs_base_per_medcond[medcond] = 0.
+                else:
+                    raise ValueError('cur_prefix_inds has wrong len')
+            for cpi in cur_prefix_inds:
+                output = tpll[cpi][-1]
+                rn = tpll[cpi][0]
+                medcond = rn.split('_')[-1]
+                perfs_base_per_medcond[medcond] = 0.
+        else:
+            cur_prefix_inds = np.where( np.array(tpll_reshaped[1]) == base_perf_low_prefix )[0]
+            assert (len(cur_prefix_inds) >0 ) and len(cur_prefix_inds) <= 2, \
+                f'problem getting base perf { [ tpll[ci][:-1] for ci in cur_prefix_inds ] }'
+            for cpi in cur_prefix_inds:
+                output = tpll[cpi][-1]
+                rn = tpll[cpi][0]
+                medcond = rn.split('_')[-1]
+                r = output['XGB_analysis_versions']['all_present_features']
+                perfs_base_per_medcond[medcond] = \
+                    _extractPerfNumber (r['perf_dict'], score )
+
+    print(perfs_base_per_medcond)
 
     ######################################
     perfs_aver_per_medcond = {}
@@ -5209,17 +5688,21 @@ def computeImprovementsPerParcelgroup(output_per_raw, mode = 'only',
 
     impr_per_medcond_per_pgn = {'on':{}, 'off':{}}
     impr_wrtLFP_per_medcond_per_pgn = {'on':{}, 'off':{}}
-    for prefix in corresp:
-        ind,pgn,nice_name = corresp[prefix]
+    impr_wrt_base_per_medcond_per_pgn = {'on':{}, 'off':{}}
+    for prefix in prefixes:
         part = prefix[n_chars:]
         if not part.startswith(mode):
             continue
 
         cur_prefix_inds = np.where( np.array(tpll_reshaped[1]) == prefix )[0]
         for cpi in cur_prefix_inds:
+            corresp,all_info = loadRunCorresp(tpll[cpi][-1])
+            ind,pgn,nice_name = corresp[prefix]
+
             output = tpll[cpi][-1]
             rn = tpll[cpi][0]
             medcond = rn.split('_')[-1]
+            print(prefix,pgn)
             if pgn != 'LFP':
                 if mode == 'only':
                     assert dict( output['cmd'][0] )['--parcel_group_names'] == pgn
@@ -5228,30 +5711,46 @@ def computeImprovementsPerParcelgroup(output_per_raw, mode = 'only',
 
             #output[]
             r = output['XGB_analysis_versions']['all_present_features']
-            perf_cur = r['perf_dict']['perf_aver']
-            perf_one_number = min( perf_cur[0], perf_cur[1] )
+            #perf_cur = r['perf_dict']['perf_aver']
+            #perf_one_number = min( perf_cur[0], perf_cur[1] )
+            perf_one_number = _extractPerfNumber (r['perf_dict'], score )
+            improvement_wrt_base = perf_one_number  - perfs_base_per_medcond[medcond]   # prob (range is 0 to 1)
             improvement = perf_one_number  - perfs_aver_per_medcond[p]   # prob (range is 0 to 1)
-            improvement_wrt_LFP = perf_one_number - perfs_per_medcond[medcond][f'onlyH_act_{mode}15']
+            LFPkey =f'onlyH_act_{mode}15'
+            if LFPkey in perfs_per_medcond[medcond]:
+                improvement_wrt_LFP = perf_one_number - perfs_per_medcond[medcond][LFPkey]
+            else:
+                improvement_wrt_LFP = None
 
             #if mode == 'exclude':
             #    improvement = perf_one_number  - perfs_aver_per_medcond[p]   # prob (range is 0 to 1)
 
             if inv_exclude and mode == 'exclude':
+                improvement_wrt_base = -improvement_wrt_base
                 improvement = -improvement
-                improvement_wrt_LFP =- improvement_wrt_LFP
+                if improvement_wrt_LFP is not None:
+                    improvement_wrt_LFP =- improvement_wrt_LFP
 
+            impr_wrt_base_per_medcond_per_pgn[medcond][pgn] = improvement_wrt_base * 100  # now in pct
             impr_per_medcond_per_pgn[medcond][pgn] = improvement * 100  # now in pct
-            impr_wrtLFP_per_medcond_per_pgn[medcond][pgn] = improvement_wrt_LFP * 100
+            if improvement_wrt_LFP is not None:
+                impr_wrtLFP_per_medcond_per_pgn[medcond][pgn] = improvement_wrt_LFP * 100
             if printLog:
                 print(prefix,pgn, medcond,improvement * 100)
-    return impr_per_medcond_per_pgn, impr_wrtLFP_per_medcond_per_pgn, perfs_aver_per_medcond
+    return impr_wrt_base_per_medcond_per_pgn, impr_per_medcond_per_pgn, impr_wrtLFP_per_medcond_per_pgn, perfs_aver_per_medcond
 
-def plotTableInfoBrain(impr_per_medcond_per_pgn , medcond, multi_clf_output, head_subj_ind=None, inv_exclude=True, mode='only',
-                       subdir=''):#, perf_tuple):
+def plotTableInfoBrain(impr_per_medcond_per_pgn , medcond,
+                       multi_clf_output, head_subj_ind=None,
+                       inv_exclude=True, mode='only',
+                       subdir='',
+                       savefile_prefix = 'EXPORT_brain_map_area_strength_',
+                       save_only = False):#, perf_tuple):
     from utils import vizGroup2
     from globvars import gp
 
     import pymatreader
+    intensity_mult = 0.1
+    intensity_mult = 1
 
     #rncur = rawnames[0] + '_off_hold'
     #sind_str,mc,tk  = utils.getParamsFromRawname(rncur)
@@ -5316,9 +5815,10 @@ def plotTableInfoBrain(impr_per_medcond_per_pgn , medcond, multi_clf_output, hea
 
         #brain_area_labels += [pgn]
 
-        intensity_cur = impr_per_medcond_per_pgn[medcond][pgn] / 10
+        intensity_cur = impr_per_medcond_per_pgn[medcond][pgn] * intensity_mult
         #print(pgn,ind, intensity_cur)
         intensities[ind ]= intensity_cur #cmap(intensity_cur)  #* len(parcel_inds)
+    assert np.any( ~np.isnan( srcgrp_new ) )
     #intensities = np.zeros(len(roi_labels))
     #intensities
     ###########################################
@@ -5338,6 +5838,39 @@ def plotTableInfoBrain(impr_per_medcond_per_pgn , medcond, multi_clf_output, hea
 
     cmap = plt.cm.get_cmap('inferno')
 
+
+    savename = f'{savefile_prefix}medcond={medcond}_mode={mode}.npz'
+    savename_full = pjoin(gv.data_dir,subdir,savename)
+
+    def cvt(x):
+        if np.isnan( float(x) ):
+            return 'NaN'
+        else:
+            return str( int(x) )
+
+    setdiff = set( map(str,range( len( brain_area_labels ) ) ) ) ^  set( map(cvt,srcgrp_new)  )
+    setdiff = list(sorted(setdiff))
+    # brain area labels, named
+    ss = [ brain_area_labels[int(ind)] for ind in setdiff if ind != 'NaN' ]
+    assert set(setdiff) == set(['0', 'NaN']), (setdiff, ss )
+
+
+    info=dict(coords=coords,
+        brain_area_labels=brain_area_labels,
+        srcgrp_new=srcgrp_new,
+        color_grouping=roi_lab_codes,
+        intensities = intensities,
+        color_group_labels= color_group_labels,
+        impr_per_medcond_per_pgn=impr_per_medcond_per_pgn )
+
+    np.savez(savename_full,info=info)
+    print(f'Saved to {savename_full}')
+
+    if save_only:
+        return None, None, info
+    #sind_str,
+
+
     # clrs =  utils.vizGroup2(sind_str,coords,roi_labels,srcgrp, show=False,
     #                         def_alpha=.1, figsize_mult=1.5,msz=30, printLog=0,
     #                         color_grouping=roi_lab_codes, intensities = intensities,
@@ -5354,6 +5887,11 @@ def plotTableInfoBrain(impr_per_medcond_per_pgn , medcond, multi_clf_output, hea
 
     intensities = np.array(intensities)
     gm = ~np.isnan(np.array(intensities) )
+
+    if sum( gm ) == 0:
+        print('plotTableInfoBrain: WARNING: no valid intensitites!')
+        return None,None,None
+
     mii,mai = np.min(intensities[gm]), np.max(intensities[gm])
     print(mii,mai)
 
@@ -5364,18 +5902,45 @@ def plotTableInfoBrain(impr_per_medcond_per_pgn , medcond, multi_clf_output, hea
 
     # axs[1].w_xaxis.set_pane_color(bc)
     #plt.gcf().
-    plt.colorbar(scatters['top'])
+
+    # I want to change labels but NOT locations -- does not work because
+    # ticklabels for colorbar are set during render only
+    clrb = plt.colorbar(scatters['top'])
+    #ylabs = [tl.get_text() for tl in clrb.ax.get_yticklabels()]
+    #print(ylabs)
+    #ylabs2 = []
+    #for yl in ylabs:
+    #    if len(yl):
+    #        x = float(yl)
+    #        newyl = '{:.0f}'.format(x)
+    #    else:
+    #        newyl = yl
+    #    ylabs2 += [newyl]
+    ##ylabs_a = np.array( list( map(float,ylabs) ) ) * 100
+    ##ylabs2 = map(lambda x: '{:.0f}'.format(x) , ylabs_a)
+    #clrb.ax.set_yticklabels(ylabs2)
 
 
+    refpt = 'base'
 
-    impr_lfp = impr_per_medcond_per_pgn[medcond]['LFP']
-    if inv_exclude and mode == 'exclude':
-        plt.title(f'H_act {mode} areas relative performance -difference / 10, LFP={impr_lfp/10:.2f}')
+    impr_lfp = impr_per_medcond_per_pgn[medcond].get('LFP', np.nan)
+    if refpt == 'base':
+        if inv_exclude and mode == 'exclude':
+            plt.title(f'H_act performance reduction per area removal,\nremoval of LFP={impr_lfp * intensity_mult:.0f}%')
+        else:
+            plt.title(f'H_act individual areas performance,\nLFP alone ={impr_lfp * intensity_mult:.0f}%')
     else:
-        plt.title(f'H_act {mode} areas relative performance difference / 10, LFP={impr_lfp/10:.2f}')
+        if inv_exclude and mode == 'exclude':
+            axs[1].set_title(f'H_act {mode} areas relative performance -difference * {intensity_mult}, LFP={impr_lfp * intensity_mult:.0f}%')
+        else:
+            axs[1].set_title(f'H_act {mode} areas relative performance difference * {intensity_mult}, LFP={impr_lfp * intensity_mult:.0f}%')
 
-    figname_full = pjoin(gv.dir_fig,subdir,f'brain_map_area_strength_medcond={medcond}_mode={mode}.pdf')
+
+    figname = f'brain_map_area_strength_medcond={medcond}_mode={mode}.pdf'
+    #plt.title(figname[:-4]  )
+    figname_full = pjoin(gv.dir_fig,subdir,figname)
     plt.savefig(figname_full)
+    return axs, clrb, info
     #plt.colorbar();
     #plotTableInfoBrain(impr_per_medcond_per_pgn, output)
 
@@ -5389,7 +5954,7 @@ def getLogFname(mco,folder = '$OSCBAGDIS_DATAPROC_CODE/slurmout'):
 def copyLogFname(mco, newfname = '_logfile_to_observe.out' ):
     # maybe add filename data or maybe sacct info (inc how much it took to run)
     fname_full = getLogFname(mco)
-    import gv
+    import gv, shutil
     newname_full = pjoin(gv.code_dir, newfname)
     shutil.copy(fname_full, newname_full )
     print(f'copied to {newname_full}')
@@ -5406,3 +5971,130 @@ def printLogPart(mco, text_to_find = 'Start classif' ):
             lineind = linei
 
     print(lines[lineind, :] )
+
+def filterOutputs(outputs_grouped,rns=None,prefs=None,grps=None,its=None):
+    outputs_res = {}
+    if rns is None:
+        rns = outputs_grouped.keys()
+    for rn in rns:
+        outputs_res[rn] = {}
+        o_cur_rn = outputs_grouped[rn]
+        prefs_cur = o_cur_rn.keys()
+        if prefs is not None:
+            prefs_cur = prefs
+        for pref in prefs_cur:
+            o_cur_pref = o_cur_rn.get(pref, None)
+            if o_cur_pref is None:
+                continue
+            outputs_res[rn][pref] = {}
+            gs_cur = o_cur_pref.keys()
+            gs_cur = [g for g in gs_cur if g != 'feature_names_filtered']
+            if grps is not None:
+                gs_cur = grps
+            for g in gs_cur:
+                if g not in o_cur_pref:
+                    continue
+                outputs_res[rn][pref][g] = {}
+                o_cur_g = o_cur_pref[g]
+                its_cur = o_cur_g.keys()
+                if its is not None:
+                    its_cur = its
+                for it in its_cur:
+                    outputs_res[rn][pref][g][it] = o_cur_g[it]
+
+    return outputs_res
+
+def printOutputInfo(output_per_raw, datinfo = 'prefix', autosort = False, sort_dict = None):
+    assert datinfo in ['prefix', 'rawname', 'grouping', 'interval_types']
+    if isinstance(datinfo,str):
+        datinfos = datinfo.split(',')
+    elif isinstance(datinfo,list):
+        datinfos = datinfo
+
+    resinfos = {}
+    for di in  datinfos:
+        resinfos[di] = []
+
+    assert not ( autosort and (sort_dict is not None) ), 'two sortings at the same time does not make sense'
+
+    import utils_postprocess as pp
+    prefix_sort = None
+    if sort_dict is not None:
+        assert len(sort_dict) == 1
+        #if di in sort_dict:
+        k,v = list( sort_dict.items() )[0]
+        if k != 'prefix':
+            raise ValueError('not implemented')
+        prefix_sort = v
+
+    tpll = pp.multiLevelDict2TupleList(output_per_raw,4,3, prefix_sort= prefix_sort)
+    for tpl in tpll:
+        rn,prefix,grouping,it = tpl[:-1]
+
+        di = 'rawname'; d = rn
+        if di in datinfos:
+            if d not in resinfos[di]:
+                resinfos[di] += [d]
+        di = 'prefix'; d=prefix
+        if di in datinfos:
+            if d not in resinfos[di]:
+                resinfos[di] += [d]
+        di = 'grouping'; d = grouping
+        if di in datinfos:
+            if d not in resinfos[di]:
+                resinfos[di] += [d]
+        di = 'interval_types'; d = it
+        if di in datinfos:
+            if d not in resinfos[di]:
+                resinfos[di] += [d]
+
+    for di in resinfos:
+        if autosort:
+            resinfos[di] = list( sorted(resinfos[di]) )
+
+    return resinfos
+
+def accessMultiLevelDict(d,path):
+    # how to distinguish value None from not found?
+    sep  = '/'
+    pparts = path.split(sep)
+    #print(pparts, d.keys() )
+    p0 = pparts[0]
+    v0 = None
+    if p0 in d:
+        v0 = d[p0]
+    else:
+        raise ValueError(f'Not found! {p0} amonhg {d.keys()}')
+
+    if len(pparts) == 1 or v0 is None:
+        #return v0,''
+        return v0
+    else:
+        #v,path_ret =  accessMultiLevelDict(v0, sep.join(pparts[1:] ) )
+        v =  accessMultiLevelDict(v0, sep.join(pparts[1:] ) )
+        return v
+        #if v is None:
+        #   sep.join(pparts[1:]
+
+def walkMultiLevelDict(d, path):
+    paths = []
+    if not isinstance(d, dict):
+        return path
+    for k, v in d.iteritems():
+        child_path = path + k + '/'
+        if isinstance(v, str):
+            paths.append(child_path + v)
+        else:
+            paths.extend(walkMultiLevelDict(v, child_path))
+    return paths
+
+def recurseMultiLevelDict(d, prefix=None, sep='/'):
+    if prefix is None:
+        prefix = []
+    for key, value in d.items():
+        if isinstance(value, dict):
+            yield from recurseMultiLevelDict(value, prefix + [key])
+        else:
+            yield sep.join(prefix + [key, value])
+
+#print(list(recurse(dirDict)))

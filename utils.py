@@ -7,6 +7,7 @@ import matplotlib.pyplot as plt
 import globvars as gv
 import os
 import mne
+from os.path import join as pjoin
 
 def getIntervalIntersection(a1,b1, a2, b2):
     assert b1 >= a1
@@ -771,6 +772,9 @@ def getBinsInside(bins, b1, b2, retBool = True, rawname = None):
         return np.where(binsbool)
 
 def filterArtifacts(k, chn, bins, retBool = True, rawname = None):
+    '''
+    returns binmask without articats
+    '''
     validbins_bool = np.ones( len(bins) , dtype=bool)
     if gv.artifact_intervals is not None and (k in gv.artifact_intervals):
         if chn.find('MEGsrc') >= 0:
@@ -2770,14 +2774,29 @@ def getEMGperHand(rectconvraw):
     EMG_per_hand = gv.EMG_per_hand
     rectconvraw.load_data()
 
+    old_suffix_present = True
     rectconvraw_perside = {}
     for side in EMG_per_hand:
         chns = EMG_per_hand[side]
         tmp = rectconvraw.copy()
+        if not np.all( [ (chn_ in tmp.ch_names) for chn_ in chns  ] ):
+            old_suffix_present = False
+            del tmp
+            break
         tmp.pick_channels(chns)
 
         assert len(tmp.ch_names) == 2
         rectconvraw_perside[side] = tmp
+    if not old_suffix_present:
+        EMG_per_hand = gv.EMG_per_hand_base
+        for side in EMG_per_hand:
+            chns = EMG_per_hand[side]
+            tmp = rectconvraw.copy()
+            #print(chns, tmp.ch_names)
+            tmp.pick_channels(chns)
+
+            assert len(tmp.ch_names) == 2
+            rectconvraw_perside[side] = tmp
 
     for side in EMG_per_hand:
         badstr = '_' + getOppositeSideStr(side[0].upper())
@@ -3064,15 +3083,17 @@ def getIntervalMaxs(raw,intervals, q=0.995):
 def intervalJSON2Anns(rawname_, use_new_intervals = True, maintremside=None, return_artifacts = False):
     import json
     from copy import deepcopy
+    import globvars as gv
 
-    with open('subj_info.json') as info_json:
-        gen_subj_info = json.load(info_json)
+    #gv.gen_subj_info
+    #with open('subj_info.json') as info_json:
+    #    gen_subj_info = json.load(info_json)
 
     subj,medcond,task  = getParamsFromRawname(rawname_)
     subj_num = int(subj[1:])
 
     if maintremside is None:
-        maintremside = gen_subj_info[subj]['tremor_side']
+        maintremside = gv.gen_subj_info[subj]['tremor_side']
     nonmaintremside = getOppositeSideStr(maintremside)
 
     rawname_impr = rawname_
@@ -3086,18 +3107,18 @@ def intervalJSON2Anns(rawname_, use_new_intervals = True, maintremside=None, ret
     else:
         trem_times_fn = 'trem_time_jan_unmod.json'
 
-    with open(trem_times_fn ) as jf:
+    with open(os.path.join(gv.code_dir, trem_times_fn ) ) as jf:
         trem_times_byhand = json.load(jf)
 
     tremIntervalJan, artif_main         = unpackTimeIntervals(trem_times_byhand, mainSide = True,
-                                                            gen_subj_info=gen_subj_info, skipNotLoadedRaws=0)
+                                                            gen_subj_info=gv.gen_subj_info, skipNotLoadedRaws=0)
 
     if use_new_intervals:
         trem_times_nms_fn = 'trem_times_tau_nms.json'
-        with open(trem_times_nms_fn ) as jf:
+        with open(os.path.join(gv.code_dir, trem_times_nms_fn ) ) as jf:
             trem_times_nms_byhand = json.load(jf)
         tremIntervalJan_nms, artif_nms = unpackTimeIntervals(trem_times_nms_byhand, mainSide = False,
-                                                                gen_subj_info=gen_subj_info, skipNotLoadedRaws=0)
+                                                                gen_subj_info=gv.gen_subj_info, skipNotLoadedRaws=0)
 
     #%debug
 
@@ -3955,6 +3976,52 @@ def addSideToParcels(parcel_labels_no_side,body_side):
 
     return res
 
+def dupValsWithinParcel(labels_cur,srcgroups, val_per_label):
+#     xs = []
+#     ys = []
+#     zs = []
+    BAD_VAL = -10000
+    BAD_VAL = 0
+    srcgroups[np.isnan(  srcgroups) ] = BAD_VAL
+    srcgroups = srcgroups.astype(int)
+
+    #srcgroups_int = srcgroups[~np.isnan(scrgroups) ].astype(int)
+    #u = set(srcgroups_int )
+    u = np.array( list( set(srcgroups ) ) )
+    #nu = sum( u > BAD_VAL)
+    nu = len(u)
+    print(u,labels_cur)
+    assert len(labels_cur) == nu, 'len(labels_cur)={}, len(unique(srcgroups))={}'.format( len(labels_cur), nu )
+    assert len(labels_cur) == len(val_per_label), ( len(labels_cur), len(val_per_label) )
+    #assert set( u[u>BAD_VAL] ) == set(np.arange(len(labels_cur) ) ), (set( u[u>BAD_VAL] ), set(np.arange(len(labels_cur) ) ) )
+    assert set( u ) == set(np.arange(len(labels_cur) ) ), (set( u[u>BAD_VAL] ), set(np.arange(len(labels_cur) ) ) )
+    val_per_label = np.array(val_per_label)
+    newvals = np.ones(len(srcgroups)) * np.nan
+
+
+    for grpi,lab in enumerate(labels_cur):
+        # grpi -- index of parcel:
+        group_code = grpi
+        inds = np.where(srcgroups == group_code)[0]
+        #print(inds)
+        newvals[inds] = val_per_label[grpi]
+        #x,y,z = positions[inds].T
+        #mam.points3d(x,y,z, scale_factor=0.5, color = tuple(clrs[grpi]) )
+        #ax_top.scatter(xs,ys,zs,color=tuple(clrs[grpi]), s=msz)
+        #ax_side.scatter(xs,ys,zs,color=tuple(clrs[grpi]), s=msz)
+        #xs += [x]
+        #ys += [y]
+        #zs += [z]
+
+    #if color_group_labels is not None:
+    #    color_list = np.array(clrs)[ color_grouping ]
+#     xs = np.hstack(xs)
+#     ys = np.hstack(ys)
+#     zs = np.hstack(zs)
+# np.vstack((xs,ys,zs))
+
+    return newvals
+
 
 def vizGroup(sind_str,positions,labels,srcgroups, show=True, labels_to_skip = ['unlabeled'],
              show_legend=True):
@@ -4192,12 +4259,12 @@ def vizGroup2(sind_str, positions, labels, srcgroups,
     scatters = {}
     if cmap is not None:
         for projection,ax in ax_per_proj.items():
-            scatters[projection] = ax.scatter(xs,ys,zs,c=intensities_ext,  s=marker_sizes, cmap=cmap)
+            scatters[projection] = ax.scatter(xs,ys,zs,c=intensities_ext,  s=marker_sizes, cmap=cmap, linewidth=0)
         #scatters['top'] = ax_top.scatter(xs,ys,zs,c=intensities_ext,  s=marker_sizes, cmap=cmap)
         #scatters['side'] = ax_side.scatter(xs,ys,zs,c=intensities_ext, s=marker_sizes, cmap=cmap)
     else:
         for projection,ax in ax_per_proj.items():
-            scatters[projection] = ax.scatter(xs,ys,zs,color=color_list,  s=marker_sizes)
+            scatters[projection] = ax.scatter(xs,ys,zs,color=color_list,  s=marker_sizes, linewidth=0)
         #scatters['top'] = ax_top.scatter(xs,ys,zs,color=color_list,  s=marker_sizes)
         #scatters['side'] = ax_side.scatter(xs,ys,zs,color=color_list, s=marker_sizes)
 
@@ -4594,3 +4661,214 @@ def loadLabelsDict(rncur = 'S01_off_hold'):
     labels_dict = rec_info['label_groups_dict'][()]
     del rec_info
     return labels_dict
+
+def loadROILabels(rncur = 'S01_off_hold'):
+    #sources_type=multi_clf_output['info']['sources_type']
+    #rc_file_grouping_ind = multi_clf_output['info']['src_grouping_fn']
+    sources_type = 'parcel_aal'
+    src_file_grouping_ind = '10'
+    src_rec_info_fn = '{}_{}_grp{}_src_rec_info'.format(rncur,
+                                                        sources_type,src_file_grouping_ind)
+    src_rec_info_fn_full = os.path.join(gv.data_dir, src_rec_info_fn + '.npz')
+    rec_info = np.load(src_rec_info_fn_full, allow_pickle=True)
+
+    #print( list(rec_info.keys()) )
+
+    labels_dict = rec_info['label_groups_dict'][()]
+    srcgroups_dict = rec_info['srcgroups_dict'][()]
+    coords = rec_info['coords_Jan_actual'][()]
+    #######
+    # order, that is new compared to what was in .mat file
+    # generated by .m script preparting source coordinates
+    new_src_order = rec_info['new_src_order'][()]
+    srcgrouping_names_sorted = rec_info['srcgroups_key_order'][()]
+    sgdn = 'all_raw'
+    return labels_dict[sgdn],srcgroups_dict[sgdn], coords #, new_src_order
+
+def loadSurfAndGrids(sind_strs, source_coords, load_def=True, src_order = None):
+    import pymatreader as pymr
+    vis_info_per_subj = {}
+    nums = []
+    units = []
+    for sind_str in sind_strs:
+        vi = {}
+        hdf = pymr.read_mat(pjoin(gv.data_dir,f'headmodel_grid_{sind_str}_surf.mat'))
+
+        hdf_mod = pymr.read_mat(pjoin(gv.code_dir,f'{sind_str}_modcoord_parcel_aal.mat'))
+
+
+        vi['hdf'] = hdf
+        vi['hdf_mod'] = hdf_mod
+
+        mni_aligned_grid = hdf['mni_aligned_grid']
+        pos = mni_aligned_grid['pos']
+        nums += [len(pos) ]
+        units += [mni_aligned_grid['unit'] ]
+        vi['headsurfgrid_verts'] = pos
+        vi['headsurfgrid_unit'] = mni_aligned_grid['unit']
+
+        if src_order is not None:
+            vi['headsurfgrid_mod_order'] = src_order
+        # WARNING these are wrongly ordered coords, inconsistent with the result of run_process_FTsources.py
+        #vi['headsurfgrid_mod_verts'] = hdf_mod['coords_Jan_actual']
+        # this would be more correct but maybe better avoid computing inverse
+        # because there can be a problem when I use only one hemisphere, better
+        # taking actually used coords (well orderd) from src_rec_info file
+        #vi['headsurfgrid_mod_verts'] = hdf_mod['coords_Jan_actual'][ INVERSE(src_order) ]
+
+        if isinstance(source_coords, np.ndarray):
+            # if we do so, I should not try to plot each subject on their own
+            # head
+            print('WARNING: Setting same source coords for all subjects')
+            vi['headsurfgrid_mod_verts'] = source_coords
+        elif isinstance(source_coords, dict):
+            vi['headsurfgrid_mod_verts'] = source_coords[sind_str]
+        else:
+            print('WARNING: not setting source coords at all')
+
+        tris = hdf['hdm']['bnd']['tri'].astype(int)
+        rr_mm = hdf['hdm']['bnd']['pos']
+        tris -= 1 # correct matlab
+        #rr_mm -= 1
+
+        vi['headsurf_tris'] = tris
+        vi['headsurf_verts'] = rr_mm
+        vi['headsurf_units'] = 'mm'
+        vis_info_per_subj[sind_str] = vi
+
+    assert len(set(nums) ) == 1
+    assert len(set(units) ) == 1
+
+    #print('
+
+    if load_def:
+        cgMNI = pymr.read_mat(pjoin(gv.code_dir,'cortical_grid_MNI.mat') )
+        #cgMNI['cortical_grid'].shape  #(3, 567)
+        vi = {}
+        vi['headsurfgrid_verts']  = cgMNI['cortical_grid']
+        vis_info_per_subj['S_default'] = vi
+
+    return vis_info_per_subj
+
+def loadFeatFile(subdir,rawn,prefix,sources_type='parcel_aal', skip=32, windowsz=256,
+                src_file_grouping_ind=10,src_grouping=0, crp_str=''):
+    import utils_tSNE as utsne
+    regex = '{}_feats_{}_{}chs_nfeats{}_skip{}_wsz{}_grp{}-{}{}.npz'.\
+        format(rawn,sources_type,'[0-9]+', '[0-9]+', skip, windowsz,
+                src_file_grouping_ind, src_grouping, crp_str)
+        #format(rawn, prefix, regex_nrPCA, regex_nfeats, regex_pcadim)
+    inp_subdir = pjoin(gv.data_dir, subdir)
+    fnfound = utsne.findByPrefix(inp_subdir, rawn, prefix, regex=regex)
+    if len(fnfound) > 1:
+        fnt = [0] * len(fnfound)
+        for fni in range(len(fnt) ):
+            fnfull = pjoin(inp_subdir, fnfound[fni])
+            fnt[fni] = os.path.getmtime(fnfull)
+        fni_max = np.argmax(fnt)
+        fnfound = [ fnfound[fni_max] ]
+    assert len(fnfound) == 1, 'For {} found not single fnames {}'.format(rawn,fnfound)
+    fname_feat_full = pjoin( inp_subdir, fnfound[0] )
+    return fname_feat_full
+
+def loadMLFile(subdir,rawn,prefix,sources_type='parcel_aal', skip=32, windowsz=256,
+                src_file_grouping_ind=10,src_grouping=0, crp_str='',light=True,
+              nraws_used_PCA=2, dim_PCA=11111, n_feats_PCA=11111):
+    import utils_tSNE as utsne
+    set_explicit_nraws_used_PCA = 0
+    set_explicit_n_feats_PCA = 0
+    set_explicit_dim_PCA = 0
+
+    if set_explicit_nraws_used_PCA:
+        regex_nrML = str(nraws_used_PCA)
+    else:
+        regex_nrML = '[0-9]+'
+    if set_explicit_n_feats_PCA:
+        regex_nfeats = str(n_feats_PCA)
+    else:
+        regex_nfeats = '[0-9]+'
+    if set_explicit_dim_PCA:
+        regex_pcadim = str(dim_PCA)
+    else:
+        regex_pcadim = '[0-9]+'
+    regex = '_{}_{}_grp{}-{}_{}_ML_nr({})_[0-9]+chs_nfeats({})_pcadim({}).*'.\
+        format(rawn, sources_type, src_file_grouping_ind, src_grouping,
+               prefix, regex_nrML, regex_nfeats, regex_pcadim)
+    if light:
+        regex = '_\!' + regex
+
+    # here prefix should be without '_' in front or after
+    inp_subdir = pjoin(gv.data_dir, subdir)
+    fnfound = utsne.findByPrefix(inp_subdir, rawn, prefix, regex=regex)
+    if len(fnfound) > 1:
+        fnt = [0] * len(fnfound)
+        for fni in range(len(fnt) ):
+            fnfull = pjoin(inp_subdir, fnfound[fni])
+            fnt[fni] = os.path.getmtime(fnfull)
+        fni_max = np.argmax(fnt)
+        fnfound = [ fnfound[fni_max] ]
+    assert len(fnfound) == 1, 'For {} with regex {} in {} found not single fnames {}'.\
+        format(rawn,regex,inp_subdir, fnfound)
+    fname_PCA_full = pjoin( inp_subdir, fnfound[0] )
+    return fname_PCA_full
+
+
+def getMainLFPchan(subj,best_LFP_prefix = 'modLFP',
+                   grp='merge_movements', it='basic'):
+    import json
+    best_LFP_info_fname = pjoin(gv.data_dir, 'best_LFP_info.json')
+    with open(best_LFP_info_fname, 'r') as f:
+        best_LFP_info = json.load(f)
+    #onlyH modLFP LFPrel_noself_onlyCon LFPrel_noself_onlyRbcorr LFPrel_noself_onlyBpcorr
+
+    # it could (and should) be different for different subjects
+    mainLFPchan = best_LFP_info[subj][f'{best_LFP_prefix},{grp},{it}']['best_LFP']
+    return mainLFPchan
+
+
+def filterAnnDict(anndict, sidelet = 'L', artif_best_LFP_only = True):
+    import copy
+      # body side
+
+    anndict_flt = copy.deepcopy(anndict)
+    for k,v in anndict_flt.items():
+        subj = k.split('_')[0]
+        mainLFPchan = getMainLFPchan(subj)
+        for kk,vv in v.items():
+            if isinstance(vv,dict):  # artif
+                for kkk,vvv in vv.items():
+                    l = len(vvv.duration)
+                    z = zip(vvv.onset,vvv.duration,vvv.description)
+                    zr = []
+                    for zt in z:
+                        include = True
+                        if zt[-1].startswith('BAD_LFP') and artif_best_LFP_only:
+                            include = (zt[-1] == f'BAD_{mainLFPchan}')
+                        if include:
+                            zr += [zt]
+                    if len(zr):
+                        on,dur,des=zip(*zr)
+                    else:
+                        on,dur,des = [],[],[]
+                    #vvv2 = mne.Annotations(list(on),list(dur),list(des),
+                    #                      ch_names = [[]]*l)
+                    vvv2 = mne.Annotations(on,dur,des,
+                                          ch_names = [[]]*len(zr))
+                    vv[kkk] = vvv2
+            else:
+                l = len(vv.duration)
+
+                z = zip(vv.onset,vv.duration,vv.description)
+                zr = []
+                for zt in z:
+                    include = zt[-1].endswith('_' + sidelet)
+                    if include:
+                        zr += [zt]
+                if len(zr):
+                    on,dur,des=zip(*zr)
+                else:
+                    on,dur,des = [],[],[]
+                #print(len(zr))
+                vv2 = mne.Annotations(on,dur,des,
+                                      ch_names = [[]]*len(zr))
+                v[kk] = vv2
+    return anndict_flt

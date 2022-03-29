@@ -66,7 +66,8 @@ rawname_ = 'S01_on_hold'
 sources_type = 'parcel_aal'
 
 groupings_to_use = ['all']
-do_save = 1
+save_info = 1
+save_data = 1
 
 nPCA_comp = 0.95
 algType = 'PCA+ICA' #'PCA' # 'mean'
@@ -76,7 +77,9 @@ output_subdir = ""
 
 helpstr = 'Usage example\nrun_process_FTsources.py --rawname <rawname_naked> --sources_type <srct> '
 opts, args = getopt.getopt(effargv,"hr:s:",
-        ["rawnames=", 'sources_type=', 'groupings=', 'alg_type=', 'do_save=',
+        ["rawnames=", 'sources_type=', 'groupings=', 'alg_type=',
+         'save_info=',
+         'save_data=',
          "input_subdir=", "output_subdir="])
 print(sys.argv, opts, args)
 for opt, arg in opts:
@@ -86,8 +89,10 @@ for opt, arg in opts:
         sys.exit(0)
     elif opt == '--groupings':
         groupings_to_use = arg.split(',')
-    elif opt == '--do_save':
-        do_save = int(arg)
+    elif opt == '--save_info':
+        save_info = int(arg)
+    elif opt == '--save_data':
+        save_data = int(arg)
     elif opt == "--input_subdir":
         input_subdir = arg
         if len(input_subdir) > 0:
@@ -115,6 +120,8 @@ for opt, arg in opts:
         rawnames = rawnames_nonempty
     elif opt in ('-s','--sources_type'):
         sources_type = str(arg)
+    else:
+        raise ValueError(f'Unrecognized option {opt} with value {arg}')
 
 if groupings_to_use[0] == 'all_raw':
     assert algType == 'all_sources'
@@ -374,6 +381,7 @@ for rawni,rawname_ in enumerate(rawnames):
             for chi in range(len(custom_raw_cur.info['chs']) ):
                 custom_raw_cur.info['chs'][chi]['loc'][:3] = pos[concat][chi,:3]
             coords_resorted = pos[concat]
+            new_src_order = concat # to save later
 
             rawtmp = custom_raws.get(indset_name, None)
             if rawtmp is None:
@@ -659,7 +667,7 @@ assert len(sl) == 1  # just for now, I don't want to code extra in gen_features
 grp_id_str = ','.join(map(str,sl) )
 
 
-if do_save:
+if save_info:
     for rawname_ in rawnames:
         src_rec_info_fn = '{}_{}_grp{}_src_rec_info'.\
             format(rawname_,sources_type,  grp_id_str  )
@@ -669,11 +677,13 @@ if do_save:
                  srcgroups_dict=srcgroups_dict,
                 scrgroups_per_indset = scrgroups_per_indset,
                 coords_Jan_actual=coords_resorted,
+                coords_Jan_actual_unsorted=pos,
                 label_groups_dict = label_groups_dict,
                 srcgroups_key_order = srcgroups_keys_ordered,
                 coords_MNI=coords_MNI,
                 pcas=pcas, icas=icas,
-                avpos=avpos, algType=algType, vertices_inds_dict=vertices_inds_dict)
+                avpos=avpos, algType=algType, vertices_inds_dict=vertices_inds_dict,
+                new_src_order = new_src_order )
         # coords_Jan_actual -- indeed actual coords (not MNI)
 
 
@@ -750,7 +760,7 @@ srcgroups_backup = custom_raws['surround'].info['srcgroups']
 
 newraw = mne.io.RawArray(dd, info)
 
-if do_save:
+if save_data:
     curstart = 0
     for rawni,rawname_ in enumerate(rawnames):
         if sources_type == 'HirschPt2011':

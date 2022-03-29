@@ -118,7 +118,7 @@ do_Classif = 1
 n_feats = 609  # this actually depends on the dataset which may have some channels bad :(
 do_XGB = 1
 do_LDA = 1
-calc_MI = 1
+calc_MI = 0
 calc_VIF     = 1
 calc_Boruta = 1
 compute_ICA = 0
@@ -256,6 +256,7 @@ opts, args = getopt.getopt(effargv,"hr:n:s:w:p:",
          "SLURM_job_id=", "runCID=", "featsel_only_best_LFP=",
          "XGB_max_depth=", "XGB_min_child_weight=", "XGB_tune_param=",
          "EBM_tune_param=", "EBM_tune_max_evals=",
+         "runstring_ind=",
          "EBM_compute_pairwise=", "EBM_featsel_feats=",
          "EBM_balancing=", "EBM_balancing_numfeats_thr=",
          'XGB_featsel_feats=',
@@ -294,6 +295,8 @@ for opt,arg in pars.items():
         n_channels = int(arg)
     elif opt == "SLURM_job_id":
         SLURM_job_id = arg # str
+    elif opt == "runstring_ind":
+        runstring_ind = arg # str
     elif opt == "runCID":
         runCID  = int(arg)
     elif opt == "n_feats":
@@ -1358,13 +1361,17 @@ if do_Classif:
             else:
                 subjdir = custom_rawname_str
 
-            def saveResToFolder(resobj, key, subsubdir = ''):
+            def saveResToFolder(resobj, key, subsubdir = '', fname=None):
                 #from pathlib import Path
                 pl = [ gv.data_dir, output_subdir,
                     subjdir, prefix, int_types_key, grouping_key]
                 if len(subsubdir):
                     pl += [subsubdir]
-                pl += [key ]
+                if fname is not None:
+                    pl += [fname ]
+                else:
+                    if key is not None:
+                        pl += [key ]
 
                 # make dirs except of the last thing (which is a filename)
                 os.makedirs(pjoin(*tuple(pl[:-1] ) ), exist_ok=True)
@@ -1372,7 +1379,10 @@ if do_Classif:
                 final_path = pjoin(*tuple(pl) )
                 #path_list = pre_final_path.split(os.path.sep)
                 #final_path = pjoin(
-                obj = resobj[key]
+                if key is None:
+                    obj = resobj
+                else:
+                    obj = resobj[key]
                 if save_output:
                     saveResToFolder_(obj, final_path + '.npz')
 
@@ -1839,7 +1849,12 @@ if do_Classif:
                 if XGB_tune_param:
                     add_clf_creopts_tuned, add_fitopts_tuned     = None,None
                     if load_XGB_params_auto and os.path.exists(fname_ML_full_intermed_light):
-                        fe = np.load(fname_ML_full_intermed_light, allow_pickle=True)
+                        from zipfile import BadZipFile
+                        try:
+                            fe = np.load(fname_ML_full_intermed_light, allow_pickle=True)
+                        except BadZipFile as e:
+                            print('Failed to load previous params')
+                            print(str(e) )
                         resc_ = fe['results_light'][()]
                         rc = resc_['XGB_analysis_versions']['all_present_features']
                         add_clf_creopts_tuned  = rc.get('add_clf_creopts',None)
@@ -1989,7 +2004,7 @@ if do_Classif:
                     from utils_tSNE import extractSubperfs
                     perf_per_cp = extractSubperfs(X_cur,class_labels_good_for_classif, class_labels_good_for_classif_nm,
                                     revdict_lenc, revdict_lenc_nm,
-                                class_ind_to_check_lenc, r0['clf_objs' ] , r0['test_indices_list'] )
+                                class_ind_to_check_lenc, r0['clf_objs' ] , r0['test_indices_list'], confmat = r0['confmat_aver'] )
                     rc['perf_per_cp' ] =  perf_per_cp
 
                     # here we do NO want the main interval typ to be of
@@ -2658,6 +2673,10 @@ if do_Classif:
                                     assert tuple(ebm_creopts_tuned['feature_names'] ) == tuple(ebm_creopts['feature_names'] )
                                     ebm_creopts = ebm_creopts_tuned
                                     EBM_tune_param_cur = False
+
+                            sds = f'featsel_per_method/{fsh}/{featsel_feat_subset_name}/tune_param'
+                            EBM_savedict = {'save_fun':saveResToFolder,
+                                            'subsubdir':  sds}
                             info_cur = utsne.computeEBM(X_EBM,y_EBM,EBM,ebm_creopts,revdict_lenc,  revdict_lenc_nm,
                                     class_ind_to_check_lenc,
                                     class_labels_good_for_classif_nm[::subskip_fit],
@@ -2665,7 +2684,7 @@ if do_Classif:
                                     EBM_compute_pairwise=EBM_compute_pairwise,
                                     EBM_CV=EBM_CV, featnames_ebm=featnames_ebm,
                                     tune_params = EBM_tune_param_cur, params_space=params_space,
-                                                        max_evals=EBM_tune_max_evals)
+                                    max_evals=EBM_tune_max_evals, savedict=EBM_savedict)
                             info_cur['feature_indices_used'] = featis
                             featsel_info[featsel_feat_subset_name] = info_cur
 
