@@ -1,3 +1,6 @@
+# we do not do rescaling here! Only stat gathering
+
+
 import sys,os,getopt
 import utils_tSNE as utsne
 import utils_genfeats as ugf
@@ -28,6 +31,9 @@ crop_start = None
 crop_end   = None
 bands_precision = 'crude'
 calc_stats_multi_band = 0
+brain_side_to_use = 'body_move_side'
+body_side_for_baseline_int = 'body_move_side'
+channel_order = 'side,mod'
 
 n_free_cores = gp.n_free_cores
 n_jobs = max(1, mpr.cpu_count() - n_free_cores)
@@ -36,6 +42,7 @@ allow_CUDA_MNE = mne.utils.get_config('MNE_USE_CUDA')
 allow_CUDA = True
 
 input_subdir = ""
+output_subdir = ""
 msrc_inds = np.arange(8,dtype=int)  #indices appearing in channel (sources) names, not channnel indices
 
 data_modalities = ['LFP', 'msrc']
@@ -50,13 +57,18 @@ effargv = sys.argv[1:]  # to skip first
 if sys.argv[0].find('ipykernel_launcher') >= 0:
     effargv = sys.argv[3:]  # to skip first three
 
+# brain_side_to_use -- acutally it is more "body side to FOCUS on". It is used
+# to determine which BRAIN sides will be used, but it does not enforce
+# filtering of behavioral states
 helpstr = 'Usage example\nrun_prep_dat.py --rawnames <rawname_naked,rawname_naked> '
 opts, args = getopt.getopt(effargv,"hr:",
         ["mods=","msrc_inds=","rawnames=",
             "show_plots=", "side=", "LFPchan=", "useHFO=",
           "sources_type=", "crop=" ,
-         "src_grouping=", "src_grouping_fn=",
-         "input_subdir=", "save_dat=", "save_stats=", "param_file=",
+         "src_grouping=", "src_grouping_fn=", "brain_side_to_use=",
+        "body_side_for_baseline_int=", "channel_order=",
+         "input_subdir=", "output_subdir=",
+         "save_dat=", "save_stats=", "param_file=",
          "bands_precision=", "calc_stats_multi_band=", "exit_after=",
          "use_preloaded_raws=", "allow_CUDA=", "n_jobs=" ])
 print('opts is ',opts)
@@ -109,6 +121,13 @@ for opt,arg in pars.items():
         if len(input_subdir) > 0:
             subdir = pjoin(gv.data_dir,input_subdir)
             assert os.path.exists(subdir )
+    elif opt == "output_subdir":
+        output_subdir = arg
+        if len(output_subdir) > 0:
+            subdir = pjoin(gv.data_dir,output_subdir)
+            if not os.path.exists(subdir ):
+                print('Creating output subdir {}'.format(subdir) )
+                os.makedirs(subdir)
     elif opt == "src_grouping_fn":
         src_file_grouping_ind = int(arg)
     elif opt == "mods":
@@ -125,6 +144,12 @@ for opt,arg in pars.items():
             sources_type = arg
     elif opt == "use_preloaded_raws":
         use_preloaded_raws = int(arg)
+    elif opt == "brain_side_to_use":
+        brain_side_to_use = arg
+    elif opt == "body_side_for_baseline_int":
+        body_side_for_baseline_int = arg
+    elif opt == "channel_order":
+        channel_order = arg
     elif opt in 'rawnames':
         if len(arg) < 5:
             print('Empty raw name provided, exiting')
@@ -227,8 +252,11 @@ if use_lfp_HFO:
     mods_to_load += ['LFP_hires']
 
 if not use_preloaded_raws:
+    # verbosity levels from 10 (most vebose) to 50 (least)
+    # https://mne.tools/stable/auto_tutorials/intro/50_configure_mne.html#tut-logging
     raws_permod_both_sides = upre.loadRaws(rawnames,mods_to_load, sources_type, src_type_to_use,
-                src_file_grouping_ind,input_subdir=input_subdir,n_jobs=n_jobs)
+                src_file_grouping_ind,input_subdir=input_subdir,n_jobs=n_jobs,
+                                           verbose=40)
 else:
     print('----------  USING PRELOADED RAWS!!!!!')
 
@@ -243,11 +271,13 @@ if use_lfp_HFO:
 
 ####################  data processing params
 
-def_main_side = 'left'
-side_to_use = 'move_side'
+# brain side
+desired_main_body_side = 'left'
 force_consistent_main_sides = 1 # consistent across datasets, even not loaded ones
-if force_consistent_main_sides:
-    new_main_side = def_main_side
+if brain_side_to_use == 'both':
+    new_main_body_side = 'both'
+elif force_consistent_main_sides :
+    new_main_body_side = desired_main_body_side
 
 rec_info_pri = []
 for rawname_ in rawnames:
@@ -256,11 +286,26 @@ for rawname_ in rawnames:
     rec_info = np.load(src_rec_info_fn_full, allow_pickle=True)
     rec_info_pri += [rec_info]
 
+
+move_sides = []
+tremor_sides = []
+for rn in rawnames:
+    subj_cur,medcond_cur,task_cur  = utils.getParamsFromRawname(rn)
+    mainmoveside_cur = gv.gen_subj_info[subj_cur].get('move_side',None)
+    maintremside_cur = gv.gen_subj_info[subj_cur].get('tremor_side',None)
+    mainLFPchan_cur  = gv.gen_subj_info[subj_cur]['lfpchan_used_in_paper']
+    tremfreq_Jan_cur = gv.gen_subj_info[subj_cur]['tremfreq']
+
+    move_sides  += [ mainmoveside_cur ]
+    tremor_sides+= [ maintremside_cur ]
+
+
 # the output is dat only from the selected hemisphere
 r = ugf.collectDataFromMultiRaws(rawnames, raws_permod_both_sides, sources_type,
                              src_file_grouping_ind, src_grouping, use_main_LFP_chan,
-                             side_to_use, new_main_side, data_modalities,
-                             crop_start,crop_end,msrc_inds, rec_info_pri)
+                             brain_side_to_use, new_main_body_side, data_modalities,
+                             crop_start,crop_end,msrc_inds, rec_info_pri,
+                             None, None, channel_order  )
 
 dat_pri, dat_lfp_hires_pri, extdat_pri, anns_pri, anndict_per_intcat_per_rawn_, times_pri,\
 times_hires_pri, subfeature_order_pri, subfeature_order_lfp_hires_pri, aux_info_perraw = r
@@ -281,18 +326,18 @@ for rawn,anndict_per_intcat in anndict_per_intcat_per_rawn.items():
 if exit_after == 'collectDataFromMultiRaws':
     sys.exit(0)
 
-#fn_suffix_dat = 'dat_{}_newms{}_mainLFP{}_grp{}-{}.npz'.format(new_main_side,
+#fn_suffix_dat = 'dat_{}_newms{}_mainLFP{}_grp{}-{}.npz'.format(new_main_body_side,
 #                                                              ','.join(data_modalities),
 #                                                               use_main_LFP_chan,
 #                                                            src_file_grouping_ind, src_grouping)
 if save_dat:
     for rawi in range(len(rawnames) ):
         rawn = rawnames[rawi]
-        fname = utils.genPrepDatFn(rawn, new_main_side, data_modalities,
+        fname = utils.genPrepDatFn(rawn, new_main_body_side, data_modalities,
                                    use_main_LFP_chan, src_file_grouping_ind,
-                                   src_grouping)
+                                   src_grouping, brain_side_to_use)
         #fname = '{}_'.format(rawn) + fn_suffix_dat
-        fname_dat_full = pjoin(gv.data_dir, input_subdir, fname)
+        fname_dat_full = pjoin(gv.data_dir, output_subdir, fname)
         print('Saving data to ',fname_dat_full)
         np.savez(fname_dat_full,
                  dat=dat_pri[rawi],
@@ -307,7 +352,8 @@ if save_dat:
                  subfeature_order_lfp_hires_pri = subfeature_order_lfp_hires_pri[rawi],
                  aux_info = aux_info_perraw[rawn],
                  data_modalities=data_modalities,
-                 sfreq=sfreq, sfreq_hires = sfreq_hires, cmd=(opts,args), pars=pars)
+                 sfreq=sfreq, sfreq_hires = sfreq_hires,
+                 cmd=(opts,args), pars=pars)
 
 n_channels_pri = [ datcur.shape[0] for datcur in dat_pri ];
 main_sides_pri = [ aux_info_perraw[rn]['main_body_side'] for rn in rawnames]
@@ -317,9 +363,17 @@ subfeature_order = subfeature_order_pri[0]
 subfeature_order_lfp_hires = subfeature_order_lfp_hires_pri[0]
 
 
-main_side_let = new_main_side[0].upper()
+if new_main_body_side != 'both':
+    main_side_let = new_main_body_side[0].upper()
+    intervals_for_stats =\
+        [it + '_{}'.format(main_side_let) for it in gp.int_types_basic]
+    intervals_for_stats += ['entire']
+else:
+    intervals_for_stats = ['entire']
+    for main_side_let in ['L','R']:
+        intervals_for_stats += \
+            [it + '_{}'.format(main_side_let) for it in gp.int_types_basic]
 artif_handling = 'reject'
-intervals_for_stats = [it + '_{}'.format(main_side_let) for it in gp.int_types_basic] + ['entire']
 # here we plot even if we don't actually rescale
 if plot_stat_scatter and len(set( n_channels_pri ) ) == 1 :
     dat_T_pri = [0]*len(dat_pri)
@@ -336,9 +390,26 @@ if plot_stat_scatter and len(set( n_channels_pri ) ) == 1 :
     gc.collect()
 
 
-baseline_int = 'notrem_{}'.format(main_side_let)
+########## WARNING: it is wrong to run this code for more than one data file,
+########## because it would do wrong stuff when sides are inconsitent  ########
+#assert len(dat_pri) == 1
+if brain_side_to_use != 'both':
+    assert len(set(side_switched_pri) ) == 1
+#if body_side_for_baseline_int == 'body_move_side':
+#    main_side_let = move_sides[0][0].upper()
+#elif body_side_for_baseline_int == 'body_tremor_side':
+#    main_side_let = tremor_sides[0][0].upper()
+#elif body_side_for_baseline_int in ['left','right']:
+#    main_side_let = body_side_for_baseline_int[0].upper()
+#baseline_int = 'notrem_{}'.format(main_side_let)
+
+baseline_int_type = 'notrem'
+baseline_int = upre.getBaselineInt(rawnames[0], body_side_for_baseline_int, baseline_int_type)
+main_side_let = baseline_int[-1]
+
 stats_per_ct = {}
 stats_HFO_per_ct = {}
+# gather stats for ALL possible combination types
 for combine_type in gv.rawnames_combine_types_rawdata:
     dat_T_pri = [0]*len(dat_pri)
     for dati in range(len(dat_pri) ):
@@ -386,10 +457,10 @@ if save_stats:
     #inds_str = ','.join( sorted(subjs_analyzed.keys() ) )
     #nr = len(rawnames)
     #fname_stats = 'stats_{}_{}_'.format(inds_str,nr)  + fn_suffix_dat
-    fname_stats = utils.genStatsFn(rawnames, new_main_side, data_modalities,
+    fname_stats = utils.genStatsFn(rawnames, new_main_body_side, data_modalities,
                                    use_main_LFP_chan, src_file_grouping_ind,
-                                   src_grouping )
-    fname_stats_full = pjoin( gv.data_dir, input_subdir, fname_stats)
+                                   src_grouping, brain_side_to_use )
+    fname_stats_full = pjoin( gv.data_dir, output_subdir, fname_stats)
     print('Saving stats to',fname_stats_full)
     np.savez(fname_stats_full, stats_per_ct=stats_per_ct, stats_HFO_per_ct=stats_HFO_per_ct,
              rawnames=rawnames, cmd=(opts,args), pars=pars)
@@ -485,10 +556,10 @@ if calc_stats_multi_band:
         #inds_str = ','.join( sorted(subjs_analyzed.keys() ) )
         #nr = len(rawnames)
         #fname_stats = 'stats_{}_{}_'.format(inds_str,nr)  + fn_suffix_dat
-        fname_stats = utils.genStatsMultiBandFn(rawnames, new_main_side, data_modalities,
+        fname_stats = utils.genStatsMultiBandFn(rawnames, new_main_body_side, data_modalities,
                                     use_main_LFP_chan, src_file_grouping_ind,
-                                    src_grouping, bands_precision )
-        fname_stats_full = pjoin( gv.data_dir, input_subdir, fname_stats)
+                                    src_grouping, bands_precision, brain_side_to_use )
+        fname_stats_full = pjoin( gv.data_dir, output_subdir, fname_stats)
         print('Saving multiband stats ',fname_stats_full)
         np.savez(fname_stats_full, stats_multiband_bp_per_ct=stats_multiband_bp_per_ct,
                 stats_multiband_flt_per_ct=stats_multiband_flt_per_ct,

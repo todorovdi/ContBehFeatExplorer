@@ -46,3 +46,4 @@ export PYTHONPATH=$OSCBAGDIS_DATAPROC_CODE:$PYTHONPATH
 $py -c "import os; print('cwd for $py=',os.getcwd() );"
 #$py $CODE/run/$RUNSTRING_CUR --SLURM_job_id "$JOBID"_"$RUNSTRING_IND"  --calc_MI 0
 $py $CODE/run/$RUNSTRING_CUR --SLURM_job_id "$JOBID"_"$JOB_ARRAY_IND" --runstring_ind $RUNSTRING_IND 
+exit $?

@@ -12,30 +12,35 @@ import multiprocessing as mpr
 from joblib import Parallel, delayed
 
 from utils import getOppositeSideStr
-from utils import parseMEGsrcChnameShort
-from utils import parseMEGsrcChnamesShortList
+from utils import parseMEGsrcChnameShort,parseMEGsrcChnamesShortList
 from utils_tSNE import robustMeanPos, robustMean
 
 def collectDataFromMultiRaws(rawnames, raws_permod_both_sides, sources_type,
                              src_file_grouping_ind, src_grouping, use_main_LFP_chan,
-                             side_to_use, new_main_side, data_modalities,
+                             brain_side_to_use, desired_main_body_side, data_modalities,
                              crop_start,crop_end,msrc_inds, rec_info_pri,
-                             mainLFPchans_pri=None, mainLFPchan_newname=None):
+                             mainLFPchans_pri=None, mainLFPchan_newname=None,
+                             channel_order = 'side,mod' ):
     '''
     uses loaded data in different modalities and converts is to numpy arrays,
     performing side switching if necessary
 
-    side_to_use can be 'tremor_side', 'move_side' , 'both', 'left' , 'right'
+    brain_side_to_use can be 'body_tremor_side', 'body_move_side' , 'both', 'left' , 'right'
     rawnames are important to have because they give ordering
-    \<new_main_side\> is what will appear as main in the output
+    \<desired_main_body_side\> is what will appear as main in the output
 
     usually mainLFPchan_newname wil not be used because I will better rename in run_PCA
+
+    TODO: not sure whether we want to reverse when using both sides
     '''
     import copy
     from utils import changeRawInfoSides
     from utils_tSNE import revAnnSides
 
-    assert new_main_side in ['left','right']
+
+    if brain_side_to_use != 'both':
+        assert desired_main_body_side in ['left','right']
+
     dat_pri = []
     times_pri = []
     times_hires_pri = []
@@ -85,20 +90,21 @@ def collectDataFromMultiRaws(rawnames, raws_permod_both_sides, sources_type,
 
         raws = raws_permod_both_sides[rawname_]
 
-        if side_to_use == 'tremor_side':
+        if brain_side_to_use == 'body_tremor_side':
             main_body_side = maintremside
-        elif side_to_use == 'move_side':
+        elif brain_side_to_use == 'body_move_side':
             main_body_side = mainmoveside
-        elif side_to_use in ['left', 'right']:
-            main_body_side = side_to_use
-        elif side_to_use == 'both':
+        elif brain_side_to_use in ['left', 'right']:
+            main_body_side = getOppositeSideStr(brain_side_to_use)
+        elif brain_side_to_use == 'both':
             main_body_side = ['left', 'right']
         else:
             raise ValueError('wrong side name')
 
-        if main_body_side != new_main_side:
+        # if both we don't want to switch
+        if isinstance(main_body_side,str) and (main_body_side != desired_main_body_side):
             side_switch_needed = True
-            print('WE WILL BE SWITCHING SIDES for {}'.format(rawname_) )
+            print(f'WE WILL BE SWITCHING SIDES for {rawname_} from {main_body_side} to {desired_main_body_side}' )
         else:
             side_switch_needed = False
 
@@ -124,6 +130,9 @@ def collectDataFromMultiRaws(rawnames, raws_permod_both_sides, sources_type,
         raw_lfponly.load_data()
         raw_srconly.load_data()
         raw_lfp_hires.load_data()
+
+        #if brain_side_to_use == 'both':
+        #    chnames_lfp = [raw_lfponly.ch_names[chi] for chi in chis]
 
         # first we separate channels by sides (we will select one side only later)
         brain_sides = ['L', 'R'] # brain sides   # this is just for construction of data, we will restrict later
@@ -191,14 +200,14 @@ def collectDataFromMultiRaws(rawnames, raws_permod_both_sides, sources_type,
             print('{} brain side,  {} sources'.format(side, len(chis) ) )
 
 
-
         import utils_preproc as upre
         sfreq = int( raw_lfponly.info['sfreq'] )
+        # do we remove some annotations here? artifacts yes
         anndict_per_intcat = upre.collectAllMarkedIntervals( rawname_, raw_lfponly.times,
-            new_main_side, side_switch_needed, sfreq=sfreq,
+            desired_main_body_side, side_switch_needed, sfreq=sfreq,
             ann_MEGartif_prefix_to_use = '_ann_MEGartif_flt',
             printLog=False, allow_missing_files=False,
-            remove_nonmain_artif= side_to_use != 'both' )
+            remove_nonmain_artif= brain_side_to_use != 'both' )
         anndict_per_intcat_per_rawn[rawname_] = anndict_per_intcat
 
         anns_fn = rawname_ + '_anns.txt'
@@ -235,7 +244,7 @@ def collectDataFromMultiRaws(rawnames, raws_permod_both_sides, sources_type,
             raws_lfp_hires_perside = raws_lfp_hires_perside_new
 
             if isinstance(main_body_side, str):
-                main_body_side = new_main_side
+                main_body_side = desired_main_body_side
 
         if isinstance(main_body_side, str):
             test_side_let =  main_body_side[0].upper()
@@ -260,12 +269,15 @@ def collectDataFromMultiRaws(rawnames, raws_permod_both_sides, sources_type,
         rectconv_emg, ts_ = raw_emg_rectconv[chnames_emg]
         chnames_emg = [chn+'_rectconv' for chn in chnames_emg]
 
-        # select side to be outputted
+        #########################################
+        ########################### select side to output
+        #########################################
+
         raws_permod = {'LFP' : raws_lfp_perside, 'msrc' : raws_srconly_perside }
         if isinstance(main_body_side,str):
             hand_sides = [main_body_side[0].upper() ]
         elif isinstance(main_body_side,list) and isinstance(main_body_side[0], str):
-            hand_sides = main_body_side
+            hand_sides = [ bs[0].upper() for bs in main_body_side]
         else:
             raise ValueError('Wrong main_body_side',main_body_side)
         print('main_body_side {}, hand_sides to construct features '.format(main_body_side) ,hand_sides)
@@ -275,43 +287,63 @@ def collectDataFromMultiRaws(rawnames, raws_permod_both_sides, sources_type,
         #else:
         #    allowd_srcis_subregex = '[{}]'.format( ','.join( map(str, msrc_inds ) ))
 
-        ############# Concatenate data
+        ########################################################################
+        ############### Concatenate data   #####################################
+        ########################################################################
         subfeature_order = []
         dats = []
-        for side_hand in hand_sides:
+
+
+        sidemod_tuples = []
+        if channel_order == 'mod,side':
             for mod in data_modalities:
-                #sd = hand_sides_all[1-hand_sides.index(side_hand) ]  #
-                opside= getOppositeSideStr(side_hand)
-                #if mod in ['src','msrc']:  No! They are both in the brain, so both contralat!
-                opside = opside[0].upper()
+                for side_hand in hand_sides:
+                    sidemod_tuples += [ (side_hand,mod)  ]
+        elif channel_order == 'side,mod':
+            # then all of same side
+            for side_hand in hand_sides:
+                # first all of same mod
+                for mod in data_modalities:
+                    sidemod_tuples += [ (side_hand,mod)  ]
+        else:
+            raise ValueError(f'wrong chord {channel_order}')
 
-                curraw = raws_permod[mod][opside]
+        print('sidemod_tuples = ',sidemod_tuples)
 
-                if mod == 'msrc':
-                    chns = curraw.ch_names
-                    # note that we want to allow all sides in regex here
-                    # because we might have ipsilateral structures as well (as
-                    # selected by siding previsouly)
-                    if sources_type == 'HirschPt2011':
-                        inds = mne.pick_channels_regexp(  chns  , 'msrc.*_{}'.format(allowd_srcis_subregex) )
-                    else:
-                        inds = mne.pick_channels_regexp(  chns  , 'msrc._{}.*'.format(src_grouping) )
-                    assert len(inds) > 0
-                    chns_selected = list( np.array(chns)[inds]  )
-                    curdat, times = curraw[chns_selected]
-                    #msrc_inds
-                    chnames_added = chns_selected
+        for side_hand,mod in sidemod_tuples:
+            #sd = hand_sides_all[1-hand_sides.index(side_hand) ]  #
+            opside= getOppositeSideStr(side_hand)
+            #if mod in ['src','msrc']:  No! They are both in the brain, so both contralat!
+            opside = opside[0].upper()
+
+            print('mod opside = ',mod,opside)
+            curraw = raws_permod[mod][opside]
+
+            if mod == 'msrc':
+                chns = curraw.ch_names
+                # note that we want to allow all sides in regex here
+                # because we might have ipsilateral structures as well (as
+                # selected by siding previsouly)
+                if sources_type == 'HirschPt2011':
+                    inds = mne.pick_channels_regexp(  chns  , 'msrc.*_{}'.format(allowd_srcis_subregex) )
                 else:
-                    #print(curraw.ch_names)
-                    #import pdb; pdb.set_trace()
+                    inds = mne.pick_channels_regexp(  chns  , 'msrc._{}.*'.format(src_grouping) )
+                assert len(inds) > 0
+                chns_selected = list( np.array(chns)[inds]  )
+                curdat, times = curraw[chns_selected]
+                #msrc_inds
+                chnames_added = chns_selected
+            else:
+                #print(curraw.ch_names)
+                #import pdb; pdb.set_trace()
 
-                    curdat = curraw.get_data()
-                    chnames_added = curraw.ch_names
-                dats += [ curdat ]
+                curdat = curraw.get_data()
+                chnames_added = curraw.ch_names
+            dats += [ curdat ]
 
-                subfeature_order += chnames_added
-                print(f'--  side_hand {side_hand}, opside {opside} modality {mod}')
-                #print(chnames_added)
+            subfeature_order += chnames_added
+            print(f'--  side_hand {side_hand}, opside {opside} modality {mod}')
+            #print(chnames_added)
 
         if mainLFPchan_newname is not None:
             mainLFPchan_ind = subfeature_order.index(mainLFPchan)
@@ -349,6 +381,9 @@ def collectDataFromMultiRaws(rawnames, raws_permod_both_sides, sources_type,
             dat_lfp_hires_pri += [dat_lfp_hires]
 
 
+        ###############################################################
+        #########################  ECG  ###############################
+        ###############################################################
         ecg_fname = os.path.join(gv.data_dir, '{}_ica_ecg.npz'.format(rawname_) )
         if os.path.exists( ecg_fname ):
             f = np.load( ecg_fname )
@@ -2002,17 +2037,15 @@ def bandFilter(rawnames, times_pri, main_sides_pri, side_switched_pri,
         #means_perband_bp  = {}
 
         main_side_before_change = main_sides_pri[rawind]  # side of body
-        opsidelet = utils.getOppositeSideStr(main_side_before_change[0].upper() ) # side of brain
-
+        #if main_side_before_change != 'both':
+        #    opsidelet = utils.getOppositeSideStr(main_side_before_change[0].upper() ) # side of brain
+        wrong_brain_sidelet = main_side_before_change[0].upper()
 
         #fname_full_LFPartif = os.path.join(gv.data_dir, '{}_ann_LFPartif.txt'.format(rn) )
         #fname_full_MEGartif = os.path.join(gv.data_dir, '{}{}.txt'.format(rn,ann_MEGartif_prefix_to_use) )
         #anns_LFPartif = mne.read_annotations(fname_full_LFPartif)
         #anns_MEGartif = mne.read_annotations(fname_full_MEGartif)
 
-        main_side_before_change = main_sides_pri[rawind]  # side of body
-        opsidelet = utils.getOppositeSideStr(main_side_before_change[0].upper() ) # side of brain
-        wrong_brain_sidelet = main_side_before_change[0].upper()
 
 
         if artif_handling == 'reject':
@@ -2026,7 +2059,8 @@ def bandFilter(rawnames, times_pri, main_sides_pri, side_switched_pri,
                                         side_rev_pri=[side_switched_pri[rawind] ]  )
                 #print(anns_MEGartif.onset)
                 #print(anns_LFPartif.onset)
-                anns_LFPartif = utils.removeAnnsByDescr(anns_LFPartif, ['artif_LFP{}'.format(wrong_brain_sidelet) ])
+                if main_side_before_change != 'both':
+                    anns_LFPartif = utils.removeAnnsByDescr(anns_LFPartif, ['artif_LFP{}'.format(wrong_brain_sidelet) ])
                 #print(anns_LFPartif.onset)
             else:
                 anns_MEGartif = anndict_per_intcat_per_rawn[rn ]['artif']['MEG']
@@ -2086,13 +2120,14 @@ def bandFilter(rawnames, times_pri, main_sides_pri, side_switched_pri,
                     for chni in chis_LFP:
                         temp_ann = utils.getArtifForFiltering(chnames_cur[chni], anns_LFPartif )
 
-                        print(f'bandFilter: LFO LFP for {chnames_cur[chis_LFP[chni]]} chis current anns are ',
+                        print(f'bandFilter: LFO LFP for {chnames_cur[chni]} chis current anns are ',
                             temp_ann,temp_ann.onset,temp_ann.duration,temp_ann.description)
 
                         r.set_annotations(temp_ann)
                         ann_toghether = ann_toghether + temp_ann
+                        chn_cur_side = chnames_cur[chni][len('LFP')]
                         r.filter(l_freq=low,h_freq=high, n_jobs=n_jobs_maybe_cuda,
-                                skip_by_annotation='BAD_LFP{}'.format(opsidelet), pad='symmetric',
+                                skip_by_annotation='BAD_LFP{}'.format(chn_cur_side), pad='symmetric',
                                 phase=filter_phase, filter_length=filter_length, picks=[chni] )
 
                     #r.set_annotations(anns_MEGartif)
@@ -2125,9 +2160,10 @@ def bandFilter(rawnames, times_pri, main_sides_pri, side_switched_pri,
                             temp_ann,temp_ann.onset,temp_ann.duration,temp_ann.description)
 
                         ann_toghether = ann_toghether + temp_ann
+                        chn_cur_side = chn[len('LFP')]
                         r.set_annotations(temp_ann)
                         r.filter(l_freq=low,h_freq=high, n_jobs=n_jobs_maybe_cuda,
-                                skip_by_annotation='BAD_LFP{}'.format(opsidelet), pad='symmetric',
+                                skip_by_annotation='BAD_LFP{}'.format(chn_cur_side), pad='symmetric',
                                 phase=filter_phase, filter_length=filter_length, picks=[chni] )
 
                     r.set_annotations(ann_toghether)
@@ -2302,3 +2338,26 @@ def gatherMultiBandStats(rawnames,raw_perband_pri, times_pri, chnames_perband_pr
     #return means_perband_pri, stds_perband_pri
     return indsets, means_per_indset_per_band, stds_per_indset_per_band  , stats_per_indset_per_band
 
+def getIndsetsValid(rawnames, curstatinfo):
+#curstatinfo = stats_per_ct[combine_type]
+    indsets        =   curstatinfo['indsets']
+    means          =   curstatinfo['means']
+    stds           =   curstatinfo['stds']
+    rawnames_stats =   curstatinfo['rawnames']
+    newindsets     = []
+    indsetis_valid = []
+    for indseti,indset in enumerate(indsets):
+        newindset_cur = []
+        for rawi in range(len(rawnames)):
+            rawn = rawnames[rawi]
+            curind = rawnames_stats.index(rawn)
+            if curind in indset:
+                newindset_cur += [rawi]
+                if indseti not in indsetis_valid:
+                    indsetis_valid += [indseti]
+        if len(newindset_cur):
+            newindsets += [ newindset_cur ]
+    assert len(newindsets)
+    means = [ means[i] for i in indsetis_valid ]
+    stds = [ stds[i] for i in indsetis_valid ]
+    return indsetis_valid, newindsets, means, stds

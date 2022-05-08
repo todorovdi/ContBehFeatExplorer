@@ -9,7 +9,8 @@
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=128
 
-#SBATCH --time=23:00:00
+###SBATCH --time=23:00:00
+#SBATCH --time=02:00:00
 #SBATCH --partition=batch
 #SBATCH --mem=60G
 
@@ -28,7 +29,8 @@
 #SBATCH --mail-type=ALL
 #SBATCH --mail-user=todorovdi@gmail.com
 
-#SBATCH --array=0-54
+##SBATCH --array=0-54
+#SBATCH --array=0-11
 
 # *** start of job script ***
 ##source set_oscabagdis_env_vars.sh
@@ -66,11 +68,17 @@ export PATH=$PATH:$HOME/.local/bin
 #module load scikit
 #module load Python-Neuroimaging
 #module load SciPy-Stack
+module load Stages/2022
+module load GCC
+module load R
+module load Python
 
 echo "DATA_DUSS=$DATA_DUSS"
 
 source $CODE/__workstart.sh
 pwd
 
+export PYTHONPATH=$PYTHONPATH:$PROJECT/OSCBAGDIS/LOCAL/lib/python3.9/site-packages
+
 RUNSTRINGS_FN="$CODE/run/_runstrings_genfeats.txt"
-$OSCBAGDIS_DATAPROC_CODE/run/srun_exec_runstr.sh $RUNSTRINGS_FN $SLURM_ARRAY_JOB_ID $EFF_ID
+$OSCBAGDIS_DATAPROC_CODE/run/srun_exec_runstr.sh $RUNSTRINGS_FN $SLURM_ARRAY_JOB_ID $EFF_ID $ID

@@ -1,4 +1,6 @@
-GENFEATS_PARAM_FILE=genfeats_HPC.ini
+#GENFEATS_PARAM_FILE=genfeats_HPC.ini
+GENFEATS_PARAM_FILE=genfeats_wholectx_HPC.ini
+rawstrs_type="per_subject_per_medcond"
 
 #ML_PARAM_FILE=ML_HPC.ini
 #ML_PARAM_FILE=ML_HPC_nointerp.ini
@@ -10,7 +12,7 @@ GENFEATS_PARAM_FILE=genfeats_HPC.ini
 #rawstrs_type="together"
 
 ML_PARAM_FILE=ML_joint_one_LFP_HPC.ini
-rawstrs_type="per_medcond"
+#rawstrs_type="per_medcond"
 
 #ML_PARAM_FILE=ML_joint_ICA_one_LFP_HPC.ini
 #ML_PARAM_FILE=ML_joint_one_LFP_HPC.ini

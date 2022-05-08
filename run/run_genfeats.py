@@ -27,7 +27,9 @@ if sys.argv[0].find('ipykernel_launcher') < 0:
 exit_after = 'end'
 
 use_lfp_HFO = 1
-use_main_moveside = 1  # 0 both , -1 opposite
+brain_side_to_use = 'body_move_side'
+body_side_for_baseline_int = 'body_move_side'
+#use_main_moveside = 1  # 0 both , -1 opposite
 use_main_LFP_chan = 0
 bands_only = 'crude'  #'fine'  or 'no' # here 'only' means 'instead of using all mini-freq bands output by TFR
 #subsample_type = 'half'
@@ -167,15 +169,18 @@ effargv = sys.argv[1:]  # to skip first
 if sys.argv[0].find('ipykernel_launcher') >= 0:
     effargv = sys.argv[3:]  # to skip first three
 
+runstring_ind=-1000
+
 params_cmd = {}
 params_read = {}
 
 helpstr = 'Usage example\nrun_genfeats.py --rawnames <rawname_naked> '
 opts, args = getopt.getopt(effargv,"hr:",
         ["mods=","msrc_inds=","feat_types=","bands=","rawnames=",
-            "show_plots=", "side=", "LFPchan=", "useHFO=",
+            "show_plots=", "LFPchan=", "useHFO=",
          "plot_types=", "plot_only=", "sources_type=", "crop=" ,
-         "src_grouping=", "src_grouping_fn=",
+         "src_grouping=", "src_grouping_fn=", "brain_side_to_use=",
+         "body_side_for_baseline_int=",
          "load_TFR=", "save_TFR=", "save_CSD=", "load_CSD=", "use_existing_TFR=",
          "Kalman_smooth=", "save_bpcorr=", "save_rbcorr=", "load_rbcorr=", "load_bpcorr=",
          "load_TFRCSD_max_age_h=", "load_only=", "input_subdir=", "output_subdir=",
@@ -183,7 +188,7 @@ opts, args = getopt.getopt(effargv,"hr:",
          "param_file=", "coupling_types=", "use_preloaded_data=", "feat_stats_artif_handling=",
          "prescale_data=", "rescale_feats=", "allow_CUDA=", "n_jobs=", "save_feat=",
          "normalize_TFR=", "SLURM_job_id=", "DEBUG_shorten_couplings=",
-        "exit_after=", "baseline_int_type=" ])
+        "exit_after=", "baseline_int_type=", "runstring_ind=" ])
 print('opts is ',opts)
 print('args is ',args)
 
@@ -217,6 +222,8 @@ for opt,arg in pars.items():
             cr =  arg.split(',')
             crop_start = float(cr[0])
             crop_end = float(cr[1] )
+    elif opt == "runstring_ind":
+        runstring_ind = runstring_ind
     elif opt == "exit_after":
         exit_after = arg
     elif opt == "scale_data_combine_type":
@@ -247,6 +254,10 @@ for opt,arg in pars.items():
         feat_stats_artif_handling = arg
     elif opt == "coupling_types":
         coupling_types = arg.split(',')
+    elif opt == "brain_side_to_use":
+        brain_side_to_use = arg
+    elif opt == "body_side_for_baseline_int":
+        body_side_for_baseline_int = arg
     elif opt == "stats_fn_prefix":
         stats_fn_prefix = arg
     elif opt == "DEBUG_shorten_couplings":
@@ -299,15 +310,15 @@ for opt,arg in pars.items():
         #rawname_ = arg
     elif opt == 'show_plots':
         show_plots = int(arg)
-    elif opt == 'side':
-        if arg == 'both':
-            use_main_moveside == 0
-        elif arg == 'main':
-            use_main_moveside == 1
-        elif arg == 'other':
-            use_main_moveside == -1
-        elif arg in ['left','right']:
-            raise ValueError('to be implemented')
+    #elif opt == 'side':
+    #    if arg == 'both':
+    #        use_main_moveside == 0
+    #    elif arg == 'main':
+    #        use_main_moveside == 1
+    #    elif arg == 'other':
+    #        use_main_moveside == -1
+    #    elif arg in ['left','right']:
+    #        raise ValueError('to be implemented')
     elif opt == 'LFPchan':
         if arg == 'main':
             use_main_LFP_chan = 1
@@ -443,6 +454,7 @@ if use_lfp_HFO:
 # these are just to play and plot because the side can change from patient to
 # patient
 
+
 move_sides = []
 tremor_sides = []
 for rn in rawnames:
@@ -456,38 +468,39 @@ for rn in rawnames:
     tremor_sides+= [ maintremside_cur ]
 
 
-def_main_side = 'left'
-side_to_use = 'move_side'
+def_main_body_side = 'left'
 
 force_consistent_main_sides = 1 # consistent across datasets, even not loaded ones
 
-if side_to_use == 'move_side':
+if brain_side_to_use == 'body_move_side':
     if len(set(move_sides) ) == 1 and move_sides[0] is not None:
         main_side = move_sides[0]
-        new_main_side = main_side
+        new_main_body_side = main_side
     else:
         main_side = 'undef'
-        print('Setting new main side to be ',def_main_side)
-        new_main_side = def_main_side
-elif side_to_use == 'tremor_side':
+        print('Setting new main side to be ',def_main_body_side)
+        new_main_body_side = def_main_body_side
+elif brain_side_to_use == 'body_tremor_side':
     if len(set(tremor_sides) ) == 1:
         main_side = tremor_sides[0]
-        new_main_side = main_side
+        new_main_body_side = main_side
     else:
         main_side = 'undef'
-        new_main_side = def_main_side
-        print('Setting new main side to be ',def_main_side)
-elif side_to_use in ['left','right']:  # forcibly
-    main_side = side_to_use
-    new_main_side = main_side
+        new_main_body_side = def_main_body_side
+        print('Setting new main side to be ',def_main_body_side)
+elif brain_side_to_use == 'both':
+    main_side = 'undef'
+    new_main_body_side = 'both'
+elif brain_side_to_use in ['left','right']:  # forcibly
+    main_side     = utils.getOppositeSideStr(brain_side_to_use)
+    new_main_body_side = main_side
 else:
     main_side = 'undef'
     raise ValueError('wrong side_to_use')
 
-if force_consistent_main_sides:
-    new_main_side = def_main_side
+if force_consistent_main_sides and brain_side_to_use != 'both':
+    new_main_body_side = def_main_body_side
 
-ms_letter = main_side[0].upper()
 
 #####
 
@@ -514,9 +527,9 @@ else:
 
     aux_info_perraw = {}
     for rawi,rawn in enumerate(rawnames):
-        fname = utils.genPrepDatFn(rawn, new_main_side, data_modalities,
+        fname = utils.genPrepDatFn(rawn, new_main_body_side, data_modalities,
                                     use_main_LFP_chan, src_file_grouping_ind,
-                                    src_grouping)
+                                    src_grouping, brain_side_to_use)
         fname_dat_full = pjoin(gv.data_dir, input_subdir, fname)
         f = np.load(fname_dat_full, allow_pickle=True)
         fname_dat_full_pri[rawi] = fname_dat_full
@@ -544,11 +557,11 @@ else:
         else:
             print('anndict_per_intcat_per_rawn not found, recollecting')
             anndict_per_intcat = upre.collectAllMarkedIntervals( rawn, f['times'],
-                new_main_side, aux_info_perraw[rn]['side_switched'] ,
+                new_main_body_side, aux_info_perraw[rn]['side_switched'] ,
                 sfreq=sfreq,
                 ann_MEGartif_prefix_to_use = '_ann_MEGartif_flt',
                 printLog=False, allow_missing_files=False,
-                remove_nonmain_artif= side_to_use != 'both' )
+                remove_nonmain_artif= brain_side_to_use != 'both' )
             anndict_per_intcat_per_rawn[rawn] = anndict_per_intcat
 
         assert set(data_modalities) == set(f['data_modalities'])
@@ -566,10 +579,9 @@ for rawi,rawn in enumerate(rawnames):
     times_hires_cur = times_hires_pri[rawi]
     bindict_hires_per_rawn[rawn] = upre.markedIntervals2Bins(anndict_per_intcat,times_hires_cur,sfreq_hires)
 
-prefix = stats_fn_prefix
-fname_stats = utils.genStatsFn(None, new_main_side, data_modalities,
+fname_stats = utils.genStatsFn(None, new_main_body_side, data_modalities,
                                 use_main_LFP_chan, src_file_grouping_ind,
-                                src_grouping, prefix )
+                                src_grouping, brain_side_to_use, stats_fn_prefix )
 fname_stats_full = pjoin( gv.data_dir, input_subdir, fname_stats)
 print('Load stats from ',fname_stats_full)
 
@@ -580,9 +592,9 @@ stats_per_ct =  f['stats_per_ct'][()]
 stats_HFO_per_ct = f['stats_HFO_per_ct'][()]
 
 if (not recalc_stats_multi_band) and ( 'rbcorr' in features_to_use or 'bpcorr' in features_to_use ):
-    fname_stats_multi_band = utils.genStatsMultiBandFn(None, new_main_side, data_modalities,
+    fname_stats_multi_band = utils.genStatsMultiBandFn(None, new_main_body_side, data_modalities,
                                     use_main_LFP_chan, src_file_grouping_ind,
-                                    src_grouping, bands_only, prefix )
+                                    src_grouping, bands_only, brain_side_to_use, stats_fn_prefix )
     fname_stats_full = pjoin( gv.data_dir, input_subdir, fname_stats_multi_band)
     print('Load multi band stats from ',fname_stats_full)
     assert os.path.exists(fname_stats_full)
@@ -662,7 +674,7 @@ if show_plots:
         os.makedirs(fig_subdir)
     fig_fname = pjoin(fig_subdir,
                              '{}_feat_plots{}_side{}_LFP{}_{}_nmod{}_nfeattp{}.pdf'.format(
-                                 rawnstr,show_plots, use_main_moveside,
+                                 rawnstr,show_plots, brain_side_to_use == 'body_move_side',
                                  int(use_main_LFP_chan), bands_only,
                                  len(data_modalities),len(features_to_use)   ))
     from matplotlib.backends.backend_pdf import PdfPages
@@ -671,6 +683,7 @@ if show_plots:
 #############################################################
 
 # only for plotting
+ms_letter = main_side[0].upper()
 subj,medcond,task  = utils.getParamsFromRawname(rawnames[0])
 int_names = ['{}_{}'.format(task,ms_letter), 'trem_{}'.format(ms_letter), 'notrem_{}'.format(ms_letter)]
 
@@ -729,7 +742,7 @@ Tp_Kalman = 0.5 * sfreq/skip
 #times_hires_pri, subfeature_order_pri, subfeature_order_lfp_hires_pri, aux_info_perraw = \
 #    ugf.collectDataFromMultiRaws(rawnames, raws_permod_both_sides, sources_type,
 #                             src_file_grouping_ind, src_grouping, use_main_LFP_chan,
-#                             side_to_use, new_main_side, data_modalities,
+#                             side_to_use, new_main_body_side, data_modalities,
 #                             crop_start,crop_end,msrc_inds, rec_info_pri)
 
 main_sides_pri = [ aux_info_perraw[rn]['main_body_side'] for rn in rawnames]
@@ -809,7 +822,7 @@ assert len(roi_labels) == 1, 'several groupings in single run -- not implmemente
 
 # here we plot even if we don't actually rescale
 if show_plots and do_plot_stat_scatter and len(set( n_channels_pri ) ) == 1 :
-    main_side_let = new_main_side[0].upper()
+    main_side_let = new_main_body_side[0].upper()
     artif_handling_ = 'reject'
 
     dat_T_pri = [0]*len(dat_pri)
@@ -826,11 +839,24 @@ if show_plots and do_plot_stat_scatter and len(set( n_channels_pri ) ) == 1 :
     plt.close()
     gc.collect()
 
-main_side_let = new_main_side[0].upper()
-if baseline_int_type != 'entire':
-    baseline_int = '{}_{}'.format(baseline_int_type, main_side_let )
-else:
-    baseline_int = baseline_int_type
+# WARNING: this will not work well if we work on more than one feature files at
+# the same time and they have inconsistent sides!!!
+#assert len(dat_pri) == 1
+assert len(set(side_switched_pri) ) == 1
+#if body_side_for_baseline_int == 'body_move_side':
+#    main_side_let = move_sides[0][0].upper()
+#elif body_side_for_baseline_int == 'body_tremor_side':
+#    main_side_let = tremor_sides[0][0].upper()
+#elif body_side_for_baseline_int in ['left','right']:
+#    main_side_let = body_side_for_baseline_int[0].upper()
+#
+#if baseline_int_type != 'entire':
+#    baseline_int = '{}_{}'.format(baseline_int_type, main_side_let )
+#else:
+#    baseline_int = baseline_int_type
+
+baseline_int = upre.getBaselineInt(rawnames[0], body_side_for_baseline_int, baseline_int_type)
+main_side_let = baseline_int[-1]
 
 if exit_after == 'load':
     print(f'exit_after={exit_after}, exiting!')
@@ -860,37 +886,41 @@ if scale_data_combine_type != 'no_scaling':
 
 
     curstatinfo = stats_per_ct[combine_type]
-    indsets =   curstatinfo['indsets']
-    means =   curstatinfo['means']
-    stds =   curstatinfo['stds']
-    rawnames_stats =   curstatinfo['rawnames']
 
-    #inds = [ rawnames_stats.index(rawn) for rawn in rawnames ]
-    #indsetis = len(rawnames) * [-1000]
-    #for rawi in range(len(rawnames)):
-    #    curind = inds[rawi]
-    #    for indseti,indset in enumerate(indsets):
+    from utils_genfeats import getIndsetsValid
+    indsetis_valid,newindsets,means,stds = getIndsetsValid(rawnames,curstatinfo)
+
+    #indsets =   curstatinfo['indsets']
+    #means =   curstatinfo['means']
+    #stds =   curstatinfo['stds']
+    #rawnames_stats =   curstatinfo['rawnames']
+
+    ##inds = [ rawnames_stats.index(rawn) for rawn in rawnames ]
+    ##indsetis = len(rawnames) * [-1000]
+    ##for rawi in range(len(rawnames)):
+    ##    curind = inds[rawi]
+    ##    for indseti,indset in enumerate(indsets):
+    ##        if curind in indset:
+    ##            # make sure we belong only to one indset
+    ##            assert indsetis[rawi] < 0
+    ##            indsetis[rawi] = indseti
+
+    #newindsets = []
+    #indsetis_valid = []
+    #for indseti,indset in enumerate(indsets):
+    #    newindset_cur = []
+    #    for rawi in range(len(rawnames)):
+    #        rawn = rawnames[rawi]
+    #        curind = rawnames_stats.index(rawn)
     #        if curind in indset:
-    #            # make sure we belong only to one indset
-    #            assert indsetis[rawi] < 0
-    #            indsetis[rawi] = indseti
-
-    newindsets = []
-    indsetis_valid = []
-    for indseti,indset in enumerate(indsets):
-        newindset_cur = []
-        for rawi in range(len(rawnames)):
-            rawn = rawnames[rawi]
-            curind = rawnames_stats.index(rawn)
-            if curind in indset:
-                newindset_cur += [rawi]
-                if indseti not in indsetis_valid:
-                    indsetis_valid += [indseti]
-        if len(newindset_cur):
-            newindsets += [ newindset_cur ]
-    assert len(newindsets)
-    means = [ means[i] for i in indsetis_valid ]
-    stds = [ stds[i] for i in indsetis_valid ]
+    #            newindset_cur += [rawi]
+    #            if indseti not in indsetis_valid:
+    #                indsetis_valid += [indseti]
+    #    if len(newindset_cur):
+    #        newindsets += [ newindset_cur ]
+    #assert len(newindsets)
+    #means = [ means[i] for i in indsetis_valid ]
+    #stds = [ stds[i] for i in indsetis_valid ]
 
     #which indset I current raw belogns to?
     if gv.DEBUG_MODE:
@@ -1119,7 +1149,35 @@ cond2_CSD = ( (load_CSD == 1) or \
 
 #sys.exit(0)
 
-if not (use_existing_TFR and have_TFR):
+#################### extracted from inside TFR to be TFR-indipendent ###########
+
+# we do it just in case we don't have 'con' (otherwise it is left un-init)
+from utils_tSNE import selFeatsRegexNames
+names_src = selFeatsRegexNames(subfeature_order, ['msrc.*'])
+names_lfp = selFeatsRegexNames(subfeature_order, ['LFP.*'] )
+chnames_tfr = np.append(names_lfp,names_src)
+
+# new chnames (parcel indices based)
+parcels_present = []
+pp2side = {}
+for chn in chnames_tfr:
+    if chn.startswith('LFP'):
+        continue
+    side1, gi1, parcel_ind1, si1 = utils.parseMEGsrcChnameShort(chn)
+    if parcel_ind1 in pp2side:
+        assert pp2side[parcel_ind1] == side1, 'Side inconsistency within parcel!'
+    pp2side[parcel_ind1] = side1
+    parcels_present += [parcel_ind1]
+
+pp = list(sorted(set(parcels_present)))
+aa = ['msrc{}_{}_{}_c{}'.format(pp2side[p],newchn_grouping_ind,p,0) for p in pp]
+lfpinds = utsne.selFeatsRegexInds(chnames_tfr,'LFP.*')
+# note that here we'll have LFP indices in the end, not in the beginning!
+newchns = aa + np.array(chnames_tfr)[lfpinds].tolist()
+
+#######################################################
+
+if (not (use_existing_TFR and have_TFR) ) and 'con' in features_to_use:
     cond_load_TFR = (load_TFR > 0) and np.all(gs_tfr > 0)
     cond2 = ( (load_TFR == 1) or \
                             (load_TFR == 2 and np.all(gs_tfr > 1) ) )
@@ -1236,7 +1294,7 @@ if not (use_existing_TFR and have_TFR):
                 tfrres = np.concatenate( [tfrres_LFP_LFO, tfrres], axis=0 )
                 chnames_tfr =  subfeature_order_lfp_hires + chnames_tfr.tolist()
 
-                # make sure lfp goes first always
+                # make sure lfp goes first always (check only the first chan), 3 symbols
                 assert chnames_tfr[0][:3] == subfeature_order[0][:3]
 
                 # no I have to do it later, I cannot vstack because it has differtn
@@ -1271,220 +1329,230 @@ if not (use_existing_TFR and have_TFR):
         if do_cleanup:
             del tfrres
 
-if cond_load_CSD and cond2_CSD:
-    csd_pri = [0]    * len( rawnames )
-    csdord_pri = [0] * len( rawnames )
-    csd_LFP_HFO_pri    = [0] * len( rawnames )
-    csdord_LFP_HFO_pri = [0] * len( rawnames )
-    tfrres_wbd_pri = [0]    * len( rawnames )
-    for rawi in range(len(rawnames) ):
-        fname_csd_full = fname_csd_full_pri[rawi]
-        print('Start loading CSD from {}'.format(fname_csd_full) )
-        csdf = np.load(fname_csd_full, allow_pickle=True)
-        csd_pri[rawi]    = csdf['csd']
-        csdord_pri[rawi] =csdf['csdord']
-        csd_LFP_HFO_pri[rawi]    = csdf['csd_LFP_HFO']
-        csdord_LFP_HFO_pri[rawi] =csdf['csdord_LFP_HFO']
-        tfrres_wbd_pri[rawi] = csdf['tfrres_wbd']
-        del fname_csd_full
-    #print('Start loading CSD from {}'.format(fname_csd_full) )
-    #csdf = np.load(fname_csd_full, allow_pickle=True)
-    #csd_pri_    = csdf['csd_pri'][()]
-    #csdord_pri_ =csdf['csdord_pri'][()]
-    #csd_LFP_HFO_pri_    = csdf['csd_LFP_HFO_pri'][()]
-    #csdord_LFP_HFO_pri_ =csdf['csdord_LFP_HFO_pri'][()]
-
-    #tfrres_wbd_pri_dict = csdf['tfrres_wbd_pri'][()]
-
-
-    #csd_pri = [0]    * len( csd_pri_.keys() )
-    #csdord_pri = [0] * len( csdord_pri_.keys() )
-    #csd_LFP_HFO_pri    = [0] * len( csd_LFP_HFO_pri_.keys() )
-    #csdord_LFP_HFO_pri = [0] * len( csdord_LFP_HFO_pri_.keys() )
-    #tfrres_wbd_pri = [0]    * len( tfrres_wbd_pri_dict.keys() )
-
-    #for i in range(len(csdord_pri) ):
-    #    csd_pri[i]    = csd_pri_[i]
-    #    csdord_pri[i] = csdord_pri_[i]
-    #    csd_LFP_HFO_pri   [i] = csd_LFP_HFO_pri_   [i]
-    #    csdord_LFP_HFO_pri[i] = csdord_LFP_HFO_pri_[i]
-    #    tfrres_wbd_pri[i]    = tfrres_wbd_pri_dict[i]
-
-
-    newchns=list( csdf['newchns'][()] )
-    res_couplings=csdf['res_couplings'][()]
-    ind_distr, ind_distr_parcels, ind_pairs_parcelsLFP, \
-        parcel_couplings, LFP2parcel_couplings, LFP2LFP_couplings = res_couplings
-
-    _,names_src = utsne.selFeatsRegex(None, subfeature_order, ['msrc.*'])
-    _,names_lfp = utsne.selFeatsRegex(None, subfeature_order, ['LFP.*'])
-    chnames_tfr = list(names_lfp) + list(names_src)
-else:
-    chnames_nicened = utils.nicenMEGsrc_chnames(chnames_tfr, roi_labels, srcgrouping_names_sorted,
-                            prefix='msrc_')
-
-    # since I have TFR in separate chunks, I implement the computation by hand
-    # note that it is different from rescaling of the raws in the beginning
-    # -- here I don't need to unify the scales, only to get rid of too
-    # small values (because later when computing CSD I will mutiply them
-    # and it falls below double precision)
-    # here I don't really care about normalizing robustly (I will normalize
-    # again after features are constructed anyway). I just want to multiply
-    # everything by the same number that's all. More accurate way would be to
-    # use my rescaling code with 'entire' and some data set grouping
-    # but it does not work for multidim arrays so far
-    # the way I do it below works only if datasets don't have data many oders
-    # of magnitude different between each other
-    if normalize_TFR == 'across_datasets':
-        print('Start computing TFR stats for normalization')
-        s1,s2,s3 = tfrres_pri[0].shape
-        s = np.zeros( (s1,s2 ), dtype=np.complex )
-        nb = 0
-        for tfrres_cur in tfrres_pri:
-            s += np.sum(tfrres_cur, axis=-1)
-            nb += tfrres_cur.shape[-1]
-        tfr_mean = s / nb
-
-        var = np.zeros( (s1,s2 ), dtype=np.complex )
-        for tfrres_cur in tfrres_pri:
-            y = tfrres_cur - tfr_mean[:,:,None]
-            var += np.sum( y * np.conj(y) , axis=-1)
-        tfr_std = np.sqrt( var / nb )
-
-
-        s1,s2,s3 = tfrres_LFP_HFO_pri[0].shape
-        s = np.zeros( (s1,s2 ), dtype=np.complex )
-        nb = 0
-        for tfrres_cur in tfrres_LFP_HFO_pri:
-            s += np.sum(tfrres_cur, axis=-1)
-            nb += tfrres_cur.shape[-1]
-        tfr_LFP_HFO_mean = s / nb
-
-        var = np.zeros( (s1,s2 ), dtype=np.complex )
-        for tfrres_cur in tfrres_LFP_HFO_pri:
-            y = tfrres_cur - tfr_LFP_HFO_mean[:,:,None]
-            var += np.sum( y * np.conj(y) , axis=-1)
-        tfr_LFP_HFO_std = np.sqrt( var / nb )
-
-    LFP2LFP_only_self = True  # that we don't want to compute cross couplings LFP to LFP
-    # we DO NOT want only upper diag because cross_types does not
-    # does not contain symmetric entries
-    res_couplings = ugf.selectIndPairs(chnames_nicened, chnames_tfr, cross_types, upper_diag=False,
-                            LFP2LFP_only_self=LFP2LFP_only_self, cross_within_parcel=False)
-
-    ind_distr, ind_distr_parcels, ind_pairs_parcelsLFP, \
-        parcel_couplings, LFP2parcel_couplings, LFP2LFP_couplings = res_couplings
-    import itertools
-    ind_distr_merged = list(itertools.chain.from_iterable(ind_distr))
-    print('Starting CSD for {} pairs'.format( len(ind_distr_merged) ) )
-
-    # chreate new chnames
-    parcels_present = []
-    pp2side = {}
-    for chn in chnames_tfr:
-        if chn.startswith('LFP'):
-            continue
-        side1, gi1, parcel_ind1, si1 = utils.parseMEGsrcChnameShort(chn)
-        if parcel_ind1 in pp2side:
-            assert pp2side[parcel_ind1] == side1, 'Side inconsistency within parcel!'
-        pp2side[parcel_ind1] = side1
-        parcels_present += [parcel_ind1]
-
-    pp = list(sorted(set(parcels_present)))
-    aa = ['msrc{}_{}_{}_c{}'.format(pp2side[p],newchn_grouping_ind,p,0) for p in pp]
-    lfpinds = utsne.selFeatsRegexInds(chnames_tfr,'LFP.*')
-    newchns = aa + np.array(chnames_tfr)[lfpinds].tolist()
-
-    csd_pri = [];
-    csdord_pri = []
-    for tfri,tfrres_cur in enumerate(tfrres_pri):
-        tfrres_cur_ = tfrres_cur
-        if normalize_TFR == 'across_datasets':
-            tfrres_cur_ =  (tfrres_cur - tfr_mean[:,:,None] ) / tfr_std[:,:,None]
-        elif normalize_TFR == 'separately':
-            # RobustScaler does not work with complex data, even if I fit
-            # to absolute values :(
-            #scaler = RobustScaler(quantile_range=(percentileOffset,100-percentileOffset) ,
-            #                      with_centering=True)
-            sh = tfrres_cur.shape
-            tmp = tfrres_cur.reshape( (sh[0] * sh[1], sh[2] ) ).T
-            #scaler.fit( tmp )
-
-            tfr_mean,tfr_std = utsne.robustMean(tmp, axis=-1,ret_std=True,per_dim=1)
-            tfrres_cur_ = (tmp - tfr_mean[:,None])/ tfr_std[:,None]
-            tfrres_cur_ = tfrres_cur_.reshape(  (sh[0], sh[1], sh[2] ) )
-        csd_cur, csdord = ugf.tfr2csd(tfrres_cur_, sfreq, returnOrder=1,
-                                        ind_pairs=None,
-                                        parcel_couplings=parcel_couplings,
-                                        LFP2LFP_couplings=LFP2LFP_couplings,
-                                        LFP2parcel_couplings=LFP2parcel_couplings,
-                                        oldchns=chnames_tfr,
-                                        newchns=newchns,
-                                        res_group_id=newchn_grouping_ind,
-                                        log=log_during_csd)
-        # csdord.shape = (2, csdsize)
-        csdord_pri += [csdord]
-        csd_pri += [csd_cur]
-        gc.collect()
-
-    csdord_LFP_HFO = None
-    csd_LFP_HFO_pri = []
-    csdord_LFP_HFO_pri = []
-    for tfri,tfrres_LFP_HFO_cur in enumerate(tfrres_LFP_HFO_pri):
-        tfrres_LFP_HFO_cur_ = tfrres_LFP_HFO_cur
-        if normalize_TFR == 'across_datasets':
-            tfrres_LFP_HFO_cur_ =  (tfrres_LFP_HFO_cur - tfr_LFP_HFO_mean[:,:,None] ) / tfr_LFP_HFO_std[:,:,None]
-        elif normalize_TFR == 'separately':
-            #scaler = RobustScaler(quantile_range=(percentileOffset,100-percentileOffset) ,
-            #                      with_centering=True)
-            sh = tfrres_LFP_HFO_cur.shape
-            tmp = tfrres_LFP_HFO_cur.reshape( (sh[0] * sh[1], sh[2] ) ).T
-
-            tfr_mean,tfr_std = utsne.robustMean(tmp, axis=-1,ret_std=True,per_dim=1)
-            tfrres_LFP_HFO_cur_ = (tmp - tfr_mean[:,None])/ tfr_std[:,None]
-            tfrres_LFP_HFO_cur_ = tfrres_LFP_HFO_cur_.reshape(  (sh[0], sh[1], sh[2] ) )
-            #scaler.fit( tmp )
-            #tfrres_LFP_HFO_cur_ = scaler.transform(tmp).T.reshape(  (sh[0], sh[1], sh[2] ) )
-
-        # I don't really need HFO csd across LFP contacts
-        #csd_LFP, csdord_LFP = utils.tfr2csd(tfrres_LFP, sfreq_hires, returnOrder=1)  # csdord.shape = (2, csdsize)
-        csd_LFP_HFO_cur = tfrres_LFP_HFO_cur_ * np.conj(tfrres_LFP_HFO_cur_)
-        tmp = np.arange( tfrres_LFP_HFO_cur.shape[0] )  # n_LFP_channels
-        csdord_LFP_HFO = np.vstack([tmp,tmp] ) # same to same index, so just i->i
-
-        csdord_LFP_HFO_pri += [csdord_LFP_HFO]
-        csd_LFP_HFO_pri += [csd_LFP_HFO_cur]
-    gc.collect()
-
-
-    # remember that we have rescaled raws before so concatenating should be ok
-    #csd = np.concatenate(csd_pri,axis=-1)
-    #csd_LFP_HFO = np.concatenate(csd_LFP_HFO_pri,axis=-1)
-
-    if save_CSD:
-        #dct = {}
+ntimebins_pri = []
+if 'con' in features_to_use:
+    if cond_load_CSD and cond2_CSD:
+        csd_pri = [0]    * len( rawnames )
+        csdord_pri = [0] * len( rawnames )
+        csd_LFP_HFO_pri    = [0] * len( rawnames )
+        csdord_LFP_HFO_pri = [0] * len( rawnames )
+        tfrres_wbd_pri = [0]    * len( rawnames )
         for rawi in range(len(rawnames) ):
             fname_csd_full = fname_csd_full_pri[rawi]
-            print('Saving CSD to {}'.format(fname_csd_full) )
-            np.savez(fname_csd_full, csd=csd_pri[rawi], csdord=csdord_pri[rawi],
-                        newchns=newchns, res_couplings=res_couplings,
-                        csd_LFP_HFO = csd_LFP_HFO_pri[rawi],
-                        csdord_LFP_HFO=csdord_LFP_HFO_pri[rawi],
-                        tfrres_wbd=tfrres_wbd_pri[rawi])
+            print('Start loading CSD from {}'.format(fname_csd_full) )
+            csdf = np.load(fname_csd_full, allow_pickle=True)
+            csd_pri[rawi]    = csdf['csd']
+            csdord_pri[rawi] =csdf['csdord']
+            csd_LFP_HFO_pri[rawi]    = csdf['csd_LFP_HFO']
+            csdord_LFP_HFO_pri[rawi] =csdf['csdord_LFP_HFO']
+            tfrres_wbd_pri[rawi] = csdf['tfrres_wbd']
+            del fname_csd_full
+        #print('Start loading CSD from {}'.format(fname_csd_full) )
+        #csdf = np.load(fname_csd_full, allow_pickle=True)
+        #csd_pri_    = csdf['csd_pri'][()]
+        #csdord_pri_ =csdf['csdord_pri'][()]
+        #csd_LFP_HFO_pri_    = csdf['csd_LFP_HFO_pri'][()]
+        #csdord_LFP_HFO_pri_ =csdf['csdord_LFP_HFO_pri'][()]
 
-        #print('Saving CSD to {}'.format(fname_csd_full) )
-        #dct1 = dict(    enumerate(csd_pri)  )
-        #dct2 = dict(    enumerate(csdord_pri)  )
-        #dct3 = dict(    enumerate(csd_LFP_HFO_pri)  )
-        #dct4 = dict(    enumerate(csdord_LFP_HFO_pri)  )
-        #dct5 =dict(enumerate(tfrres_wbd_pri))
-        #np.savez(fname_csd_full, csd_pri=dct1, csdord_pri=dct2,
-        #            newchns=newchns, res_couplings=res_couplings,
-        #            csd_LFP_HFO_pri = dct3, csdord_LFP_HFO_pri=dct4,
-        #            tfrres_wbd_pri=dct5)
+        #tfrres_wbd_pri_dict = csdf['tfrres_wbd_pri'][()]
 
-    if do_cleanup:
-        del tfrres_pri
+
+        #csd_pri = [0]    * len( csd_pri_.keys() )
+        #csdord_pri = [0] * len( csdord_pri_.keys() )
+        #csd_LFP_HFO_pri    = [0] * len( csd_LFP_HFO_pri_.keys() )
+        #csdord_LFP_HFO_pri = [0] * len( csdord_LFP_HFO_pri_.keys() )
+        #tfrres_wbd_pri = [0]    * len( tfrres_wbd_pri_dict.keys() )
+
+        #for i in range(len(csdord_pri) ):
+        #    csd_pri[i]    = csd_pri_[i]
+        #    csdord_pri[i] = csdord_pri_[i]
+        #    csd_LFP_HFO_pri   [i] = csd_LFP_HFO_pri_   [i]
+        #    csdord_LFP_HFO_pri[i] = csdord_LFP_HFO_pri_[i]
+        #    tfrres_wbd_pri[i]    = tfrres_wbd_pri_dict[i]
+
+
+        newchns=list( csdf['newchns'][()] )
+        res_couplings=csdf['res_couplings'][()]
+        ind_distr, ind_distr_parcels, ind_pairs_parcelsLFP, \
+            parcel_couplings, LFP2parcel_couplings, LFP2LFP_couplings = res_couplings
+
+        _,names_src = utsne.selFeatsRegex(None, subfeature_order, ['msrc.*'])
+        _,names_lfp = utsne.selFeatsRegex(None, subfeature_order, ['LFP.*'])
+        chnames_tfr = list(names_lfp) + list(names_src)
+    else:
+        chnames_nicened = utils.nicenMEGsrc_chnames(chnames_tfr, roi_labels, srcgrouping_names_sorted,
+                                prefix='msrc_')
+
+        # since I have TFR in separate chunks, I implement the computation by hand
+        # note that it is different from rescaling of the raws in the beginning
+        # -- here I don't need to unify the scales, only to get rid of too
+        # small values (because later when computing CSD I will mutiply them
+        # and it falls below double precision)
+        # here I don't really care about normalizing robustly (I will normalize
+        # again after features are constructed anyway). I just want to multiply
+        # everything by the same number that's all. More accurate way would be to
+        # use my rescaling code with 'entire' and some data set grouping
+        # but it does not work for multidim arrays so far
+        # the way I do it below works only if datasets don't have data many oders
+        # of magnitude different between each other
+        if normalize_TFR == 'across_datasets':
+            print('Start computing TFR stats for normalization')
+            s1,s2,s3 = tfrres_pri[0].shape
+            s = np.zeros( (s1,s2 ), dtype=np.complex )
+            nb = 0
+            for tfrres_cur in tfrres_pri:
+                s += np.sum(tfrres_cur, axis=-1)
+                nb += tfrres_cur.shape[-1]
+            tfr_mean = s / nb
+
+            var = np.zeros( (s1,s2 ), dtype=np.complex )
+            for tfrres_cur in tfrres_pri:
+                y = tfrres_cur - tfr_mean[:,:,None]
+                var += np.sum( y * np.conj(y) , axis=-1)
+            tfr_std = np.sqrt( var / nb )
+
+
+            s1,s2,s3 = tfrres_LFP_HFO_pri[0].shape
+            s = np.zeros( (s1,s2 ), dtype=np.complex )
+            nb = 0
+            for tfrres_cur in tfrres_LFP_HFO_pri:
+                s += np.sum(tfrres_cur, axis=-1)
+                nb += tfrres_cur.shape[-1]
+            tfr_LFP_HFO_mean = s / nb
+
+            var = np.zeros( (s1,s2 ), dtype=np.complex )
+            for tfrres_cur in tfrres_LFP_HFO_pri:
+                y = tfrres_cur - tfr_LFP_HFO_mean[:,:,None]
+                var += np.sum( y * np.conj(y) , axis=-1)
+            tfr_LFP_HFO_std = np.sqrt( var / nb )
+
+        LFP2LFP_only_self = True  # that we don't want to compute cross couplings LFP to LFP
+        # we DO NOT want only upper diag because cross_types does not
+        # does not contain symmetric entries
+        res_couplings = ugf.selectIndPairs(chnames_nicened, chnames_tfr, cross_types, upper_diag=False,
+                                LFP2LFP_only_self=LFP2LFP_only_self, cross_within_parcel=False)
+
+        ind_distr, ind_distr_parcels, ind_pairs_parcelsLFP, \
+            parcel_couplings, LFP2parcel_couplings, LFP2LFP_couplings = res_couplings
+        import itertools
+        ind_distr_merged = list(itertools.chain.from_iterable(ind_distr))
+        print('Starting CSD for {} pairs'.format( len(ind_distr_merged) ) )
+
+        # chreate new chnames
+        #parcels_present = []
+        #pp2side = {}
+        #for chn in chnames_tfr:
+        #    if chn.startswith('LFP'):
+        #        continue
+        #    side1, gi1, parcel_ind1, si1 = utils.parseMEGsrcChnameShort(chn)
+        #    if parcel_ind1 in pp2side:
+        #        assert pp2side[parcel_ind1] == side1, 'Side inconsistency within parcel!'
+        #    pp2side[parcel_ind1] = side1
+        #    parcels_present += [parcel_ind1]
+
+        #pp = list(sorted(set(parcels_present)))
+        #aa = ['msrc{}_{}_{}_c{}'.format(pp2side[p],newchn_grouping_ind,p,0) for p in pp]
+        #lfpinds = utsne.selFeatsRegexInds(chnames_tfr,'LFP.*')
+        #newchns = aa + np.array(chnames_tfr)[lfpinds].tolist()
+
+        csd_pri = [];
+        csdord_pri = []
+        for tfri,tfrres_cur in enumerate(tfrres_pri):
+            tfrres_cur_ = tfrres_cur
+            if normalize_TFR == 'across_datasets':
+                tfrres_cur_ =  (tfrres_cur - tfr_mean[:,:,None] ) / tfr_std[:,:,None]
+            elif normalize_TFR == 'separately':
+                # RobustScaler does not work with complex data, even if I fit
+                # to absolute values :(
+                #scaler = RobustScaler(quantile_range=(percentileOffset,100-percentileOffset) ,
+                #                      with_centering=True)
+                sh = tfrres_cur.shape
+                tmp = tfrres_cur.reshape( (sh[0] * sh[1], sh[2] ) ).T
+                #scaler.fit( tmp )
+
+                tfr_mean,tfr_std = utsne.robustMean(tmp, axis=-1,ret_std=True,per_dim=1)
+                tfrres_cur_ = (tmp - tfr_mean[:,None])/ tfr_std[:,None]
+                tfrres_cur_ = tfrres_cur_.reshape(  (sh[0], sh[1], sh[2] ) )
+            csd_cur, csdord = ugf.tfr2csd(tfrres_cur_, sfreq, returnOrder=1,
+                                            ind_pairs=None,
+                                            parcel_couplings=parcel_couplings,
+                                            LFP2LFP_couplings=LFP2LFP_couplings,
+                                            LFP2parcel_couplings=LFP2parcel_couplings,
+                                            oldchns=chnames_tfr,
+                                            newchns=newchns,
+                                            res_group_id=newchn_grouping_ind,
+                                            log=log_during_csd)
+            # csdord.shape = (2, csdsize)
+            csdord_pri += [csdord]
+            csd_pri += [csd_cur]
+            gc.collect()
+
+        csdord_LFP_HFO = None
+        csd_LFP_HFO_pri = []
+        csdord_LFP_HFO_pri = []
+        for tfri,tfrres_LFP_HFO_cur in enumerate(tfrres_LFP_HFO_pri):
+            tfrres_LFP_HFO_cur_ = tfrres_LFP_HFO_cur
+            if normalize_TFR == 'across_datasets':
+                tfrres_LFP_HFO_cur_ =  (tfrres_LFP_HFO_cur - tfr_LFP_HFO_mean[:,:,None] ) / tfr_LFP_HFO_std[:,:,None]
+            elif normalize_TFR == 'separately':
+                #scaler = RobustScaler(quantile_range=(percentileOffset,100-percentileOffset) ,
+                #                      with_centering=True)
+                sh = tfrres_LFP_HFO_cur.shape
+                tmp = tfrres_LFP_HFO_cur.reshape( (sh[0] * sh[1], sh[2] ) ).T
+
+                tfr_mean,tfr_std = utsne.robustMean(tmp, axis=-1,ret_std=True,per_dim=1)
+                tfrres_LFP_HFO_cur_ = (tmp - tfr_mean[:,None])/ tfr_std[:,None]
+                tfrres_LFP_HFO_cur_ = tfrres_LFP_HFO_cur_.reshape(  (sh[0], sh[1], sh[2] ) )
+                #scaler.fit( tmp )
+                #tfrres_LFP_HFO_cur_ = scaler.transform(tmp).T.reshape(  (sh[0], sh[1], sh[2] ) )
+
+            # I don't really need HFO csd across LFP contacts
+            #csd_LFP, csdord_LFP = utils.tfr2csd(tfrres_LFP, sfreq_hires, returnOrder=1)  # csdord.shape = (2, csdsize)
+            csd_LFP_HFO_cur = tfrres_LFP_HFO_cur_ * np.conj(tfrres_LFP_HFO_cur_)
+            tmp = np.arange( tfrres_LFP_HFO_cur.shape[0] )  # n_LFP_channels
+            csdord_LFP_HFO = np.vstack([tmp,tmp] ) # same to same index, so just i->i
+
+            csdord_LFP_HFO_pri += [csdord_LFP_HFO]
+            csd_LFP_HFO_pri += [csd_LFP_HFO_cur]
+        gc.collect()
+
+
+        # remember that we have rescaled raws before so concatenating should be ok
+        #csd = np.concatenate(csd_pri,axis=-1)
+        #csd_LFP_HFO = np.concatenate(csd_LFP_HFO_pri,axis=-1)
+
+        if save_CSD:
+            #dct = {}
+            for rawi in range(len(rawnames) ):
+                fname_csd_full = fname_csd_full_pri[rawi]
+                print('Saving CSD to {}'.format(fname_csd_full) )
+                np.savez(fname_csd_full, csd=csd_pri[rawi], csdord=csdord_pri[rawi],
+                            newchns=newchns, res_couplings=res_couplings,
+                            csd_LFP_HFO = csd_LFP_HFO_pri[rawi],
+                            csdord_LFP_HFO=csdord_LFP_HFO_pri[rawi],
+                            tfrres_wbd=tfrres_wbd_pri[rawi])
+
+            #print('Saving CSD to {}'.format(fname_csd_full) )
+            #dct1 = dict(    enumerate(csd_pri)  )
+            #dct2 = dict(    enumerate(csdord_pri)  )
+            #dct3 = dict(    enumerate(csd_LFP_HFO_pri)  )
+            #dct4 = dict(    enumerate(csdord_LFP_HFO_pri)  )
+            #dct5 =dict(enumerate(tfrres_wbd_pri))
+            #np.savez(fname_csd_full, csd_pri=dct1, csdord_pri=dct2,
+            #            newchns=newchns, res_couplings=res_couplings,
+            #            csd_LFP_HFO_pri = dct3, csdord_LFP_HFO_pri=dct4,
+            #            tfrres_wbd_pri=dct5)
+
+        if do_cleanup:
+            del tfrres_pri
+
+
+    for csdi in range(len(csd_pri) ):
+        assert not ( np.any( np.isnan ( csd_pri[csdi] ) )    or np.any( np.isinf ( csd_pri[csdi] ) )    )
+        assert not ( np.any( np.isnan ( csd_LFP_HFO_pri[csdi] ) )  or np.any( np.isinf ( csd_LFP_HFO_pri[csdi] ) )    )
+
+        ntimebins_cur = csd_pri[csdi].shape[-1]
+        ntimebins_pri +=[ntimebins_cur]
 
 assert chnames_tfr[0].startswith('LFP')
 assert subfeature_order[0].startswith('LFP')
@@ -1524,12 +1592,8 @@ if DEBUG_shorten_couplings != 'no':
     LFP2parcel_couplings = LFP2parcel_couplings_short
     LFP2LFP_couplings    = LFP2LFP_couplings_short
 
-for csdi in range(len(csd_pri) ):
-    assert not ( np.any( np.isnan ( csd_pri[csdi] ) )    or np.any( np.isinf ( csd_pri[csdi] ) )    )
-    assert not ( np.any( np.isnan ( csd_LFP_HFO_pri[csdi] ) )  or np.any( np.isinf ( csd_LFP_HFO_pri[csdi] ) )    )
 gc.collect()
 
-ntimebins = csd_pri[0].shape[-1]
 
 if exit_after == 'TFR_and_CSD':
     print(f'exit_after={exit_after}, exiting!')
@@ -1537,7 +1601,6 @@ if exit_after == 'TFR_and_CSD':
         pdf.close()
     sys.exit(0)
 
-n_channels_new = len(newchns)
 
 
 
@@ -1549,17 +1612,18 @@ if gv.DEBUG_MODE:
     plt.title(f'Line {frameinfo.lineno} plot N={debug_plot_ctr}')
 
 
-print('Averaging over freqs within bands')
-#csdord_strs is longer than csdord because it
-#currently (Jan 5, 2021) bpow_imagcsd is useless
-# here I assume that channel counts are the same across datasets
-bpow_abscsd_pri, bpow_imagcsd, csdord_strs_pri, csdord_strs_HFO_pri,bpow_abscsd_LFP_HFO_pri  = \
-    ugf.bandAverage( freqs,freqs_inc_HFO,csd_pri,csdord_pri,csdord_LFP_HFO_pri,
-            csd_LFP_HFO_pri, fbands,fband_names, fband_names_inc_HFO,
-            newchns, subfeature_order_lfp_hires, log_before_bandaver= log_before_bandaver )
-if do_cleanup:
-    del csd_pri
-    del csdord_LFP_HFO_pri
+if 'con' in features_to_use:
+    print('Averaging over freqs within bands')
+    #csdord_strs is longer than csdord because it
+    #currently (Jan 5, 2021) bpow_imagcsd is useless
+    # here I assume that channel counts are the same across datasets
+    bpow_abscsd_pri, bpow_imagcsd, csdord_strs_pri, csdord_strs_HFO_pri,bpow_abscsd_LFP_HFO_pri  = \
+        ugf.bandAverage( freqs,freqs_inc_HFO,csd_pri,csdord_pri,csdord_LFP_HFO_pri,
+                csd_LFP_HFO_pri, fbands,fband_names, fband_names_inc_HFO,
+                newchns, subfeature_order_lfp_hires, log_before_bandaver= log_before_bandaver )
+    if do_cleanup:
+        del csd_pri
+        del csdord_LFP_HFO_pri
 gc.collect()
 
 if exit_after == 'bandAverage':
@@ -1699,7 +1763,10 @@ if 'Hjorth' in features_to_use or 'H_act' in features_to_use or 'H_mob' in featu
     #mob_lfp   = np.hstack(mob_lfp  )
     #compl_lfp = np.hstack(compl_lfp)
 
+    # show mean Hjorth
     if show_plots and do_plot_Hjorth:
+        n_channels_new = len(newchns)  # newchns were set up during TFR
+
         fig=plt.figure()
         ax = plt.gca()
         ax.plot (  np.min(  act[:,nedgeBins:-nedgeBins], axis=-1 ) ,label='min')
@@ -1747,13 +1814,15 @@ if gv.DEBUG_MODE:
     plt.plot( dat_pri[0][0])
     plt.title(f'Line {frameinfo.lineno} plot N={debug_plot_ctr}')
 
-for rawind in range(len(dat_pri)):
-    a,b = tfrres_wbd_pri[rawind], wbd_H_pri[rawind]
-    if a.shape != b.shape:
-        print('Warning, tfr and Hjorth have different shapes {},{}, two last {}, {}'.
-                format ( a.shape,b.shape, a[1][-2:],b[1][-2:] ) )
-    else:
-        assert np.max (np.abs (a-b) ) < 1e-10
+
+if 'con' in features_to_use:
+    for rawind in range(len(dat_pri)):
+        a,b = tfrres_wbd_pri[rawind], wbd_H_pri[rawind]
+        if a.shape != b.shape:
+            print('Warning, tfr and Hjorth have different shapes {},{}, two last {}, {}'.
+                    format ( a.shape,b.shape, a[1][-2:],b[1][-2:] ) )
+        else:
+            assert np.max (np.abs (a-b) ) < 1e-10
 
 if exit_after == 'Hjorth':
     print(f'exit_after={exit_after}, exiting!')
@@ -1833,13 +1902,12 @@ if ('rbcorr' in features_to_use and not load_rbcorr) or ('bpcorr' in features_to
         stats_multiband_bp = curstatinfo
     else:
         assert not prescale_data, 'If we prescale data, loaded multi band stats is not valid!'
-        prefix = stats_fn_prefix
         # first arg should be None so that I can specify explicitly the prefix
         # it is necessary because I run this scripts not with the same set of
         # rawnames compared to what was used for stats gathering
-        fname_stats_multi_band = utils.genStatsMultiBandFn(None, new_main_side, data_modalities,
+        fname_stats_multi_band = utils.genStatsMultiBandFn(None, new_main_body_side, data_modalities,
                                         use_main_LFP_chan, src_file_grouping_ind,
-                                        src_grouping, bands_only, prefix )
+                                        src_grouping, bands_only, brain_side_to_use, stats_fn_prefix )
 
         fname_stats_full = pjoin( gv.data_dir, input_subdir, fname_stats_multi_band)
         f = np.load(fname_stats_full, allow_pickle=True)
@@ -2110,6 +2178,7 @@ for rawind in range(len(dat_pri) ):
     if 'con' in features_to_use:
         feat_dict['con'] = {'data': None, 'pct':con_scale, 'centering':center_spec_feats,
                                 'names':None, 'wbd':tfrres_wbd_pri[rawind] }
+        feat_dict['con']['centering'] = True
     if 'Hjorth' in features_to_use or 'H_act' in features_to_use:
         feat_dict['H_act']   = {'data': fH(act_pri[rawind] ),   'pct':H_scale,
                                 'names':newchns, 'wbd':wbd_H_pri[rawind]}
@@ -2129,66 +2198,67 @@ for rawind in range(len(dat_pri) ):
                                 'wbd':wbd_rbcorr_pri[rawind]}
     #'tfr':{'data':None, 'pct':con_scale, 'centering':center_spec_feats },
 
-    feat_dict['con']['centering'] = True
 
     f = lambda x: x
     if spec_uselog:
         f = lambda x: np.log(x)
 
-    if bands_only == 'no':
-        tfres_ = tfrres.reshape( tfrres.size//ntimebins , ntimebins )
-        #feat_dict['tfr']['data'] = f( np.abs( tfres_) )
-        #feat_dict['con']['data'] = con.reshape( con.size//ntimebins , ntimebins )
-        feat_dict['con']['data'] = f( np.abs( csd_pri[rawind].reshape(
-            csd_pri[rawind].size//ntimebins , ntimebins ) ) )
-        if use_imag_coh:
-            feat_dict['con']['data'] = csd_pri[rawind].reshape( csd_pri[rawind].size//ntimebins , ntimebins ).imag
-    else:
-        bpow_abscsd = bpow_abscsd_pri[rawind]
-        bpow_abscsd_LFP_HFO = bpow_abscsd_LFP_HFO_pri[rawind]
-        csdord_strs = csdord_strs_pri[rawind]
-
-        #feat_dict['tfr']['data'] = f( bpows.reshape( bpows.size//ntimebins , ntimebins ) )
-        if bpow_abscsd.ndim == 3:
-            ncsds,nfreqs,ntimebins_ = bpow_abscsd.shape
-            bpow_abscsd_reshaped = bpow_abscsd.reshape( ncsds*nfreqs, ntimebins_ )
-            assert bpow_abscsd_reshaped.shape[0] == len(csdord_strs)
+    if 'con' in feat_dict:
+        ntimebins = ntimebins_pri[rawind]
+        if bands_only == 'no':
+            tfres_ = tfrres.reshape( tfrres.size//ntimebins , ntimebins )
+            #feat_dict['tfr']['data'] = f( np.abs( tfres_) )
+            #feat_dict['con']['data'] = con.reshape( con.size//ntimebins , ntimebins )
+            feat_dict['con']['data'] = f( np.abs( csd_pri[rawind].reshape(
+                csd_pri[rawind].size//ntimebins , ntimebins ) ) )
+            if use_imag_coh:
+                feat_dict['con']['data'] = csd_pri[rawind].reshape( csd_pri[rawind].size//ntimebins , ntimebins ).imag
         else:
-            bpow_abscsd_reshaped = bpow_abscsd
+            bpow_abscsd = bpow_abscsd_pri[rawind]
+            bpow_abscsd_LFP_HFO = bpow_abscsd_LFP_HFO_pri[rawind]
+            csdord_strs = csdord_strs_pri[rawind]
 
-        feat_dict['con']['names'] = csdord_strs[:]
-        if use_lfp_HFO:
-            if bpow_abscsd_LFP_HFO.ndim == 3:
-                bpow_abscsd_LFP_HFO_reshaped = bpow_abscsd_LFP_HFO.reshape(
-                    bpow_abscsd_LFP_HFO.size//ntimebins_ , ntimebins_ )
+            #feat_dict['tfr']['data'] = f( bpows.reshape( bpows.size//ntimebins , ntimebins ) )
+            if bpow_abscsd.ndim == 3:
+                ncsds,nfreqs,ntimebins_ = bpow_abscsd.shape
+                bpow_abscsd_reshaped = bpow_abscsd.reshape( ncsds*nfreqs, ntimebins_ )
+                assert bpow_abscsd_reshaped.shape[0] == len(csdord_strs)
             else:
-                bpow_abscsd_LFP_HFO_reshaped = bpow_abscsd_LFP_HFO
-            # add HFO to low freq
-            bpow_abscsd_all_reshaped = np.vstack( [bpow_abscsd_reshaped, bpow_abscsd_LFP_HFO_reshaped])
-            #TODO: note that csdord_strs by that moment already contains LFP HFO
-            #names (see when csdord_strs i generated)
-            feat_dict['con']['names'] += csdord_strs_HFO_pri[rawind]
-        else:
-            bpow_abscsd_all_reshaped = bpow_abscsd_reshaped
+                bpow_abscsd_reshaped = bpow_abscsd
 
-        assert len(bpow_abscsd_all_reshaped) == len(feat_dict['con']['names'] )
+            feat_dict['con']['names'] = csdord_strs[:]
+            if use_lfp_HFO:
+                if bpow_abscsd_LFP_HFO.ndim == 3:
+                    bpow_abscsd_LFP_HFO_reshaped = bpow_abscsd_LFP_HFO.reshape(
+                        bpow_abscsd_LFP_HFO.size//ntimebins_ , ntimebins_ )
+                else:
+                    bpow_abscsd_LFP_HFO_reshaped = bpow_abscsd_LFP_HFO
+                # add HFO to low freq
+                bpow_abscsd_all_reshaped = np.vstack( [bpow_abscsd_reshaped, bpow_abscsd_LFP_HFO_reshaped])
+                #TODO: note that csdord_strs by that moment already contains LFP HFO
+                #names (see when csdord_strs i generated)
+                feat_dict['con']['names'] += csdord_strs_HFO_pri[rawind]
+            else:
+                bpow_abscsd_all_reshaped = bpow_abscsd_reshaped
 
-        if not use_LFP_to_LFP:
-            templ_same_LFP = r'.*:\s(LFP.*),\1'
-            inds_same_LFP = utsne.selFeatsRegexInds(csdord_strs, [templ_same_LFP], unique=1)
-            templ_all_LFP = r'.*:\s(LFP.*),(LFP.*)'
-            inds_all_LFP = utsne.selFeatsRegexInds(csdord_strs, [templ_all_LFP], unique=1)
-            assert len(inds_all_LFP) == len(inds_same_LFP)
+            assert len(bpow_abscsd_all_reshaped) == len(feat_dict['con']['names'] )
 
-            if len(inds_all_LFP) > len(inds_same_LFP):
-                print('Removing cross LFP', inds_same_LFP)
-                inds_notsame_LFP = np.setdiff1d( inds_all_LFP, inds_same_LFP)
-                gi = np.setdiff1d( np.arange(len(csdord_strs) ) , inds_notsame_LFP)
-                bpow_abscsd_all_reshaped = bpow_abscsd_all_reshaped[gi]
+            if not use_LFP_to_LFP:
+                templ_same_LFP = r'.*:\s(LFP.*),\1'
+                inds_same_LFP = utsne.selFeatsRegexInds(csdord_strs, [templ_same_LFP], unique=1)
+                templ_all_LFP = r'.*:\s(LFP.*),(LFP.*)'
+                inds_all_LFP = utsne.selFeatsRegexInds(csdord_strs, [templ_all_LFP], unique=1)
+                assert len(inds_all_LFP) == len(inds_same_LFP)
 
-                feat_dict['con']['names'] = np.array(feat_dict['con']['names'])[gi]
+                if len(inds_all_LFP) > len(inds_same_LFP):
+                    print('Removing cross LFP', inds_same_LFP)
+                    inds_notsame_LFP = np.setdiff1d( inds_all_LFP, inds_same_LFP)
+                    gi = np.setdiff1d( np.arange(len(csdord_strs) ) , inds_notsame_LFP)
+                    bpow_abscsd_all_reshaped = bpow_abscsd_all_reshaped[gi]
 
-        feat_dict['con']['data'] = f( bpow_abscsd_all_reshaped )
+                    feat_dict['con']['names'] = np.array(feat_dict['con']['names'])[gi]
+
+            feat_dict['con']['data'] = f( bpow_abscsd_all_reshaped )
         #if use_imag_coh:
         #    feat_dict['con']['data'] = f( tmp )
 
@@ -2226,7 +2296,10 @@ for rawind in range(len(dat_pri) ):
                             wbd_pri = wbd_H_pri[rawind], sfreq=sfreq)
 
     # here we use new side instead of old because we have done the reversal in  concatAnns
-    wrong_brain_sidelet = new_main_side.upper()
+    # this feature rescaling will work wrong if I have new_main_body_side =
+    # 'both', but we will do rescaling later anyway. So it might affect only
+    # intermediate plots
+    wrong_brain_sidelet = new_main_body_side.upper()
     anns_artif = utils.removeAnnsByDescr(anns_artif, ['artif_LFP{}'.format(wrong_brain_sidelet) ])
 
     ivalis_artif = utils.ann2ivalDict(anns_artif)
@@ -2407,13 +2480,21 @@ if save_feat:
         else:
             st = sources_type
 
-        crp_str = ''
-        if crop_end is not None:
-            crp_str = '_crop{}-{}'.format(int(crop_start),int(crop_end) )
-        a = '{}_feats_{}_{}chs_nfeats{}_skip{}_wsz{}_grp{}-{}{}.npz'.\
-            format(rawname_,st,n_channels_pri[rawind], X.shape[1], skip, windowsz,
-                  src_file_grouping_ind, src_grouping, crp_str)
-        fname_feat_full = pjoin(gv.data_dir, output_subdir, a)
+        #crp_str = ''
+        #if crop_end is not None:
+        #    crp_str = '_crop{}-{}'.format(int(crop_start),int(crop_end) )
+        #a = '{}_feats_{}_{}chs_nfeats{}_skip{}_wsz{}_grp{}-{}{}.npz'.\
+        #    format(rawname_,st,, X.shape[1], skip, windowsz,
+        #          src_file_grouping_ind, src_grouping, crp_str)
+
+        fname_feat  = utils.genFeatFn(rawname_,st, n_channels_pri[rawind],
+                                      X.shape[1], skip, windowsz,
+                                      src_file_grouping_ind, src_grouping,
+                                      new_main_body_side,
+                                      crop_start=None,crop_end=None)
+
+        fname_feat_full = pjoin(gv.data_dir, output_subdir, fname_feat)
+
 
         # this contains not heavy things
         info = {}
@@ -2422,9 +2503,9 @@ if save_feat:
 
         info['bands_only'] = bands_only
         info['use_lfp_HFO'] = use_lfp_HFO
-        info['use_main_moveside'] = use_main_moveside
-        info['side_to_use'] = side_to_use
-        info['new_main_side'] = new_main_side
+        #info['use_main_moveside'] = use_main_moveside
+        info['brain_side_to_use'] = brain_side_to_use
+        info['new_main_body_side'] = new_main_body_side
         info['use_main_LFP_chan'] = use_main_LFP_chan
         info['main_side_before_switch'] = aux_info_perraw[rn]['main_body_side']
         info['side_switched']           = aux_info_perraw[rn]['side_switched']
@@ -2453,6 +2534,7 @@ if save_feat:
         info['do_Kalman']  = do_Kalman
         info['Tp_Kalman'] = Tp_Kalman
         info['rbcorr_use_local_means'] = rbcorr_use_local_means
+        info['baseline_int'] = baseline_int
 
         info['chnames_newsrcgrp_pri'] = subfeature_order_newsrcgrp_pri
         info['chnames_pri'] = subfeature_order_pri

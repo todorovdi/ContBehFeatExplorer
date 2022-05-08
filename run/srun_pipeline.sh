@@ -118,9 +118,10 @@ SRC_GROUPING_FN=10
 
 #RAW_SUBDIR="SSS"
 #FEAT_SUBDIR="SSS"
-RAW_SUBDIR=""
+RAW_SUBDIR="feats_wholectx"
 #FEAT_SUBDIR="genfeats_scale_combine_subj"
 FEAT_SUBDIR=""
+FEAT_SUBDIR="feats_wholectx" 
 ML_SUBDIR=""
 
 

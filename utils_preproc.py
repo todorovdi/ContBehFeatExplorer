@@ -200,6 +200,9 @@ def getRawnameListStructure(rawnames, change_rest_to_hold=False, ret_glob=False)
     return r
 
 def genCombineIndsets(rawnames, combine_within):
+    '''
+    returns list of ndarrays of indices or rawnames
+    '''
     import globvars as gv
     assert combine_within in gv.rawnames_combine_types
     if combine_within == 'no':   # dont combine at all, do separately
@@ -218,10 +221,13 @@ def genCombineIndsets(rawnames, combine_within):
                 indsets += [indset_cur]
         elif combine_within == 'medcond':
             indsets = []
+            # for every subject
             for subj,subj_sub in subjs_analyzed.items():
+                # for every medcond for this subject
                 for medcond in subj_sub['medconds']:
                     indset_cur = []
                     dsets = subj_sub[medcond]['datasets']
+                    # putting all datasets in the same indset
                     for rn in dsets:
                         indset_cur += [rawnames.index(rn) ]
                     indsets += [indset_cur]
@@ -492,6 +498,12 @@ def collectAllMarkedIntervals( rn,times, main_side, side_rev, sfreq=256,
             ann_MEGartif_prefix_to_use = '_ann_MEGartif_flt',
             printLog=True, allow_missing_files=False,
                               remove_nonmain_artif=True):
+    '''
+    * does reversal if needed
+    * removes artifacts from the wrong side, but does not remove
+    beh state anns from the other side (only if remove_nonmain_artif==True ),
+    which should not be so when main side == both
+    '''
     # main_side -- main side AFTER reversal
 
     anndict_per_intcat = {'artif':{}, 'beh_state':{} }
@@ -532,6 +544,7 @@ def collectAllMarkedIntervals( rn,times, main_side, side_rev, sfreq=256,
         print(rn,lens_LFPartif)
 
     if remove_nonmain_artif:
+        # note that we do it after reversal so it should be fine
         anns_LFPartif = utils.removeAnnsByDescr(anns_LFPartif,\
                 ['artif_LFP{}'.format(wrong_brain_sidelet) ])
 
@@ -1618,6 +1631,30 @@ def rescaleRaws(raws_permod_both_sides, mod='LFP',
              rawnames=rawnames)
 
 
+def getBaselineInt(subj_or_rawname, body_side_for_baseline_int, baseline_int_type='notrem'):
+    if subj_or_rawname.find('_') >= 0:
+        subj_cur,medcond_cur,task_cur  = utils.getParamsFromRawname(subj_or_rawname)
+    else:
+        subj_cur = subj_or_rawname
+
+    mainmoveside = gv.gen_subj_info[subj_cur].get('move_side',None)
+    maintremside = gv.gen_subj_info[subj_cur].get('tremor_side',None)
+
+    if body_side_for_baseline_int == 'body_move_side':
+        main_side_let = mainmoveside[0].upper()
+    elif body_side_for_baseline_int == 'body_tremor_side':
+        main_side_let = maintremside[0].upper()
+    elif body_side_for_baseline_int in ['left','right']:
+        main_side_let = body_side_for_baseline_int[0].upper()
+
+    if baseline_int_type != 'entire':
+        baseline_int = '{}_{}'.format(baseline_int_type, main_side_let )
+    else:
+        baseline_int = baseline_int_type
+
+    return baseline_int
+
+
 def getCleanIntervalBins(rawname_,sfreq, times, suffixes = ['_ann_LFPartif'],verbose=False):
     #returns bins belonging to annotations, without ANY artifacs
     #from given suffix (regardless of channel name), as boolean array
@@ -1666,7 +1703,7 @@ def getCleanIntervalBins(rawname_,sfreq, times, suffixes = ['_ann_LFPartif'],ver
 
 def loadRaws(rawnames,mods_to_load, sources_type = None, src_type_to_use=None,
              src_file_grouping_ind=None, use_saved = True, highpass_lfreq = None,
-             input_subdir="", n_jobs=1, filter_phase = 'minimum'  ):
+             input_subdir="", n_jobs=1, filter_phase = 'minimum', verbose=None  ):
     '''
     only loads data from different files, does not do any magic with sides
     use_saved means using previously done preproc
@@ -1710,7 +1747,7 @@ def loadRaws(rawnames,mods_to_load, sources_type = None, src_type_to_use=None,
             #rawname_resample = rawname_ + '_resample_raw.fif'
             rawname_resample = rawname_ + '_resample_notch_highpass.fif'
             rawname_resample_full = os.path.join(data_dir, rawname_resample)
-            raw_resample = mne.io.read_raw_fif(rawname_resample_full)
+            raw_resample = mne.io.read_raw_fif(rawname_resample_full, verbose=verbose)
             if 'resample' in mods_to_load:
                 raw_permod_both_sides_cur['resample'] = raw_resample
 
@@ -1718,7 +1755,7 @@ def loadRaws(rawnames,mods_to_load, sources_type = None, src_type_to_use=None,
             if use_saved:
                 rawname_LFPonly = rawname_ + '_LFPonly'+ '.fif'
                 rawname_LFPonly_full = os.path.join( data_dir, rawname_LFPonly )
-                raw_lfponly = mne.io.read_raw_fif(rawname_LFPonly_full, None)
+                raw_lfponly = mne.io.read_raw_fif(rawname_LFPonly_full, verbose=verbose)
             else:
                 raw_lfponly = getSubRaw(rawname_, raw=raw_resample, picks = ['LFP.*'])
 
@@ -1727,7 +1764,7 @@ def loadRaws(rawnames,mods_to_load, sources_type = None, src_type_to_use=None,
             raw_lfp_highres = saveLFP(rawname_, skip_if_exist = 1, sfreq=1024)
             if raw_lfp_highres is None:
                 lfp_fname_full = os.path.join(data_dir, '{}_LFP_1kHz.fif'.format(rawname_) )
-                raw_lfp_highres = mne.io.read_raw_fif(lfp_fname_full)
+                raw_lfp_highres = mne.io.read_raw_fif(lfp_fname_full, verbose=verbose)
             raw_permod_both_sides_cur['LFP_hires'] = raw_lfp_highres
 
         if 'src' in mods_to_load:
@@ -1743,14 +1780,14 @@ def loadRaws(rawnames,mods_to_load, sources_type = None, src_type_to_use=None,
                 newsrc_fname_full = os.path.join( data_dir, input_subdir, 'pcica_' + src_fname_noext + '.fif' )
             else:
                 raise ValueError('Wrong src_type_to_use {}'.format(src_type_to_use) )
-            raw_srconly =  mne.io.read_raw_fif(newsrc_fname_full, None)
+            raw_srconly =  mne.io.read_raw_fif(newsrc_fname_full, verbose=verbose)
             raw_permod_both_sides_cur['src'] = raw_srconly
 
         if 'EMG' in mods_to_load:
             if use_saved:
                 saveRectConv(rawname_, skip_if_exist = 1)
                 rectconv_fname_full = os.path.join(data_dir, '{}_emg_rectconv.fif'.format(rawname_) )
-                raw_emg = mne.io.read_raw_fif(rectconv_fname_full)
+                raw_emg = mne.io.read_raw_fif(rectconv_fname_full, verbose=verbose)
                 assert 4 == len(raw_emg.ch_names), rawname_
             else:
                 raw_emg = getSubRaw(rawname_, raw=raw_resample, picks = ['EMG.*old'])
@@ -1766,7 +1803,7 @@ def loadRaws(rawnames,mods_to_load, sources_type = None, src_type_to_use=None,
         if 'afterICA' in mods_to_load:
             rawname_afterICA = rawname_ + '_resample_afterICA_raw.fif'
             rawname_afterICA_full = os.path.join(data_dir, input_subdir, rawname_afterICA)
-            raw_afterICA = mne.io.read_raw_fif(rawname_afterICA_full)
+            raw_afterICA = mne.io.read_raw_fif(rawname_afterICA_full, verbose=verbose)
             raw_permod_both_sides_cur['afterICA'] = raw_afterICA
 
         if 'SSS' in mods_to_load:
@@ -1775,7 +1812,7 @@ def loadRaws(rawnames,mods_to_load, sources_type = None, src_type_to_use=None,
             #rawname_SSS = rawname_ + '_SSS_notch_resample_raw.fif'
             rawname_SSS = rawname_ + '_SSS_notch_highpass_resample_raw.fif'
             rawname_SSS_full = os.path.join(data_dir, input_subdir, rawname_SSS)
-            raw_SSS = mne.io.read_raw_fif(rawname_SSS_full)
+            raw_SSS = mne.io.read_raw_fif(rawname_SSS_full, verbose=verbose)
             raw_permod_both_sides_cur['SSS'] = raw_SSS
 
         if highpass_lfreq is not None:

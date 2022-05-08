@@ -68,6 +68,12 @@ def parseFeatNames(fns,n_jobs=1):
     d['mod2'] = mod2
     return d
 
+def getFreqsFromParseRes(parse_result):
+    r = parse_result
+    relevant_freqs = list( set(r['fb1'] + r['fb2'] ) )
+    relevant_freqs = [ rq for rq in relevant_freqs if rq is not None]
+    return relevant_freqs
+
 
 def parseFeatName(fn,  addarg = None, n_jobs=1):
 
@@ -407,13 +413,16 @@ def filterFeats(feature_names_all, chnames_LFP, LFP_related_only, parcel_types,
                 fbands_def, fband_names_fine_inc_HFO,
                 use_lfp_HFO,
                 use_main_LFP_chan, mainLFPchan, mainLFPchan_new_name_templ,
+                brain_side_to_use, LFP_side_to_use,
                 remove_corr_self_couplings=1,
-                printLog=0):
+                verbose=0):
+
+    #print(locals())
     from globvars import gp
     import re
     bad_inds = set([] )
 
-    if printLog:
+    if verbose >= 1:
         print('------- filterStats start -------- ')
 
     from time import time
@@ -422,26 +431,100 @@ def filterFeats(feature_names_all, chnames_LFP, LFP_related_only, parcel_types,
     print('Start parsing feat names')
     parsed_featnames = parseFeatNames(feature_names_all)
 
-    t1 = time()
-    dif = t1 - t0;
-    print(f'parseFeatNames took {dif:.3f} secs')
+    #t1 = time()
+    #dif = t1 - t0;
+    #print(f'parseFeatNames took {dif:.3f} secs')
 
     featnames = np.array(feature_names_all)
+
+
+
     # remove those that don't have LFP in their names i.e. purely MEG features
     if LFP_related_only:
         regexes = ['.*LFP.*']  # LFP to LFP (all bands) and LFP to msrc (all bands)
         inds_good_ = selFeatsRegexInds(feature_names_all,regexes)
         inds_bad_ = set(range(len(feature_names_all))) - set(inds_good_)
         bad_inds.update(inds_bad_)
-        if printLog>0:
+        if verbose>0:
             remaining = set( range(len(feature_names_all) ) ) - bad_inds
             print(( f'LFP_related_only: after removing {len(inds_bad_)} '
                   f'remain {len(remaining) }') )
 
-            if printLog>1:
+            if verbose>1:
                 print('LFP_related_only: removing ',  featnames[ list( inds_bad_) ] )
 
+
+            if verbose>2:
+                remaining_fis = set( range(len(feature_names_all) ) ) - bad_inds
+                remaining_fis = list( sorted(remaining_fis) )
+                print('LFP_related_only: remaining ',  featnames[ list( remaining_fis) ] )
+
             #print(utils.collectFeatTypeInfo(featnames[list(remaining)] ) )
+
+
+    # both and all_available mean different things but in both cases
+    # we don't want to remove anything
+    if brain_side_to_use not in ['all_available', 'both']:
+        assert brain_side_to_use in [ 'left', 'right',
+                                     'left_exCB', 'right_exCB', ]
+        sidelet = brain_side_to_use[0].upper()
+        opsidelet = utils.getOppositeSideStr(sidelet)
+        # this is to prohibit for cross-side side couplings if we computed them
+        if brain_side_to_use.endswith('CB'):
+            all_parcels= roi_labels[gp.src_grouping_names_order[src_file_grouping_ind]]
+            CB_curside = f'Cerebellum_{sidelet}'
+            CB_opside = f'Cerebellum_{opsidelet}'
+            CBcsi = all_parcels.index(CB_curside)
+            CBosi = all_parcels.index(CB_opside)
+            #CB_opside = f'Cerebellum_{sidelet}'
+            opsrcre1 = '.*msrc'+opsidelet+'_[0-9]+_(?!' + str(CBosi) +  ').*_.*'  # not CB with opsidelet will be prohib
+            opsrcre2 = '.*msrc'+sidelet+'_[0-9]+_' + str(CBcsi) + '_.*'    # CB with sidelet will be prohib
+
+            regexes = [opsrcre1, opsrcre2]
+        else:
+            opsrcre = '.*msrc'+opsidelet+'.*'
+            regexes = [opsrcre]
+        inds_bad_  = selFeatsRegexInds(feature_names_all,regexes)
+        bad_inds.update(inds_bad_)
+
+        if verbose:
+            remaining = set( range(len(feature_names_all) ) ) - bad_inds
+            print(( f'brain_side_to_use: after removing {len(inds_bad_)} '
+                  f'remain {len(remaining) }') )
+            if verbose>1:
+                print('brain_side_to_use: removing ',
+                    featnames[ list(inds_bad_) ] )
+
+            if verbose>2:
+                remaining_fis = set( range(len(feature_names_all) ) ) - bad_inds
+                remaining_fis = list( sorted(remaining_fis) )
+                print('brain_side_to_use: remaining ',  featnames[ list( remaining_fis) ] )
+
+    # both and all_available mean different things but in both cases
+    # we don't want to remove anything
+    if LFP_side_to_use not in ['all_available', 'both']:
+        assert LFP_side_to_use in [ 'left', 'right' ]
+        sidelet = LFP_side_to_use[0].upper()
+        opsidelet = utils.getOppositeSideStr(sidelet)
+        # this is to prohibit for cross-side side couplings if we computed them
+        opLFPre = '.*LFP'+opsidelet+'.*'
+
+        regexes = [opLFPre]
+        inds_bad_  = selFeatsRegexInds(feature_names_all,regexes)
+        bad_inds.update(inds_bad_)
+
+        if verbose:
+            remaining = set( range(len(feature_names_all) ) ) - bad_inds
+            print(( f'LFP_side_to_use: after removing {len(inds_bad_)} '
+                  f'remain {len(remaining) }') )
+            if verbose>1:
+                print('LFP_side_to_use: removing ',
+                    featnames[ list(inds_bad_) ] )
+
+            if verbose>2:
+                remaining_fis = set( range(len(feature_names_all) ) ) - bad_inds
+                remaining_fis = list( sorted(remaining_fis) )
+                print('LFP_side_to_use: remaining ',  featnames[ list( remaining_fis) ] )
 
     # parcel_group_names can take only few values
     # parcel_types is a list of actual parcel names or !parcel_name
@@ -451,6 +534,7 @@ def filterFeats(feature_names_all, chnames_LFP, LFP_related_only, parcel_types,
     else:
         assert set(roi_labels.keys() ) == set(srcgrouping_names_sorted )
 
+        # sided
         all_parcels= roi_labels[gp.src_grouping_names_order[src_file_grouping_ind]]
 
         bad_parcels = []
@@ -491,16 +575,30 @@ def filterFeats(feature_names_all, chnames_LFP, LFP_related_only, parcel_types,
                 negmode = False
                 pgneff = pgn
 
+            sided = False
+            if pgn.endswith('_L') or pgn.endswith('_R'):
+                pgneff = pgn[:-2]
+                sided = True
+            if pgn.endswith('_B'):
+                pgneff = pgn[:-2]
+                sided = False
+
             if pgneff in gp.parcel_groupings_post:
                 curlabel_sublist = gp.parcel_groupings_post[pgneff]
                 if negmode:
                     for pcl1_sideless in curlabel_sublist:
-                        bad_parcels_cur += [pcl1_sideless + '_L' ]
-                        bad_parcels_cur += [pcl1_sideless + '_R' ]
+                        if sided:
+                            bad_parcels_cur += [pcl1_sideless + pgn[-2:] ]
+                        else:
+                            bad_parcels_cur += [pcl1_sideless + '_L' ]
+                            bad_parcels_cur += [pcl1_sideless + '_R' ]
                 else:
                     for pcl1_sideless in curlabel_sublist:
-                        good_parcels_cur += [pcl1_sideless + '_L' ]
-                        good_parcels_cur += [pcl1_sideless + '_R' ]
+                        if sided:
+                            good_parcels_cur += [pcl1_sideless + pgn[-2:] ]
+                        else:
+                            good_parcels_cur += [pcl1_sideless + '_L' ]
+                            good_parcels_cur += [pcl1_sideless + '_R' ]
                     #for pcl1 in all_parcels:
                     #    pcl1_sideless = pcl1[:-2]
                     #    if pcl1_sideless not in curlabel_sublist:
@@ -553,8 +651,8 @@ def filterFeats(feature_names_all, chnames_LFP, LFP_related_only, parcel_types,
         #bad_parcel_inds = set( range(len(all_parcels) ) ) -
 
         temp = set(bad_parcels)
-        assert len(temp) > 0
-        if printLog:
+        assert len(temp) > 0, parcel_types
+        if verbose:
             print(f'final Parcels to remove {len(temp)} of {len(all_parcels)} :',temp)
         bad_parcel_inds = [i for i, p in enumerate(all_parcels) if p in temp]
         assert len(bad_parcel_inds) > 0, bad_parcels
@@ -569,13 +667,18 @@ def filterFeats(feature_names_all, chnames_LFP, LFP_related_only, parcel_types,
         inds_bad_ = inds_bad_parcels
         bad_inds.update(inds_bad_)
 
-        if printLog:
+        if verbose:
             remaining = set( range(len(feature_names_all) ) ) - bad_inds
             print(( f'parcel_group_names: after removing {len(inds_bad_)} '
                   f'remain {len(remaining) }') )
-            if printLog>1:
+            if verbose>1:
                 print('parcel_group_names: removing ',
                     featnames[ list(inds_bad_) ] )
+
+            if verbose>2:
+                remaining_fis = set( range(len(feature_names_all) ) ) - bad_inds
+                remaining_fis = list( sorted(remaining_fis) )
+                print('parcel_group_names: remaining ',  featnames[ list( remaining_fis) ] )
 
             #print('remaining = ',featnames[list(remaining)] )
 
@@ -591,13 +694,18 @@ def filterFeats(feature_names_all, chnames_LFP, LFP_related_only, parcel_types,
         inds_bad_ = inds_self_coupling
         bad_inds.update(inds_bad_)
 
-        if printLog:
+        if verbose:
             remaining = set( range(len(feature_names_all) ) ) - bad_inds
             print(( f'remove_corr_self_couplings: after removing {len(inds_bad_)} '
                   f'remain {len(remaining) }') )
-            if printLog>1:
+            if verbose>1:
                 print('remove_corr_self_couplings: removing ',
                     featnames[ list(inds_bad_) ] )
+
+            if verbose>2:
+                remaining_fis = set( range(len(feature_names_all) ) ) - bad_inds
+                remaining_fis = list( sorted(remaining_fis) )
+                print('remove_corr_self_couplings: remaining ',  featnames[ list( remaining_fis) ] )
 
     # we normally should not even compute those during feat preparation!
     if remove_crossLFP:
@@ -617,11 +725,11 @@ def filterFeats(feature_names_all, chnames_LFP, LFP_related_only, parcel_types,
             inds_bad_ = inds_notsame_LFP
             bad_inds.update(inds_bad_)
 
-            if printLog:
+            if verbose:
                 remaining = set( range(len(feature_names_all) ) ) - bad_inds
                 print(( f'remove_crossLFP: after removing {len(inds_bad_)} '
                     f'remain {len(remaining) }') )
-                if printLog>1:
+                if verbose>1:
                     print('remove_crossLFP: removing  ',
                           featnames[ list(inds_bad_) ] )
 
@@ -638,13 +746,19 @@ def filterFeats(feature_names_all, chnames_LFP, LFP_related_only, parcel_types,
             #print('Removing self-couplings of LFP and msrc {}'.format( inds_self_coupling) )
             bad_inds.update(inds_bad_ )
 
-            if printLog:
+            if verbose:
                 remaining = set( range(len(feature_names_all) ) ) - bad_inds
                 print(( f'cross_couplings_only: after removing {len(inds_bad_)} '
                     f'remain {len(remaining) }') )
-                if printLog > 1:
+                if verbose > 1:
                     print('cross_couplings_only: removing ',
                         featnames[ list(inds_bad_) ] )
+
+                if verbose>2:
+                    remaining_fis = set( range(len(feature_names_all) ) ) - bad_inds
+                    remaining_fis = list( sorted(remaining_fis) )
+                    print('cross_couplings_only: remaining ',  featnames[ list( remaining_fis) ] )
+
 
     if self_couplings_only:
         regex_same_LFP = r'.*(LFP.[0-9]+),.*\1.*'
@@ -659,13 +773,18 @@ def filterFeats(feature_names_all, chnames_LFP, LFP_related_only, parcel_types,
             inds_bad_ = inds_non_self_coupling
             bad_inds.update( inds_bad_ )
 
-            if printLog:
+            if verbose:
                 remaining = set( range(len(feature_names_all) ) ) - bad_inds
                 print(( f'self_couplings_only: after removing {len(inds_bad_)} '
                     f'remain {len(remaining) }') )
-                if printLog > 1:
+                if verbose > 1:
                     print('self_couplings_only: removing ',
                         featnames[ list(inds_bad_) ] )
+
+                if verbose>2:
+                    remaining_fis = set( range(len(feature_names_all) ) ) - bad_inds
+                    remaining_fis = list( sorted(remaining_fis) )
+                    print('self_couplings_only: remaining ',  featnames[ list( remaining_fis) ] )
 
     #if len(fbands_to_use) < len(fband_names_fine_inc_HFO):
     if len(fbands_to_use) < len(fbands_def):
@@ -679,13 +798,18 @@ def filterFeats(feature_names_all, chnames_LFP, LFP_related_only, parcel_types,
         inds_bad_ = inds_bad_fbands
         bad_inds.update( inds_bad_ )
 
-        if printLog:
+        if verbose:
             remaining = set( range(len(feature_names_all) ) ) - bad_inds
             print(( f'fbands_to_use: after removing {len(inds_bad_)} '
                 f'remain {len(remaining) }') )
-            if printLog > 1:
+            if verbose > 1:
                 print('fbands_to_use: removing ',
                     featnames[ list(inds_bad_) ] )
+
+            if verbose>2:
+                remaining_fis = set( range(len(feature_names_all) ) ) - inds_bad_
+                remaining_fis = list( sorted(remaining_fis) )
+                print('fbands_to_use: remaining ',  featnames[ list( remaining_fis) ] )
 
     if fbands_per_mod is not None and len(fbands_per_mod) and len(fbands_per_mod ) ==2 :
         inds_bad_ = getBadInds_doubleBandFeats(feature_names_all, \
@@ -693,10 +817,15 @@ def filterFeats(feature_names_all, chnames_LFP, LFP_related_only, parcel_types,
             parsed_featnames=parsed_featnames)
         bad_inds.update( inds_bad_ )
 
-        if printLog:
+        if verbose:
             remaining = set( range(len(feature_names_all) ) ) - bad_inds
             print(( f'fbands_per_mod: after removing {len(inds_bad_)} '
                 f'remain {len(remaining) }') )
+
+        if verbose>2:
+            remaining_fis = set( range(len(feature_names_all) ) ) - bad_inds
+            remaining_fis = list( sorted(remaining_fis) )
+            print('fbands_per_mod: remaining ',  featnames[ list( remaining_fis) ] )
 
     # here 'bad' means nothing essentially, just something I want to remove
     if set(feat_types_all) != set(features_to_use):
@@ -708,13 +837,18 @@ def filterFeats(feature_names_all, chnames_LFP, LFP_related_only, parcel_types,
         inds_bad_ = inds_badfeats
         bad_inds.update( inds_bad_ )
 
-        if printLog:
+        if verbose:
             remaining = set( range(len(feature_names_all) ) ) - bad_inds
             print(( f'features_to_use: after removing {len(inds_bad_)} '
                 f'remain {len(remaining) }') )
-            if printLog > 1:
+            if verbose > 1:
                 print('features_to_use: removing ',
                     featnames[ list(inds_bad_) ] )
+
+            if verbose>2:
+                remaining_fis = set( range(len(feature_names_all) ) ) - bad_inds
+                remaining_fis = list( sorted(remaining_fis) )
+                print('features_to_use: remaining ',  featnames[ list( remaining_fis) ] )
 
     if set(data_modalities_all) != set(data_modalities):
         badmod = list( set(data_modalities_all) - set(data_modalities) )
@@ -727,13 +861,18 @@ def filterFeats(feature_names_all, chnames_LFP, LFP_related_only, parcel_types,
         inds_bad_ = inds_badmod
         bad_inds.update( inds_bad_ )
 
-        if printLog:
+        if verbose:
             remaining = set( range(len(feature_names_all) ) ) - bad_inds
             print(( f'data_modalities: after removing {len(inds_bad_)} '
                 f'remain {len(remaining) }') )
-            if printLog > 1:
+            if verbose > 1:
                 print('data_modalities: removing ',
                     featnames[ list(inds_bad_) ] )
+
+            if verbose>2:
+                remaining_fis = set( range(len(feature_names_all) ) ) - bad_inds
+                remaining_fis = list( sorted(remaining_fis) )
+                print('data_modalities: remaining ',  featnames[ list( remaining_fis) ] )
 
     if use_main_LFP_chan:
         # take mainLFPchan, extract <side><number>,  select names where there
@@ -741,7 +880,7 @@ def filterFeats(feature_names_all, chnames_LFP, LFP_related_only, parcel_types,
         # similar with msrc_inds
 
         #getFeatIndsRelToLFPchan(feature_names_all, chnpart=mainLFPchan,
-        #                        printLog=False,
+        #                        verbose=False,
 
         chnames_bad_LFP = set(chnames_LFP) - set([mainLFPchan] )
 
@@ -765,13 +904,18 @@ def filterFeats(feature_names_all, chnames_LFP, LFP_related_only, parcel_types,
         inds_bad_ = inds_bad_LFP
         bad_inds.update( inds_bad_ )
 
-        if printLog:
+        if verbose:
             remaining = set( range(len(feature_names_all) ) ) - bad_inds
             print(( f'use_main_LFP_chan: after removing {len(inds_bad_)} '
                 f'remain {len(remaining) }') )
-            if printLog > 1:
+            if verbose > 1:
                 print('use_main_LFP_chan: removing ',
                     featnames[ list(inds_bad_) ] )
+
+            if verbose>2:
+                remaining_fis = set( range(len(feature_names_all) ) ) - bad_inds
+                remaining_fis = list( sorted(remaining_fis) )
+                print('use_main_LFP_chan: remaining ',  featnames[ list( remaining_fis) ] )
 
     # removing HFO-related feats if needed
     if not use_lfp_HFO:
@@ -781,13 +925,18 @@ def filterFeats(feature_names_all, chnames_LFP, LFP_related_only, parcel_types,
         inds_bad_ = inds_HFO
         bad_inds.update( inds_bad_ )
 
-        if printLog:
+        if verbose:
             remaining = set( range(len(feature_names_all) ) ) - bad_inds
             print(( f'use_lfp_HFO: after removing {len(inds_bad_)} '
                 f'remain {len(remaining) }') )
-            if printLog > 1:
+            if verbose > 1:
                 print('use_lfp_HFO: removing ',
                     featnames[ list(inds_bad_) ] )
+
+            if verbose>2:
+                remaining_fis = set( range(len(feature_names_all) ) ) - bad_inds
+                remaining_fis = list( sorted(remaining_fis) )
+                print('use_lfp_HFO: remaining ',  featnames[ list( remaining_fis) ] )
 
     ############# for HisrchPt2011 only
     # collecting indices of all msrc that we have used
@@ -810,7 +959,7 @@ def filterFeats(feature_names_all, chnames_LFP, LFP_related_only, parcel_types,
         inds_bad_src = selFeatsRegexInds(feature_names_all, regexs, unique=1)
         bad_inds.update(inds_bad_src)
 
-        if printLog:
+        if verbose:
             print(  featnames[ inds_bad_src ] )
     #################### end
 
@@ -966,7 +1115,10 @@ def selectFeatNames(fts,relevant_freqs,desired_chns, feature_names_all,
 def getChnamesFromFeatlist(featnames, mod='LFP'):
     from featlist import  parseFeatNames
     r = parseFeatNames(featnames)
-    chnames = [chn for chn in r['ch1'] if chn.find(mod) >= 0] + [chn for chn in r['ch2'] if (chn is not None and chn.find(mod) >= 0) ]
+    chnames = [chn for chn in r['ch1'] if chn.find(mod) >= 0]
+    chnames += [chn for chn in r['ch2'] if \
+                (chn is not None and chn.find(mod) >= 0) ]
+
     chnames = list(sorted(set(chnames)))
     return chnames
 

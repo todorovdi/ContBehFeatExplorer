@@ -30,6 +30,7 @@ global gparams
 global artifact_intervals
 global code_dir
 global data_dir
+global fig_dir
 global dir_fig
 global dir_fig_preproc
 global fbands
@@ -72,6 +73,7 @@ if os.environ.get('OUTPUT_OSCBAGDIS') is not None:
     dir_fig = os.path.expandvars('$OUTPUT_OSCBAGDIS')
 else:
     dir_fig = '.'
+fig_dir = dir_fig
 
 param_dir = pjoin(code_dir,'params')
 
@@ -185,10 +187,29 @@ def paramFileRead(fname,recursive=True):
 
 class globparams:
     def __init__(self):
+        self.time_format_str = "%d.%m.%Y   %H:%M:%S"
+        import datetime
+        dt = datetime.datetime.now()
+        # it will be convenient
+        print("NOW is ", dt.strftime(self.time_format_str) )
 
         self.hostname = socket.gethostname()
         if not self.hostname.startswith('jsfc'):
             print('Hostname = ',self.hostname)
+        else:
+            try:
+                from jupyter_helpers.notifications import Notifications
+                p = '/usr/share/sounds/gnome/default/alerts/'
+                sound_file  = '../beep-06.mp3'
+                sound_file2 = '../glitch-in-the-matrix-600.mp3'
+                #p1 = p + 'glass.ogg'; p2 = p + 'sonar.ogg';
+                p1 = sound_file; p2 = sound_file2
+                Notifications(success_audio=p1, time_threshold=2,
+                    failure_audio=p2)  #    ,integration='GNOME')
+                print('Jupyter sounds setting succeded')
+            except:
+                print('Jupyter sounds setting failed')
+
 
         self.hostname_home = 'demitau-ZBook'
         if self.hostname == self.hostname_home:
@@ -322,6 +343,12 @@ class globparams:
          ['Occipital_Inf','Calcarine','Lingual'],['Angular'],['SupraMarginal'],['Cerebellum']];
 
         self.parcel_groupings_post = dict(zip(new_labels,old_labels_MATLAB_mod) )
+
+        self.parcel_groupings_post_sided = {}
+        for side in ['left','rignt']:
+            sidelet = side[0].upper()
+            for pgn,oldlabs in self.parcel_groupings_post.items():
+                self.parcel_groupings_post_sided[pgn + '_' + sidelet] = [lab + '_' + sidelet  for lab in  oldlabs]
 
 
 

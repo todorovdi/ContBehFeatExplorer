@@ -17,6 +17,7 @@ import mne
 from scipy.stats import pearsonr
 
 from featlist import selFeatsRegexInds
+from os.path import join as pjoin
 
 def plotEvolutionMultiCh(dat, times, chan_names=None, interval = None, extend=5,
                          yshift_stdmult = 4, bnd_toshow = 'start', rawname='',
@@ -541,6 +542,10 @@ def getIntervalSurround(start,end, extend, raw=None, times=None, verbose = False
 #
 #    return inds
 
+def selFeatsRegexNames(names, regexs, unique=1, copy=False):
+    inds = selFeatsRegexInds( names, regexs, unique)
+    namesel = np.array(names) [inds]
+    return namesel
 
 def selFeatsRegex(data, names, regexs, unique=1, copy=False):
     '''
@@ -1861,15 +1866,28 @@ def _getPredPower_singleFold(arg):
     from xgboost import XGBClassifier
     from interpret.glassbox import ExplainableBoostingClassifier
     from numpy.linalg import LinAlgError
-    (fold_type,clf,add_clf_creopts,add_fitopts,X_train,X_test,y_train,y_test,class_ind,n_classes, split_ind, printLog)  = arg
+    (fold_type,clf,add_clf_creopts,add_fitopts,\
+     X_train,X_test,y_train,y_test,class_ind,\
+     n_classes, split_ind, balancing, printLog)  = arg
     model_cur = type(clf)(**add_clf_creopts)  # I need num LDA compnents I guess
+    #print('balancing = ',balancing)
     try:
-        if isinstance(clf, XGBClassifier) or isinstance(clf,ExplainableBoostingClassifier):
+        if balancing == 'weighting' and (isinstance(clf, XGBClassifier) or\
+            isinstance(clf,ExplainableBoostingClassifier) ):
             #print('WEIGHTS COMPUTED')
             from sklearn.utils.class_weight import compute_sample_weight
             class_weights = compute_sample_weight('balanced', y_train)
-            model_cur.fit(X_train, y_train, **add_fitopts, sample_weight=class_weights)
-        else:
+            model_cur.fit(X_train, y_train, **add_fitopts,
+                          sample_weight=class_weights)
+        elif balancing == 'oversample':
+            from imblearn.over_sampling import RandomOverSampler
+            oversample = RandomOverSampler(sampling_strategy='minority',
+                    random_state=0)
+            X_orig,y_orig = X_train,y_train
+            X_train,y_train = oversample.fit_resample(X_train,y_train)
+            #sample_indices = oversample.sample_indices_
+            model_cur.fit(X_train, y_train, **add_fitopts)
+        elif balancing == 'no':
             model_cur.fit(X_train, y_train, **add_fitopts)
         perf_cur = getClfPredPower(model_cur,X_test,y_test,
                                     class_ind, printLog=printLog)
@@ -1877,7 +1895,7 @@ def _getPredPower_singleFold(arg):
             #print('getPredPowersCV: CV {}/{} pred powers {}'.format(-1,n_splits,cur) )
             print('getPredPowersCV: current fold pred powers {}'.format(perf_cur) )
     except LinAlgError as e:
-        print( str(e) )
+        print( 'LinAlgError=',str(e) )
         model_cur, perf_cur = None, None
 
     return split_ind, fold_type, model_cur,perf_cur
@@ -1909,8 +1927,9 @@ def averPerfDicts(perf_dicts):
 def getPredPowersCV(clf,X,class_labels,class_ind, printLog = False, n_splits=None,
                     ret_clf_obj=False, skip_noCV =False, add_fitopts={},
                    add_clf_creopts ={}, train_on_shuffled =True, seed=0,
-                    group_labels=None, stratified = True ):
-    # clf is assumed to be already fitted on entire training data here
+                    group_labels=None, stratified = True, balancing='weighting' ):
+    # clf is assumed to be already fitted on entire training data here, it is
+    # used only for no_CV computation
     # TODO: maybe I need to adapt for other classifiers
     # ret = [perf_nocv, perfs_CV, perf_aver, confmat_avGroupKFolder ] and maybe list of classif objects
     # obtained during CV
@@ -1978,7 +1997,8 @@ def getPredPowersCV(clf,X,class_labels,class_ind, printLog = False, n_splits=Non
 
             fold_type = 'regular'
             arg = (fold_type,clf,add_clf_creopts,add_fitopts,\
-                   X_train,X_test,y_train,y_test,class_ind, n_classes, split_ind, printLog)
+                   X_train,X_test,y_train,y_test,class_ind,
+                   n_classes, split_ind, balancing, printLog)
             args += [arg]
 
             split_ind += 1
@@ -1996,13 +2016,16 @@ def getPredPowersCV(clf,X,class_labels,class_ind, printLog = False, n_splits=Non
 
             fold_type_shuffled = 'train_on_shuffled_labels'
             fold_type = fold_type_shuffled
-            arg = (fold_type, clf,add_clf_creopts,add_fitopts,X_train,X_test,y_train,y_test,class_ind, n_classes, -1, printLog)
+            arg = (fold_type, clf,add_clf_creopts,add_fitopts,\
+                   X_train,X_test,y_train,y_test,class_ind, \
+                   n_classes, -1, balancing, printLog)
             args += [arg]
 
         retcur['test_indices_list'] =  [ [] ]*len(args)
         print(len(args))
 
         res_fold_type_spec = None
+        # we cannot do parallel inside parallel
         if n_jobs_perrun > 1:
             n_jobs = 1
             for arg in args:
@@ -2019,6 +2042,7 @@ def getPredPowersCV(clf,X,class_labels,class_ind, printLog = False, n_splits=Non
 
             if printLog:
                 print('getPredPowersCV:  Sending {} tasks to {} cores'.format(len(args), n_jobs))
+            #print('getPredPowersCV:  Sending {} tasks to {} cores'.format(len(args), n_jobs))
             #pool = mpr.Pool(n_jobs)
             #res = pool.map(_getPredPower_singleFold, args)
             #pool.close()
@@ -2080,6 +2104,15 @@ def getPredPowersCV(clf,X,class_labels,class_ind, printLog = False, n_splits=Non
     else:
         res_fold_type_spec_no_clfobj = None
     retcur['fold_type_shuffled' ] = res_fold_type_spec_no_clfobj
+
+    from sklearn.dummy import DummyClassifier
+    dummy_clf = DummyClassifier(strategy='stratified')
+    dummy_clf.fit(X, class_labels)
+    #dummy_clf.predict(X_cur)
+    #array([1, 1, 1, 1])
+    #dummy_clf.score(X, y)
+    r = getClfPredPower(dummy_clf,X,class_labels,class_ind)
+    retcur['perf_dummy'] = r
 
     #return tuple(ret)
     return retcur
@@ -2939,7 +2972,7 @@ def selFeatsBoruta(X,y,verbose = 2,add_clf_creopts=None, n_jobs = -1, random_sta
 
 
 def selBestLFP(output_cur, clf_type = 'XGB', chnames_LFP = None, s= '',
-               featnames=None, nperfs = 2):
+               featnames=None, nperfs = 2, metric = 'sens,spec,F1', verbose=1):
     #output_cur = output_per_int_types[int_type]
     #s = '{}:{}:{}:{}'.format(k,prefix,grouping,int_type)
     #s = '{}:{}:{}:{}'.format(ki,prefix,grouping,int_type)
@@ -2956,56 +2989,98 @@ def selBestLFP(output_cur, clf_type = 'XGB', chnames_LFP = None, s= '',
     else:
         perfs_full = anver_full['perf_dict']['perf_aver']   # exclude conf matrix
 
-    perfs_str_full = sprintfPerfs(perfs_full[:3])
-    perfs_full = np.array(perfs_full[:nperfs])
-    print('selBestLFP {}:: Full avCV perfs {}'.format(s,perfs_str_full))
-    pdrop = {}
-    for chn in chnames_LFP:
-        key = 'all_present_features_but_{}'.format(chn)
-        anver = anvers.get(key,None)
-        if anver is None:
-            print(f'selBestLFP: {chn} anver is None')
-            break
-        #perfs = [p[:nperfs] for p in anver['CV']['CV_perfs'] ]
-        #perfs = [p[:nperfs] for p in anver['CV']['CV_perfs'] ]
-        if 'CV_aver' in anver:
-            perfs = anver['CV_aver']['perfs']
-        else:
-            perfs = anver['perf_dict']['perf_aver']
+    if metric == 'sens,spec,F1':
+        assert nperfs is not None
+        if isinstance(perfs_full,np.ndarray):
+            pv = perfs_full[:3]
+        elif isinstance(perfs_full,dict):
+            pv = perfs_full['sens'],perfs_full['spec'],perfs_full['F1']
+            pv = list(pv)
 
-        #print(perfs_full, perfs)
-        perfs_str = sprintfPerfs(perfs[:3] )
-        perfs = np.array(perfs[:nperfs] )
-
-        print('selBestLFP {}:: No {} avCV perfs {}'.format(s,chn,perfs_str))
-        perf_drop = perfs_full[:nperfs] - perfs
-
-        pdrop[chn] = perf_drop
-        print(f'selBestLFP: no {chn} perf drop: {sprintfPerfs(perf_drop)}' )
-    if len(pdrop) == 0:
-        pdrop = None
-        winning_chan = None
+        perfs_full = np.array(pv[:nperfs])
     else:
-        winning_chan = chooseBestLFPchan(pdrop, chnames_LFP)
+        pv = [ perfs_full[metric] ]
+        perfs_full = np.array(pv)
+    perfs_str_full = sprintfPerfs(pv)
+    if verbose:
+        print('selBestLFP {}:: Full avCV perfs {}'.format(s,perfs_str_full))
 
-    return pdrop, winning_chan
+    pdrop_per_kt = {}
+    winning_chan_per_kt = {}
+    for kt in ['only', 'but' ]:
+        pdrop = {}
+        for chn in chnames_LFP:
+            key = 'all_present_features_{}_{}'.format(kt,chn)
+            anver = anvers.get(key,None)
+            if anver is None:
+                print(f'selBestLFP: {chn} anver is None')
+                break
+            #perfs = [p[:nperfs] for p in anver['CV']['CV_perfs'] ]
+            #perfs = [p[:nperfs] for p in anver['CV']['CV_perfs'] ]
+            if 'CV_aver' in anver:
+                perfs = anver['CV_aver']['perfs']
+            else:
+                perfs = anver['perf_dict']['perf_aver']
+
+            if metric == 'sens,spec,F1':
+                if isinstance(perfs,np.ndarray):
+                    pv = perfs[:3]
+                elif isinstance(perfs,dict):
+                    pv = perfs['sens'],perfs['spec'],perfs['F1']
+                    pv = list(pv)
+                perfs = np.array(pv[:nperfs] )
+                perfs_str = sprintfPerfs(pv )
+            else:
+                pv = np.array( [ perfs[metric] ] )
+                perfs = np.array(pv)
+                perfs_str = sprintfPerfs(pv )
+
+            #print(perfs_full, perfs)
+
+            if verbose > 1:
+                print('selBestLFP {}: {} {} avCV abs perfs {}'.format(s,kt,chn,perfs_str))
+            perf_drop = perfs_full - perfs
+
+            pdrop[chn] = perf_drop.tolist()
+            if verbose:
+                print(f'selBestLFP: {kt} {chn} perf drop: {sprintfPerfs(perf_drop)}' )
+
+        pdrop_per_kt[kt] = pdrop
+
+        if len(pdrop) == 0:
+            pdrop = None
+            winning_chan = None
+        else:
+            winning_chan = chooseBestLFPchan(pdrop, chnames_LFP,
+                                             inv = (kt == 'only') )
+        winning_chan_per_kt[kt] = winning_chan
+
+    return pdrop_per_kt, winning_chan_per_kt
 
 # not used
 
-def chooseBestLFPchan(pdrop, chnames_LFP):
+def chooseBestLFPchan(pdrop, chnames_LFP, inv = False):
     #winnder_chans = {}
     pds = []
     # I want ordered access across
     for chn in chnames_LFP:
         pds += [pdrop[chn]]
     pds = np.vstack(pds)
+    if inv:
+        pds = -pds
+
     # axis 0 -- index of channel
     maxdrop_perchan = np.max(pds,axis=1)
     maxdrop_perchan = np.maximum(maxdrop_perchan,0)
 
-    mindrop_perchan = np.min(pds,axis=1)
-    mindrop_perchan = np.minimum(mindrop_perchan,0)
-    # dropping channel should maximum worsen and minimum improve (mindrop is neg)
+    #minmax_perchan = np.minimum(maxdrop_perchan,0)
+
+    if pds.shape[1] > 1:
+        mindrop_perchan = np.min(pds,axis=1)
+        mindrop_perchan = np.minimum(mindrop_perchan,0)
+    else:
+        mindrop_perchan = 0
+    # dropping channel should maximally worsen and minimally improve (mindrop is neg)
     inds = np.argsort(maxdrop_perchan + mindrop_perchan)
     win_ind = inds[-1]
     return chnames_LFP[win_ind]
@@ -3135,9 +3210,13 @@ def genParList(param_grids, keys=None):
 
 def gridSearch(dtrain, params, param_grids, keys, num_boost_round=100,
               early_stopping_rounds=10, nfold=5, seed=0, shuffle=True,
-               printLog = False, main_metric = 'mae'):
+               printLog = False, main_metric = 'mae', savedir = None,
+               savepref = ''):
     search_grid_cur = list ( genParList(param_grids, keys) )
     # Define initial best params and MAE
+    # param_grids is a dict of ndarrays
+    # keys are param names that will be used from param_grids
+
     import xgboost
     from time import time
 
@@ -3145,7 +3224,7 @@ def gridSearch(dtrain, params, param_grids, keys, num_boost_round=100,
     min_mae = float("Inf")
     best_params = None
     cv_results_best = None
-    for pd in search_grid_cur:
+    for pdi,pd in enumerate(search_grid_cur):
         params_cur = dict(params.items()) #copy
 
         for k in ['use_label_encoder', 'importance_type', 'n_estimators']:
@@ -3183,18 +3262,34 @@ def gridSearch(dtrain, params, param_grids, keys, num_boost_round=100,
         boost_rounds = cv_results[f'test-{main_metric}-mean'].argmin()
         mean_secmet = cv_results[f'test-{second_metric}-mean'].min()
         if printLog:
-            print(f"{pd} \t{main_metric}: mae={mean_secmet:.4f} for {boost_rounds} rounds, {time_passed:.3f}s", flush=True)
+            print(f"{pd} \t{main_metric}={mean_mm:.4f}: mae={mean_secmet:.4f} for {boost_rounds} rounds, {time_passed:.3f}s", flush=True)
         if mean_mm < min_mae:
             min_mae = mean_mm
             best_params = pd
             cv_results_best = cv_results
+        if savedir is not None:
+            if not os.path.exists(savedir):
+                os.makedirs(savedir)
+            # TODO makedirs
+            sd = dict(params_cur=params_cur,cv_results=cv_results)
+            fn = pjoin(savedir, f'{savepref}_{pdi}.npz' )
+            np.savez(fn,**sd)
+            print(f'Current tuning result saved to {fn}')
+            # to load
+            # f = np.load('/home/demitau/data/test/all_present_features/XGB_tune/1_1.npz',allow_pickle=1)
+            #list( f.keys() ) = ['params_cur', 'cv_results']
+            #f['params_cur'][()]
+
     return best_params, cv_results_best
 
 def gridSearchSeq(X,y,params,search_grid,param_list_search_seq,
                   num_boost_round=100,
               early_stopping_rounds=10, nfold=5, seed=0, shuffle=True,
                   printLog=False, sel_num_boost_round = False,
-                  main_metric='mae', test_dataset_prop = 0.2):
+                  main_metric='mae', test_dataset_prop = 0.2, savedir=None):
+    # params are default creation options for the classifier
+    # search_grid is a dict of ndarrays
+    # list_search_grid is a list of lists of str
 
     assert X.shape[0] == len(y), (X.shape[0], len(y)  )
 
@@ -3210,11 +3305,14 @@ def gridSearchSeq(X,y,params,search_grid,param_list_search_seq,
     best_params_list = []
     cv_resutls_best_list = []
     params_mod = dict( params.items() )
-    for parlist in param_list_search_seq:
+    for parlisti,parlist in enumerate(param_list_search_seq):
+        savepref = str(parlisti)
         best_params,cv_results_best= gridSearch(dtrain, params_mod,
                 search_grid, parlist, num_boost_round = num_boost_round,
                 early_stopping_rounds = early_stopping_rounds,
-                nfold=nfold, seed=seed, printLog= printLog, main_metric=main_metric )
+                nfold=nfold, seed=seed,
+                printLog= printLog, main_metric=main_metric,
+                savedir =savedir, savepref=savepref)
         best_params_list += [best_params]
         cv_resutls_best_list += [cv_results_best]
         params_mod.update(best_params)
@@ -3403,7 +3501,7 @@ def classSubsetInds(y,cid):
 
 
 def _computeEBM(X,y,EBM,ebm_creopts,revdict_lenc, revdict_lenc_nm,
-                class_ind_to_check_lenc,
+                class_ind_to_check_lenc, class_ind_to_check_lenc_nm,
                 class_labels_good_nm,
                 n_splits=5,
                EBM_CV=0, featnames_ebm=None, tune_params = False,
@@ -3488,7 +3586,7 @@ def _computeEBM(X,y,EBM,ebm_creopts,revdict_lenc, revdict_lenc_nm,
     else:
         trials = None
 
-    assert revdict_lenc[class_ind_to_check_lenc] == revdict_lenc_nm[class_ind_to_check_lenc]
+    #assert revdict_lenc[class_ind_to_check_lenc] == revdict_lenc_nm[class_ind_to_check_lenc]
     class_id_nm = class_ind_to_check_lenc
 
     r0_ebm = None
@@ -3520,9 +3618,13 @@ def _computeEBM(X,y,EBM,ebm_creopts,revdict_lenc, revdict_lenc_nm,
         #ks,vs = zip(*revdict_lenc.items() )
         #directdict = dict( zip(vs,ks) )
 
-        perf_per_cp = extractSubperfs(X,y,class_labels_good_nm, revdict_lenc, revdict_lenc_nm,
-                            class_ind_to_check_lenc, r0_ebm['clf_objs'],
-                                      r0_ebm['test_indices_list'], confmat=r0_ebm['confmat_aver'] )
+        perf_per_cp = extractSubperfs(X,y,class_labels_good_nm,
+                                      revdict_lenc,
+                                      revdict_lenc_nm, class_ind_to_check_lenc,
+                                      class_ind_to_check_lenc_nm,
+                                      r0_ebm['clf_objs'],
+                                      r0_ebm['test_indices_list'],
+                                      confmat=r0_ebm['confmat_aver'] )
         #perf_per_cp = {}
         #uls = list(set(y))
         #if len( uls  ) == 2:
@@ -3698,10 +3800,11 @@ def _computeEBM(X,y,EBM,ebm_creopts,revdict_lenc, revdict_lenc_nm,
         #featsel_info.update(info_cur)
     return res
 
-def extractSubperfs(X,y,y_nm, revdict_lenc, revdict_lenc_nm, class_ind_to_check_lenc,
+def extractSubperfs(X,y,y_nm, revdict_lenc, revdict_lenc_nm,
+                    class_ind_to_check_lenc,  class_ind_to_check_lenc_nm,
                     clf_objs, test_indices_list, confmat=None):
-    assert revdict_lenc[class_ind_to_check_lenc] == revdict_lenc_nm[class_ind_to_check_lenc]
-    class_id_nm = class_ind_to_check_lenc
+    #assert revdict_lenc[class_ind_to_check_lenc] == revdict_lenc_nm[class_ind_to_check_lenc]
+    class_id_nm = class_ind_to_check_lenc_nm
     #perf_per_cp = {}
     #ks,vs = zip(*revdict_nm.items() )
     #directdict_nm = dict( zip(vs,ks) )
@@ -3726,10 +3829,10 @@ def extractSubperfs(X,y,y_nm, revdict_lenc, revdict_lenc_nm, class_ind_to_check_
                 if cpstr not in perf_per_cp:
                     perf_per_cp[cpstr] =  {'perfs':[] }
 
-                XX,yy = X[inds_cur_cp],y[inds_cur_cp]
+                XX,yy = X[inds_cur][inds_cur_cp],y[inds_cur][inds_cur_cp]
                 #print('fdsfs')
                 perf_cur = getClfPredPower(ebm_cur,XX,yy,
-                    class_ind_to_check_lenc, printLog=False)
+                    class_ind_to_check_lenc_nm, printLog=False)
                 #import pdb; pdb.set_trace()
                 perf_per_cp[cpstr]['perfs'] += [ perf_cur ]
                 perf_per_cp[cpstr]['bininds'] = inds_cur_cp
@@ -3758,11 +3861,11 @@ def extractSubperfs(X,y,y_nm, revdict_lenc, revdict_lenc_nm, class_ind_to_check_
             c1,c2 = cp
             confmat_aver = confmat[[c1,c2],:][:,[c1,c2] ]
             ind = c1
-            if c2 == class_ind_to_check_lenc:
+            if c2 == class_ind_to_check_lenc_nm:
                 ind = c2
             perf_aver = perfFromConfmat(confmat,ind)
             d = {'confmat_aver':confmat_aver, 'perf_aver':perf_aver }
-            cpstr = revdict_lenc[cp[0]],revdict_lenc[cp[1] ]
+            cpstr = revdict_lenc_nm[cp[0]],revdict_lenc_nm[cp[1] ]
             perf_per_cp[cpstr] = [ d  ]
 
     return perf_per_cp
@@ -3770,7 +3873,7 @@ def extractSubperfs(X,y,y_nm, revdict_lenc, revdict_lenc_nm, class_ind_to_check_
 
 
 def computeEBM(X,y,EBM,ebm_creopts,revdict_lenc, revdict_lenc_nm,
-               class_ind_to_check_lenc,
+               class_ind_to_check_lenc, class_ind_to_check_lenc_nm,
                class_labels_good_nm,
                n_splits=5,
                EBM_compute_pairwise=0,EBM_CV=0, featnames_ebm=None,
@@ -3806,7 +3909,8 @@ def computeEBM(X,y,EBM,ebm_creopts,revdict_lenc, revdict_lenc_nm,
                 os.path.join(savedict_cur['subsubdir'], str(indpair_names) )
 
             info_cur_cp = _computeEBM(X,y,EBM,ebm_creopts,
-                revdict_lenc, revdict_lenc_nm, class_ind_to_check_lenc,
+                revdict_lenc, revdict_lenc_nm,
+                class_ind_to_check_lenc, class_ind_to_check_lenc_nm,
                 class_labels_good_nm[inds],
                 n_splits=n_splits, EBM_CV=EBM_CV, featnames_ebm=featnames_ebm,
                 tune_params = tune_params,
@@ -3832,7 +3936,8 @@ def computeEBM(X,y,EBM,ebm_creopts,revdict_lenc, revdict_lenc_nm,
 
         info_cur = _computeEBM(X,y,EBM,ebm_creopts,
             revdict_lenc, revdict_lenc_nm,
-            class_ind_to_check_lenc, class_labels_good_nm,
+            class_ind_to_check_lenc,  class_ind_to_check_lenc_nm,
+            class_labels_good_nm,
             n_splits=n_splits, EBM_CV=EBM_CV, featnames_ebm=featnames_ebm,
                         tune_params = tune_params, params_space = params_space, max_evals = max_evals,
                         balancing=balancing, savedict=savedict)

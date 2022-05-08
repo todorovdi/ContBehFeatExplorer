@@ -8,6 +8,7 @@ from os.path import join as pjoin
 from time import time
 import pandas as pd
 import matplotlib.pyplot as plt
+from utils_postprocess import multiLevelDict2TupleList
 
 # compared to 2 it adds warid to tuple keys
 def collectPerformanceInfo3(rawnames, prefixes, ndays_before = None,
@@ -153,7 +154,8 @@ def collectPerformanceInfo3(rawnames, prefixes, ndays_before = None,
 
         if not date_ok:
             n_old += 1
-            print('skipping due to being old ',dt)
+            if printFilenames:
+                print('skipping due to being old ',dt)
             continue
         else:
             if ndays_before is not None:
@@ -187,7 +189,8 @@ def collectPerformanceInfo3(rawnames, prefixes, ndays_before = None,
         s = (rawstrid,prefix,int_grouping,intset)
         # filter not-selected prefixed
         if prefixes is not None and prefix not in prefixes:
-            print('skipping {} due to bad prefix'.format(fnf) )
+            if printFilenames:
+                print('skipping {} due to bad prefix'.format(fnf) )
             continue
 
         if rawnames is not None and rawstrid not in rawnames:
@@ -206,7 +209,7 @@ def collectPerformanceInfo3(rawnames, prefixes, ndays_before = None,
         else:
             fn_per_fntype[s] = [ ( fnf,mod_time ) ]
 
-    if printFilenames:
+    if printFilenames and verbose >= 3:
         print( 'fn_per_fntype keys are', fn_per_fntype.keys() )
 
     #################3
@@ -241,9 +244,12 @@ def collectPerformanceInfo3(rawnames, prefixes, ndays_before = None,
                 fnf,mod_time = tpl
                 fname_full = os.path.join(dir_to_use,fnf )
 
+
                 res_cur = {}
                 res_cur['_fname_full'] = fname_full
                 res_cur['filename_full'] = fname_full
+
+
                 if load:
                     t0 = time()
                     from zipfile import BadZipFile
@@ -254,6 +260,7 @@ def collectPerformanceInfo3(rawnames, prefixes, ndays_before = None,
                             res_cur = f['results_light'][()]
                         else:
                             res_cur = f['results_cur'][()]
+
 
                         if 'featsel_shap_res' in f and 'featsel_shap_res' not in res_cur:
                             print('Moving Shapley values')
@@ -333,8 +340,7 @@ def checkTupleListTableCompleteness(arg, grouping_to_check=None, it_to_check=Non
     if isinstance(arg,(list,np.ndarray) ):
         tpll_reshaped = arg
     elif isinstance(arg,dict):
-        import utils_postprocess as pp
-        tpll = pp.multiLevelDict2TupleList(arg,4,3)
+        tpll = multiLevelDict2TupleList(arg,4,3)
         tpll_reshaped = list( zip(*tpll) ) # it is a tuple of lists
     rawnames_found = set(tpll_reshaped[0])
     prefixes_found = set(tpll_reshaped[1])
@@ -373,29 +379,16 @@ def checkTupleListTableCompleteness(arg, grouping_to_check=None, it_to_check=Non
     return complen == ll, prefixes_missing
 
 
-def checkPrefixCollectionConsistencty(subdir,prefixes,start_time, end_time,
-                                      grouping_to_check, it_to_check,
-                                      use_main_LFP_chan=1, light_only=1,
-                                     prefixes_ignore  = None, preloaded = None):
-    import utils_postprocess as pp
-    sources_type ='parcel_aal'
-    ndaysBefore = None
-    if preloaded is not None:
-        output_per_raw_notload = preloaded
+def getOutputSetInfo( output_per_raw ):
+    if len(output_per_raw) == 0:
+        return [],[],[],[]
+    if isinstance(output_per_raw ,dict):
+        tpll_notload = multiLevelDict2TupleList(output_per_raw,4,3)
+    elif isinstance(output_per_raw ,list) and len(output_per_raw[0]) == 5:
+        tpll_notload = output_per_raw
     else:
-        r = collectPerformanceInfo3(None,prefixes, nraws_used='[0-9]+',
-                                                sources_type = sources_type,
-                                                printFilenames=0,
-                                                    ndays_before=ndaysBefore,
-                                                    use_main_LFP_chan=use_main_LFP_chan,
-                                                    subdir=subdir, remove_large_items = 1,
-                                        list_only=0, allow_multi_fn_same_prefix=0,
-                                        use_light_files = light_only, rawname_regex_full=0,
-                                        start_time=start_time,
-                                        end_time=end_time, load=False, verbose=0)
+        raise ValueError(f'Wrong type {type(output_per_raw)}, {len(output_per_raw[0])}')
 
-        output_per_raw_notload = r[0]
-    tpll_notload = pp.multiLevelDict2TupleList(output_per_raw_notload,4,3)
     tpll_notload_reshaped = list(zip(*tpll_notload))
 
     rawnames_found = list(sorted(set(tpll_notload_reshaped[0] ) ));
@@ -403,19 +396,97 @@ def checkPrefixCollectionConsistencty(subdir,prefixes,start_time, end_time,
     its_found = list(sorted(set(tpll_notload_reshaped[3] ) ));
     prefixes_found = list(sorted(set(tpll_notload_reshaped[1] ) ));
 
-#     print(rawnames_found)
-#     print(groupings_found)
-#     print(its_found)
-#     print(prefixes_found)
+    return rawnames_found, groupings_found, its_found, prefixes_found
 
-    if prefixes_ignore is None:
-        prefixes_ignore = ['LFPrel_noself',
-          'allb_beta_noH',
-          'allb_gamma_noH',
-          'allb_tremor_noH',
-          'modSrc',
-          'modSrc_self',
-          'onlyH']
+    # can be not loaded
+
+def tupleList2multiLevelDict(tpll): #,min_depth=0,max_depth=99999, cur_depth = 0, prefix_sort = None):
+    rawnames_found, groupings_found, its_found, prefixes_found = getOutputSetInfo( tpll )
+    tpll_reshaped = list( zip(*tpll) ) # it is a tuple of lists
+
+    rawnames =  np.array(tpll_reshaped[0] )
+    prefixes =  np.array(tpll_reshaped[1] )
+    groupings = np.array(tpll_reshaped[2] )
+    its =       np.array(tpll_reshaped[3] )
+
+    d = {}
+    for rn in rawnames_found:
+        d[rn] = {}
+        for prefix in prefixes_found:
+            mask1 = (rawnames == rn) & (prefixes == prefix)
+            n = sum( mask1 )
+            if n == 0:
+                continue
+            d[rn][prefix] = {}
+            for grp in groupings_found:
+                mask2 = mask1 & (groupings == grp)
+                n = sum( mask2 )
+                if n == 0:
+                    continue
+                d[rn][prefix][grp] = {}
+                for it in its_found:
+                    mask3 = mask2 & (its == it)
+                    n = sum( mask3 )
+                    if n == 0:
+                        continue
+                    else:
+                        assert n == 1
+                    ind = np.where(mask3)[0][0]
+                    d[rn][prefix][grp][it] = tpll[ind][-1]
+
+    return d
+
+def checkPrefixCollectionConsistencty(subdir,prefixes,start_time, end_time,
+                                      grouping_to_check, it_to_check,
+                                      use_main_LFP_chan=1, light_only=1,
+                                     prefixes_ignore  = [], preloaded = None):
+    sources_type ='parcel_aal'
+    ndaysBefore = None
+    if preloaded is not None:
+        output_per_raw_notload = preloaded
+    else:
+        r = collectPerformanceInfo3(None,prefixes, nraws_used='[0-9]+',
+                sources_type = sources_type,
+                printFilenames=0,
+                ndays_before=ndaysBefore,
+                use_main_LFP_chan=use_main_LFP_chan,
+                subdir=subdir, remove_large_items = 1,
+                list_only=0, allow_multi_fn_same_prefix=0,
+                use_light_files = light_only, rawname_regex_full=0,
+                start_time=start_time, end_time=end_time,
+                load=False, verbose=0)
+
+        if r is None:
+            return None,None
+        output_per_raw_notload = r[0]
+    if isinstance(output_per_raw_notload ,dict):
+        tpll_notload = multiLevelDict2TupleList(output_per_raw_notload,4,3)
+    elif isinstance(output_per_raw_notload ,list) and len(output_per_raw_notload) == 4:
+        tpll_notload = output_per_raw_notload
+    else:
+        raise ValueError('Wrong type')
+    tpll_notload_reshaped = list(zip(*tpll_notload))
+
+    rawnames_found, groupings_found, its_found, prefixes_found = getOutputSetInfo( output_per_raw_notload )
+    for tmp in [rawnames_found, groupings_found, its_found, prefixes_found]:
+        assert tmp is not None
+    #rawnames_found = list(sorted(set(tpll_notload_reshaped[0] ) ));
+    #groupings_found = list(sorted(set(tpll_notload_reshaped[2] ) ));
+    #its_found = list(sorted(set(tpll_notload_reshaped[3] ) ));
+    #prefixes_found = list(sorted(set(tpll_notload_reshaped[1] ) ));
+    print(rawnames_found)
+    print(groupings_found)
+    print(its_found)
+    print(prefixes_found)
+
+    #if prefixes_ignore is None:
+    #    prefixes_ignore = ['LFPrel_noself',
+    #      'allb_beta_noH',
+    #      'allb_gamma_noH',
+    #      'allb_tremor_noH',
+    #      'modSrc',
+    #      'modSrc_self',
+    #      'onlyH']
 
     prefixes_a  = np.array( tpll_notload_reshaped[1] )
     rns_a       = np.array( tpll_notload_reshaped[0] )
@@ -425,6 +496,7 @@ def checkPrefixCollectionConsistencty(subdir,prefixes,start_time, end_time,
     for rn in rawnames_found:
         cond = (rns_a == rn) & (groupings_a == grouping_to_check) & (its_a == it_to_check)
         prefixes_cur = prefixes_a[cond]
+        assert prefixes_cur is not None
         prefixes_missing_cur = set(prefixes_found) - set(prefixes_cur) - set(prefixes_ignore)
         #print(len(prefixes_cur))
         prefixes_missing[rn] = prefixes_missing_cur
@@ -437,6 +509,592 @@ def checkPrefixCollectionConsistencty(subdir,prefixes,start_time, end_time,
 
     return prefixes_missing, output_per_raw_notload
 
+def loadCalcOutput(subdir, output_per_raw=None, save_collected=True, ignore_missing=False,
+                  verbose=0 ):
+    import globvars as gv
+    import utils
+    import utils_tSNE as utsne
+    import utils_preproc as upre
+
+    import os
+    import sys
+    import mne
+    import json
+    import matplotlib.pyplot as plt
+    import numpy as np
+    import h5py
+    import multiprocessing as mpr
+    import matplotlib as mpl
+    import time
+    import gc;
+    import scipy.signal as sig
+    import pandas as pd
+
+    import numpy as np
+    import utils_postprocess_HPC as postp
+    import pymatreader
+    import re
+
+    from IPython.display import Audio
+    sound_file = '../beep-06.mp3'
+
+    data_dir = gv.data_dir
+    from os.path import join as pjoin
+
+    light_only = 1
+    #light_only = 0
+    ndaysBefore = None
+
+    from dateutil import parser
+    # start_time = parser.parse("6 Sept 2021 19:05:15")
+    # end_time = parser.parse("8 Sept 2021 21:21:45")
+    start_time = parser.parse("26 Sept 2015 01:00:15")
+    #end_time = parser.parse("30 Oct 2021 21:21:45")
+    end_time = parser.parse("30 Oct 2029 21:21:45")
+
+    ndaysBefore = None
+    #subdir = 'nointerp'
+    #subdir = 'nofeatsel'
+    subdir = 'per_subj_per_medcond_best_LFP_wholectx'
+    lookup_dir = pjoin(gv.data_dir,subdir)
+    recent = postp.listRecent(days=ndaysBefore, lookup_dir= lookup_dir,
+                            start_time=start_time,
+                                    end_time=end_time)
+    print(len(recent))
+    rawnames = []
+    for lf in recent:
+        st = 0
+        if light_only:
+            if not lf.startswith('_!'):
+                continue
+        rawname_regex = '([S0-9]+_[a-z]+)'
+        if light_only:
+            r = re.match('_\!_'+rawname_regex+'_.*',lf)
+        else:
+            r = re.match('_'+rawname_regex+'_.*',lf)
+        if r is None:
+            print('None ',lf)
+            continue
+        cr = r.groups()[0]
+        rawnames += [ cr ]
+    rawnames = list(sorted(set(rawnames)))
+
+
+    rawname_regex = '([S0-9]+_[a-z]+)'
+    #a0 = re.findall('_\!_'+rawname_regex+'_.*',lf)
+    #a1 = re.match('_\!_'+rawname_regex+'_.*',lf)
+    #print(a0,a1.groups())#
+
+    import utils_postprocess_HPC as postp
+    prefixes = postp.listRecentPrefixes(days = ndaysBefore, light_only=light_only,
+                                        lookup_dir= lookup_dir,
+                                        custom_rawname_regex = rawname_regex,
+                                        start_time=start_time,
+                                    end_time=end_time)
+
+    print(rawnames)
+    #display(prefixes)
+    preloaded = None
+    ###############################
+    from utils_postprocess_HPC import checkPrefixCollectionConsistencty
+    grouping_to_check= 'merge_nothing'
+    it_to_check = 'basic'
+
+    r = checkPrefixCollectionConsistencty(subdir,prefixes,start_time, end_time,
+                                        grouping_to_check, it_to_check,
+                                        use_main_LFP_chan=1, light_only=1,
+                                        prefixes_ignore  = None, preloaded=preloaded)
+    missing, preloaded = r
+    print(missing)
+    if max( [len(m) for m in missing.values()] ) != 0 and not ignore_missing:
+        raise ValueError('something is missing')
+    import gc; gc.collect()
+    ##################################
+    printFilenames = verbose > 2
+    if output_per_raw is None:
+        sources_type = 'parcel_aal'  # or ''
+        r = postp.collectPerformanceInfo3(None,prefixes, nraws_used='[0-9]+',
+                                                sources_type = sources_type,
+                                                printFilenames=printFilenames,
+                                                    ndays_before=ndaysBefore,
+                                                    use_main_LFP_chan=1,
+                                                    subdir=subdir, remove_large_items = 1,
+                                        list_only=0, allow_multi_fn_same_prefix=0,
+                                        use_light_files = light_only, rawname_regex_full=0,
+                                        start_time=start_time,
+                                        end_time=end_time)
+        #output_per_raw,Ximp_per_raw,gis_per_raw = r
+        output_per_raw,_,_ = r
+        print('len(output_per_raw) =', len(output_per_raw))
+        import gc; gc.collect()
+
+        if save_collected:
+            np.savez(pjoin(gv.data_dir,subdir,'gathered.npz'), output_per_raw=output_per_raw )
+            import gc; gc.collect()
+
+    Audio(filename=sound_file, autoplay=True)
+    return output_per_raw
+
+
+def plotCalcOutput(subdir, output_per_raw, to_show = [('trem_vs_all','merge_nothing','basic') ] ,
+                   ignore_missing = False, rawnames=None, prefixes=None, pref_quick = 'onlyH_actBB' ):
+    import globvars as gv
+    sd = pjoin(gv.dir_fig, subdir)
+    if not os.path.exists(sd):
+        os.makedirs(sd)
+
+
+    import utils_postprocess_HPC as postp
+    tpll = multiLevelDict2TupleList(output_per_raw,4,3)
+
+    z0 = [tpl[:-1] for tpl in tpll]
+    #rns_ord, prefs_ord, grp_ord, it_ord = list (zip(*z0  ) )
+    tpll_reshaped = np.array( list (zip(*z0  ) ) )
+    #################################################
+    from utils_postprocess_HPC import checkTupleListTableCompleteness
+    b,missing = checkTupleListTableCompleteness(tpll_reshaped)
+
+    if rawnames is None:
+        rawnames = list(sorted(output_per_raw.keys()))
+    if prefixes is None:
+        prefixes = list(sorted(output_per_raw[rawnames[0]].keys() ) )
+    outputs_filtered = postp.filterOutputs(output_per_raw, rns=rawnames ,
+                        prefs=prefixes, grps = ['merge_nothing'] )
+    b,missing =  checkTupleListTableCompleteness(outputs_filtered)
+    print(missing)
+    if max( [len(m) for m in missing.values()] ) != 0 and not ignore_missing:
+        raise ValueError('something is missing')
+    ################################################
+    #tpll [0][:4]
+    mult_clf_output = tpll[0][-1]
+    all_thrs = mult_clf_output['feat_variance_q_thr'][-1:]
+    #thr0,thr1,thr2='0.87','0.92','0.99'
+    all_LDA =  []
+    all_XGB = ['all_present_features'] #,'after_VF_threshold']
+    for thr_cur in all_thrs:
+        all_XGB += [ f'best_PCA-derived_features_{thr_cur}']
+
+    perf_to_use_list = []
+    for v in all_XGB[1:]:
+        perf_to_use_list += [('XGB',all_XGB[0],v,'across_medcond')]
+        #perf_to_use_list += [('XGB',all_XGB[0],v,'across_subj')]
+
+    perf_to_use_list = [('XGB',all_XGB[0], f'best_PCA-derived_features_{all_thrs[-1]}','across_subj')]
+
+    ###########################################  Table info
+    print(f'perf_to_use_list={perf_to_use_list}')
+
+    # to_show = [('allsep','merge_nothing','basic'), ('trem_vs_all','merge_all_not_trem','basic'),
+    #         ('trem_vs_2class','merge_movements','basic')]
+    #to_show = [('trem_vs_mvt','merge_movements','trem_vs_hold&move'),
+    #           ('trem_vs_all','merge_all_not_trem','basic') ]
+
+
+    #             ('trem_vs_2class','merge_movements','basic'),
+    #           ('trem_vs_quiet','merge_nothing','trem_vs_quiet') ]
+    #          ('allsep','merge_nothing','basic')]
+
+    # warnings.simplefilter('error')
+    # table_info_per_perf_type, table_per_perf_type = \
+    #     postp.prepTableInfo2(output_per_raw, prefixes=prefixes,
+    #     perf_to_use_list=perf_to_use_list)
+
+    #%debug
+    # import warnings
+    # with warnings.catch_warnings():
+    #warnings.simplefilter('error')
+    table_info_per_perf_type, table_per_perf_type = \
+        postp.prepTableInfo3(output_per_raw, prefixes=prefixes,
+        perf_to_use_list=perf_to_use_list, to_show=to_show)
+
+    ##################################
+
+
+    plotOnePrefQuick(rawnames,table_info_per_perf_type, perf_to_use_list[0],
+                     pref = pref_quick)
+
+    plt.tight_layout()
+    plt.savefig( pjoin(gv.dir_fig, subdir,f'{pref_quick}_summary.pdf') )
+    plt.close()
+
+    ##########################################  Plot table
+    for perf_tuple in perf_to_use_list:
+        print(f'Satrting plotTableInfos2 for {perf_tuple}')
+        postp.plotTableInfos2(table_info_per_perf_type, perf_tuple=perf_tuple,
+                            output_subdir=subdir,use_recalc_perf=False,
+                            prefixes_sorted=prefixes, crop_rawname=slice(None,None))
+    plt.close()
+    import gc;gc.collect()
+    ####################################
+
+    score = 'bacc'
+    ##############################################
+
+    plotname_pref = 'noLFP'
+    good_prefs_permod = {'msrc': ['onlyH_act_exclude15'], 'LFP': ['onlyH_act_only15']}
+    #good_prefs_permod =
+    prefix2final_name = {good_prefs_permod['LFP'][0]:'LFP',
+                         'onlyH_act_only_best': 'best area',
+                         'onlyH_act_LFPand_quasibest': '*LFP + best area',
+                         'onlyH_act_LFPand_best': 'LFP + best area',
+                         good_prefs_permod['msrc'][0]:'cortex',
+                         'onlyH_act':'LFP + cortex'  }
+    #%debug
+
+    #score = 'bacc'
+    prefixes_final = list( prefix2final_name.keys() )
+    #prefixes_final = ['modLFP','modSrc_self','onlyH_act']
+    #for perf_tuple in [('XGB', 'all_present_features', 'interpret_EBM', 'across_subj')]:
+    #for perf_tuple in [('XGB', 'all_present_features', 'interpret_EBM', 'across_subj')]:
+    for perf_tuple in table_info_per_perf_type:
+        print(f'Starting plotTableInfos_onlyBar for {perf_tuple}')
+        addBestParcelGroups(output_per_raw, table_info_per_perf_type, perf_tuple, score )
+
+        k = list( table_info_per_perf_type.keys() )[0]
+        axs = postp.plotTableInfos_onlyBar(table_info_per_perf_type,
+                                           perf_tuple=perf_tuple,
+                              output_subdir=subdir,use_recalc_perf=False,
+                              prefixes_sorted=prefixes_final, prefix2final_name=prefix2final_name,
+                                     crop_rawname='no',
+                                           score= score,
+                                           rawnames=rawnames, per_medcond =1,
+                                          expand_best = 1,
+                                           allow_missing_prefixes = 1)
+        #axs[0,0].set_xlabel('')
+        axs[2,1].set_visible(False)
+        #frame1.axes.get_yaxis().set_visible(False)
+        plt.rc('axes', titlesize=18)
+        plt.rc('axes', labelsize=16)
+        plt.rc('ytick', labelsize=16)
+
+    defsp = 'special:min(sens,spec)'
+    if score != defsp:
+        scstr = score
+    fn_full = pjoin(gv.dir_fig,subdir, f'bars_perf_dif_subsets_{plotname_pref}_{scstr}.pdf')
+    plt.savefig(fn_full)
+    plt.close()
+
+
+    ##########################################################################
+    ############################ Confmats ####################################
+    ##########################################################################
+
+    ############################revdict_user = {'trem_L':0, 'notrem_L':1, 'hold_L':2, 'move_L':3}
+    #%debug
+    from utils_postprocess_HPC import filterOutputs
+    # 'onlyH%%'  #brain is contralat move
+    # 'onlyH^^'  #brain is ipsilat move
+    pref_confmat_plots = ['onlyHBB', 'onlyH_act%%' ,'onlyH_act^^' ,'onlyH%%', 'onlyH^^']
+    #pref_confmat_plot = 'onlyHBB'
+    #pref_confmat_plot = 'modLFP'
+    #pref_confmat_plot = 'onlyH_act_only15' # CB
+    #pref_confmat_plot = 'onlyH_act_only14' # CB
+    #pref_confmat_plot = 'onlyH_act_only0'  #Senosorimotor
+    #pref_confmat_plot = 'onlyH_act_LFPand_only14' # CB
+    #pref_confmat_plot = 'onlyH_act_LFPand_only0'  #Senosorimotor
+
+    for pref_confmat_plot in pref_confmat_plots:
+        grps = ['merge_nothing'] #, 'merge_movements']
+        #grps = [ 'merge_movements']
+        outputs_filtered = postp.filterOutputs(output_per_raw,prefs=[pref_confmat_plot],
+                                            grps=grps)
+        plt.rcParams.update({'font.size': 15})
+        plt.rc('ytick',labelsize=22)
+        plt.rc('xtick',labelsize=22)
+        plt.rc('axes',labelsize=24)
+
+        colorbar_axes_bbox = [0.80, 0.2, 0.025, 0.7]
+        postp.plotConfmats(outputs_filtered, ww = 5, hh =5, keep_beh_state_sides=0,
+                        keep_subj_list_title=1,
+                        labelpad_cbar=140, colorbar_axes_bbox= colorbar_axes_bbox,
+                        rename_class_names = {'notrem':'quiet'})
+        #plt.gcf().axes[-1].set_visible(False)
+        s = pref_confmat_plot.replace('%%','_contramove')
+        s = s.replace('^^','_ipsimove')
+        figname = f'confmats_{s}_{grps}.pdf'
+        figname_full = pjoin(gv.dir_fig,subdir,figname)
+        plt.savefig(figname_full)####################
+        plt.close()
+
+    print('Plotting finised successfully!')
+
+
+def addBestParcelGroups(output_per_raw, table_info_per_perf_type,
+                        perf_tuple, score='special:min(sens,spec)',do_add=True):
+    # modifies in place
+    import re
+    #import utils_postprocess_HPC as postp
+    #score = defsp
+    #score = 'spec'
+    #score = 'bacc'
+    perfkey = score
+
+    from utils_postprocess_HPC import _extractPerfNumber
+
+    templs = []
+    templs += [ ('onlyH_act_only[0-9]+.*',       'onlyH_act_only_best_among_single-sided','both','single',0)  ]
+    templs += [ ('onlyH_act_LFPand_only[0-9]+.*','onlyH_act_LFPand_best_among_single-sided','both','single',0) ]
+    templs += [ ('onlyH_act_only[0-9]+.*',       'onlyH_act_only_best_among_two-sided','both','both',1)  ]
+    templs += [ ('onlyH_act_LFPand_only[0-9]+.*','onlyH_act_LFPand_best_among_two-sided','both','both',1) ]
+    templs += [ ('onlyH_act_only[0-9]+.*',       'onlyH_act_only_best_among_clmove','contralat_to_move','single',2)  ]
+    templs += [ ('onlyH_act_LFPand_only[0-9]+.*','onlyH_act_LFPand_best_among_clmove','contralat_to_move','single',2) ]
+    templs += [ ('onlyH_act_only[0-9]+.*',       'onlyH_act_only_best_among_ilmove','ipsilat_to_move','single',3)  ]
+    templs += [ ('onlyH_act_LFPand_only[0-9]+.*','onlyH_act_LFPand_best_among_ilmove','ipsilat_to_move','single',3) ]
+
+    templ_ind_sets = {}
+    for ti,(templ,bestname,side_to_collect,side_used_in_fit,templ_grp) in enumerate(templs) :
+        if templ_grp not in templ_ind_sets.keys():
+            templ_ind_sets[templ_grp] = []
+        templ_ind_sets[ templ_grp ] += [ti]
+    #templ_ind_sets = [ [0,1], [2,3] ]
+
+    prefs_per_pgn_pertk = {}
+    if do_add:
+        for k,d in table_info_per_perf_type[perf_tuple].items():
+            prefs_per_pgn = {}
+            prefs_per_pgn_pertk[k] = prefs_per_pgn
+            # we may have in our collection results both when we fitted
+            # Sensormitor from both sides AND separately Sensorimotor_L,
+            # Sensorimotor_R
+            for templ,bestname,side_to_collect,side_used_in_fit,templ_grp in templs:
+                m = 0 # max perf
+                mkey = ''
+                mkey_nice = ''
+                mpgn = ''
+                i = 0
+                for prefix in d:
+                    try:
+                        moc = output_per_raw[k[0]][prefix][k[1]][k[2]]
+                    except KeyError as e:
+                        continue
+
+                    mr = re.match(templ,prefix)
+                    if mr is None:
+                        continue
+
+                    corresp,all_info = loadRunCorresp(moc)
+                    ind,pgn,nice_name = corresp.get(prefix, (None,None,None) )
+                    if pgn is None or pgn == 'LFP':
+                        continue
+
+                    pgn_has_one_side = pgn.endswith('_L') or pgn.endswith('_R')
+                    c1 = (side_used_in_fit == 'single' and pgn_has_one_side )
+                    c2 = (side_used_in_fit == 'both' and (not pgn_has_one_side ) )
+                    if not (c1 or c2):
+                        continue
+
+                    if pgn not in prefs_per_pgn:
+                        prefs_per_pgn[pgn] = []
+                    prefs_per_pgn[pgn] += [prefix]
+
+                    rn = k[0]
+                    subj = rn.split('_')[0]
+                    mainmoveside = gv.gen_subj_info[subj].get('move_side',None)
+                    assert mainmoveside is not None
+                    movesidelet = mainmoveside[0].upper()
+                    moveopsidelet = utils.getOppositeSideStr( movesidelet )
+                    #templ_eff = templ.    replace('%', moveopsidelet)
+                    #templ_eff = templ_eff.replace('^', movesidelet)
+                    #if side_to_collect == 'contralat_to_move' and \
+                    #        (not (pgn_has_one_side) or not pgn.endswith(f'_{moveopsidelet}') ):
+                    #    continue
+
+                    if side_to_collect != 'both':
+                        if side_to_collect in ['left','right']:
+                            side_eff = side_to_collect
+                        else:
+                            if side_to_collect == 'contralat_to_move':
+                                if pgn.startswith('Cerebellum'):
+                                    side_eff = movesidelet
+                                else:
+                                    side_eff = moveopsidelet
+                            if side_to_collect == 'ipsilat_to_move':
+                                if pgn.startswith('Cerebellum'):
+                                    side_eff = moveopsidelet
+                                else:
+                                    side_eff = movesidelet
+                                #print(side_eff)
+
+                        sidelet = side_eff[0].upper()
+                        if pgn[-1] != sidelet:
+                            continue
+
+
+                    #if prefix == 'onlyH_act_only15':  #LFP
+                    #    continue
+                    #if prefix.find(templ  ) < 0:
+                    #    continue
+
+                    perf_cur = _extractPerfNumber(d[prefix],perfkey)
+        #             if perfkey == defsp:
+        #                 pc0 = d[prefix]['sens']
+        #                 pc1 = d[prefix]['spec']
+        #                 perf_cur = min(pc0,pc1)
+        #             else:
+        #                 perf_cur = d[prefix][perfkey]
+                    if m < perf_cur:
+                        m = perf_cur
+                        mkey = prefix
+
+                        #corresp,all_info = loadRunCorresp(output_per_raw[k[0]][prefix][k[1]][k[2]])
+                        #ind,pgn,nice_name = corresp[prefix]
+                        #mkey_nice = nice_name
+                        mkey_nice = nice_name
+                        mpgn = pgn
+                        #print(nice_name)
+                    i += 1
+                #print(i)
+                d[bestname] = d[mkey].copy()
+                d[bestname]['name_best'] = mkey
+                d[bestname]['name_nice_best'] = mkey_nice
+                d[bestname]['parcel_group_name'] = mpgn
+
+                print(k,bestname,mkey,'pgn=',mpgn,'nice=',mkey_nice, m)#,d[mkey][perfkey])
+        #print(k,list(d['modLFP'].keys()))
+    #print(list(table_info_per_perf_type[perf_tuple][('S07_off', 'merge_nothing', 'basic')].keys() ) )
+    #%debug
+    similarity_thr = 5e-2
+    #Handle casese when LFP + best of single areas is NOT the same as best (LFP + single)
+    for k,d in table_info_per_perf_type[perf_tuple].items():
+        for tis in templ_ind_sets.values():
+            name_nice_curset = []
+            prefix_alt = ''
+            for ti in tis:
+                templ,bestname,side_to_collect,side_used_in_fit,templ_grp = templs[ti]
+                nn = d[bestname]['name_nice_best']
+                name_nice_curset += [nn]
+                if bestname.startswith('onlyH_act_only_best'):
+                    prefix_best = bestname
+                    prefix_alt = d[bestname]['name_best'].replace('_only','_LFPand_only')
+                    if do_add:
+                        prefs_cur = prefs_per_pgn_pertk[k][ d[bestname]['parcel_group_name'] ]
+                        assert prefix_alt in prefs_cur, (prefix_alt, prefs_cur)
+                if bestname.startswith('onlyH_act_LFPand_best'):
+                    prefix_LFP_best = bestname
+            #print(name_nice_curset, prefix_alt)
+            print(k,prefix_best, d[prefix_best]['parcel_group_name'])
+            print('  ',prefix_LFP_best, d[prefix_LFP_best]['parcel_group_name'])
+
+            corresp,all_info = loadRunCorresp(output_per_raw[k[0]][prefix_alt][k[1]][k[2]])
+            ind,pgn,nice_name_alt = corresp[prefix_alt]
+
+            c1 = prefix_LFP_best.find(prefix_best) < 0
+            p1 = _extractPerfNumber(d[prefix_LFP_best], perfkey)
+            p2 = _extractPerfNumber( d[prefix_alt], perfkey)
+            pdiff = np.abs(p1  - p2)
+            c2 = pdiff > similarity_thr
+
+            name_nice1 = d[prefix_best]['name_nice_best']
+            name_nice2 = d[prefix_LFP_best]['name_nice_best']
+
+            prefix_quasibest = prefix_LFP_best.replace('onlyH_act_LFPand_best','onlyH_act_LFPand_quasibest')
+            if c1 and c2:
+                #print(pdiff)
+                #assert nice_name.split()[-1].find( name_nice1.split()[-1] ) >= 0,  (nice_name_alt,  name_nice1)
+                #assert nice_name_alt.find(name_nice1) >= 0, (nice_name_alt,  name_nice1)
+                assert nice_name_alt.split()[2].find( name_nice1.split()[2] ) >= 0,  (nice_name_alt,  name_nice1)
+
+                d[prefix_quasibest] = d[prefix_alt].copy()
+                d[prefix_quasibest]['name_best'] = prefix_alt
+                d[prefix_quasibest]['name_nice_best'] = nice_name_alt
+                d[prefix_quasibest]['parcel_group_name'] = pgn
+            else:
+                if c1 and not c2:  # if areas are different but perf is similar
+                    #d['onlyH_act_LFPand_best'] = kk
+                    d[prefix_LFP_best] = d[prefix_alt].copy()
+                    d[prefix_LFP_best]['name_best'] = prefix_alt
+                    d[prefix_LFP_best]['name_nice_best'] = nice_name_alt
+                    d[prefix_LFP_best]['parcel_group_name'] = pgn
+
+                if prefix_quasibest in d:
+                    del d[prefix_quasibest]
+
+
+
+        #name_nice1 = d['onlyH_act_only_best']['name_nice_best']
+        #name_nice2 = d['onlyH_act_LFPand_best']['name_nice_best']
+        ##name_nice1 = name_nice1.split()[-1]
+        ##name_nice2 = name_nice2.split()[-1]
+        #print(k)
+
+        ##key = d['onlyH_act_only_best']['name_best']
+        ## that would have been
+        #kk = d['onlyH_act_only_best']['name_best'].replace('_only','_LFPand_only')
+        #corresp,all_info = loadRunCorresp(output_per_raw[k[0]][kk][k[1]][k[2]])
+        #ind,pgn,nice_name = corresp[kk]
+
+        #c1 = name_nice2.find(name_nice1) < 0
+        #p1 = _extractPerfNumber(d['onlyH_act_LFPand_best'], perfkey)
+        #p2 = _extractPerfNumber( d[kk], perfkey)
+        #pdiff = np.abs(p1  - p2)
+        #c2 = pdiff > similarity_thr
+        #if c1 and c2:
+        #    print(pdiff)
+        #    #assert nice_name.split()[-1].find( name_nice1.split()[-1] ) >= 0,  (nice_name,  name_nice1)
+        #    assert nice_name.find(name_nice1) >= 0, (nice_name,  name_nice1)
+
+        #    d['onlyH_act_LFPand_quasibest'] = d[kk].copy()
+        #    d['onlyH_act_LFPand_quasibest']['name_best'] = kk
+        #    d['onlyH_act_LFPand_quasibest']['name_nice_best'] = nice_name
+        #    d['onlyH_act_LFPand_quasibest']['parcel_group_name'] = pgn
+        #else:
+        #    if c1 and not c2:  # if areas are different but perf is similar
+        #        #d['onlyH_act_LFPand_best'] = kk
+        #        d['onlyH_act_LFPand_best'] = d[kk].copy()
+        #        d['onlyH_act_LFPand_best']['name_best'] = kk
+        #        d['onlyH_act_LFPand_best']['name_nice_best'] = nice_name
+        #        d['onlyH_act_LFPand_best']['parcel_group_name'] = pgn
+
+        #    if 'onlyH_act_LFPand_quasibest' in d:
+        #        del d['onlyH_act_LFPand_quasibest']
+
+def plotOnePrefQuick(rawnames,table_info_per_perf_type, perf_to_use, pref = 'onlyH_actBB',
+                     scores=['bacc','sens','spec'], title_type = 'subj'):
+    subjs = list(sorted(set( [rn.split('_')[0] for rn in rawnames] ) ))
+    #dict_keys(['sens_recalc', 'spec_recalc', 'descr', 'comment_from_runstrings', 'sens', 'spec', 'F1', 'acc', 'bacc', 'sens_red', 'spec_red', 'sens_red_recalc', 'spec_red_recalc', 'F1_red', 'num', 'num_red'])
+    aa = table_info_per_perf_type[perf_to_use]
+    tpls = sorted( list(aa.keys() ), key=lambda x: x[0] )
+
+    #if not isinstance(prefs,list):
+    #    prefs = [pref]
+
+    nr = len(subjs)
+    nc = len(scores)
+    ww = 6; hh = 2
+    fig,axs = plt.subplots(nr,nc,figsize=( nc*ww, nr*hh) ) #, sharex='col')
+    axs = axs.reshape((nr,nc))
+    for tpl in tpls:
+        rn,grp,it = tpl
+        subj,medcond = rn.split('_')
+        medcond = medcond.upper()
+        axi = subjs.index(subj)
+
+        mainmoveside = gv.gen_subj_info[subj].get('move_side',None)
+        assert mainmoveside is not None
+        movesidelet = mainmoveside[0].upper()
+        moveopsidelet = utils.getOppositeSideStr( movesidelet )
+
+        #rpint(aa[tpl].keys() )
+        #print( aa[tpl]['onlyH_act'].keys() )
+        pref_eff = pref.replace('%', moveopsidelet)
+        pref_eff = pref_eff.replace('^', movesidelet)
+
+        for coli,score in enumerate(scores):
+            val = aa[tpl][pref_eff][score]
+            print(rn, axi, val * 100 )
+
+            ax = axs[axi,coli]
+            ax.barh([medcond ],[val * 100] )
+            ax.set_xlim(0,100)
+            if title_type == 'subj':
+                ax.set_title(subj)
+            elif title_type == 'rawname':
+                ax.set_title(rn)
+
+    # 'balanced acc'
+            axs[-1,coli].set_xlabel(score)
+        #break
+    #.keys()
 
 def _old_collectPerformanceInfo2_(rawnames, prefixes, ndays_before = None,
                            n_feats_PCA=None,dim_PCA=None, nraws_used=None,
@@ -679,6 +1337,10 @@ def _old_collectPerformanceInfo2_(rawnames, prefixes, ndays_before = None,
                         print(f'!!! Got error {e} for {fnf}, skiping')
                         break
                     res_cur['filename_full'] = fname_full
+
+                    mod_time = os.stat( fname_full ).st_mtime
+                    dt = datetime.fromtimestamp(mod_time)
+                    res_cur['fname_mod_time'] = dt
 
                     if 'featsel_shap_res' in f and 'featsel_shap_res' not in res_cur:
                         print('Moving Shapley values')
@@ -1240,13 +1902,20 @@ def prepTableInfo3(output_per_raw, prefixes=None, perf_to_use_list = [('perfs_XG
 
                             class_label_names = mult_clf_results.get('class_label_names_ordered',None)
                             if class_label_names is not None:
-                                lblind_trem = class_label_names.index('trem_L')
-                                print('prepTableInfo3: warninig: Using fixed side for tremor: trem_L')
+                                subj = rn.split('_')[0]
+                                mainmoveside = gv.gen_subj_info[subj].get('move_side',None)
+                                assert mainmoveside is not None
+                                movesidelet = mainmoveside[0].upper()
+                                fn = getLogFname(mult_clf_results)
+                                print(fn)
+                                lblind_trem = class_label_names.index(f'trem_{movesidelet}')
+                                #print('prepTableInfo3: warninig: Using fixed side for tremor: trem_L')
                             else:
                                 lblind_trem = 0
 
                             perfs_CV,perfs_noCV, perfs_red_CV,perfs_red_noCV  = None,None,None,None
                             perfs_CV_recalc,perfs_red_CV_recalc = None,None
+                            perf_shuffled = None
                             if clf_type == 'XGB':
                                 XGB_anver = mult_clf_results['XGB_analysis_versions']
                                 anver_cur = XGB_anver.get(perf_to_use)
@@ -1256,9 +1925,12 @@ def prepTableInfo3(output_per_raw, prefixes=None, perf_to_use_list = [('perfs_XG
                                         perfs_noCV = anver_cur['perf_nocv']
                                         ps = anver_cur.get('perfs_CV', None)
                                     else:
-                                        perfs_CV = anver_cur['perf_dict']['perf_aver']
-                                        perfs_noCV = anver_cur['perf_dict']['perf_nocv']
-                                        ps = anver_cur['perf_dict'].get('perfs_CV', None)
+                                        perfd = anver_cur['perf_dict']
+                                        perfs_CV = perfd['perf_aver']
+                                        perfs_noCV = perfd['perf_nocv']
+                                        ps = perfd.get('perfs_CV', None)
+
+                                        perf_shuffled = perfd['fold_type_shuffled'][-1]
                                     perfs_CV_recalc = recalcPerfFromCV(ps,lblind_trem)
 
                                     confmats_cur = [p['confmat'] for p in ps]
@@ -1432,6 +2104,8 @@ def prepTableInfo3(output_per_raw, prefixes=None, perf_to_use_list = [('perfs_XG
                     info_cur['bacc'] = bacc
                     info_cur['sens_red'] = sens_red
                     info_cur['spec_red'] = spec_red
+
+                    info_cur['perf_dict_shuffled'] = perf_shuffled
                     if perfs_red_CV_recalc is not None:
                         if isinstance(perfs_CV_recalc, (list,tuple,np.ndarray) ):
                             info_cur['sens_red_recalc'] = perfs_red_CV_recalc[0]
@@ -4275,7 +4949,8 @@ def plotTableInfos_onlyBar(table_info_per_perf_type, perf_tuple,
                    sort_by_featnum = 0, show_add_info ='none', percents=True,
                            score= 'special:min(sens,spec)', per_medcond=False,
                            rawnames = None, expand_best = 0,
-                          allow_missing_prefixes=0, hh =2, ww=5 ):
+                          allow_missing_prefixes=0, hh =2, ww=5, label_fontsize = 14,
+                           red = 'red' ):
     # rawnames argument is mainly to specify order
     import matplotlib.pyplot as plt
 
@@ -4348,7 +5023,7 @@ def plotTableInfos_onlyBar(table_info_per_perf_type, perf_tuple,
         sind_strs += [sind_str]
     sind_strs = list(sorted(set(sind_strs)))
     print('sind strs = ',sind_strs)
-    label_fontsize = 14
+
     #label_fontsize = None
 
     for rowid_tuple,rowinfo in info_per_rn_pref.items():
@@ -4359,7 +5034,16 @@ def plotTableInfos_onlyBar(table_info_per_perf_type, perf_tuple,
             prefixes_sorted = list(sorted(rowinfo.keys()))
         prefixes_wnums = []
         str_per_pref = {}
-        for prefix in prefixes_sorted:
+        for prefix_pre in prefixes_sorted:
+            rn = rowid_tuple[0]
+            subj=rn.split('_')[0]
+            mainmoveside = gv.gen_subj_info[subj].get('move_side',None)
+            assert mainmoveside is not None
+            movesidelet = mainmoveside[0].upper()
+            moveopsidelet = utils.getOppositeSideStr( movesidelet )
+            prefix = prefix_pre.replace('%', moveopsidelet)
+            prefix = prefix.replace('^', movesidelet)
+
             prefinfo = rowinfo.get(prefix,None)
             if prefinfo is None and allow_missing_prefixes:
                 continue
@@ -4418,14 +5102,23 @@ def plotTableInfos_onlyBar(table_info_per_perf_type, perf_tuple,
 
             #print(clf_type,str_to_put)
             if prefix2final_name is not None:
-                prefix_like = prefix2final_name[prefix]
+                prefix_like = prefix2final_name[prefix_pre]
                 bai = prefix_like.find('best area')
                 if expand_best and bai >= 0:
                     print(prefix_like,prefinfo['name_nice_best'])
                     #prefix_like = prefix_like[:bai] + \
                     #    prefinfo['name_nice_best'].split()[-1].split('+')[-1]
-                    area = prefinfo['name_nice_best'].split()[-1].split('+')[-1]
-                    prefix_like = prefix_like.replace('best area',area)
+                    side_suff = [ '_L', '_R', '_B']
+                    sided = False
+                    #nnb = prefinfo['name_nice_best']
+                    #for suff in side_suff:
+                    #    if prefinfo['name_nice_best'].find(suff):
+                    #        sided = True
+                    #        nnb.split()
+                    #area = prefinfo['name_nice_best'].split()[-1].split('+')[-1]
+                    #prefix_like = prefix_like.replace('best area',area)
+                    #prefix_like = prefix_like.replace('best area', prefinfo['name_nice_best'] )
+                    prefix_like = prefix_like.replace('best area', prefinfo['parcel_group_name'] )
             else:
                 prefix_like = prefix
 
@@ -4438,9 +5131,13 @@ def plotTableInfos_onlyBar(table_info_per_perf_type, perf_tuple,
             else:
                 raise ValueError('unk val of show_add_info = {show_add_info}')
 
+            if red == 'red':
+                p_red = np.min(pvec_red)
+            elif red == 'shuffled':
+                p_red = _extractPerfNumber ( prefinfo['perf_dict_shuffled'], score )
+
             #p = np.mean(pvec)
             p     = np.min(pvec)
-            p_red = np.min(pvec_red)
             p_add = np.min(pvec_add)
             if percents:
                 p *= 100
@@ -4454,6 +5151,7 @@ def plotTableInfos_onlyBar(table_info_per_perf_type, perf_tuple,
             #print(ys_add)
 
         print( prefixes_wnums )
+        print( ys_red )
 
         #print(ys_red)
         str_per_pref_per_rowname[rowid_tuple] = str_per_pref
@@ -4850,9 +5548,9 @@ def plotConfmats(outputs_per_raw, normalize_mode = 'true', best_LFP=False, commo
     normalize_mode == true means that we start from real positives (nut just correctly predicted)
     common_norm -- colorbar always has max 100 and min 0 (regardless of actual min and max vals)
     '''
-    import utils_postprocess as pp
     #tpll = pp.multiLevelDict2TupleList(outputs_grouped,4,3)
-    tpll = pp.multiLevelDict2TupleList(outputs_per_raw,4,3)
+    tpll = multiLevelDict2TupleList(outputs_per_raw,4,3)
+    assert len(tpll)
 
     # TODO: it will plot all confmats for all the outputs, I might want to restruct to just one
     #nc = int( np.ceil( np.sqrt( len(outputs_grouped) ) ) );
@@ -4928,6 +5626,7 @@ def plotConfmats(outputs_per_raw, normalize_mode = 'true', best_LFP=False, commo
     #         confmat_normalized = confmat / np.sum(confmat, axis=1)[None,:] * 100
 
     confmat_normalized_ = np.array(confmats_normalized)
+    assert confmat_normalized_.size
     confmat_normalized_diags = np.array( [np.diag(np.diag(cm)) for cm in confmats_normalized] )
     eyes = np.array( [np.eye(confmat_normalized_.shape[-1] ) for cm in confmats_normalized], dtype=bool)
     confmat_normalized_offdiags = confmat_normalized_ - confmat_normalized_diags
@@ -5533,15 +6232,22 @@ def loadRunCorresp(moc):
     corresp, all_info = None,None
     if runCID is not None:
         import json
-        with open( pjoin(gv.code_dir,'run',f'___run_corresp_{runCID}.txt'), 'r') as f:
+        fn = pjoin(gv.code_dir,'run',f'___run_corresp_{runCID}.json')
+        if not os.path.exists(fn):
+            fn = pjoin(gv.code_dir,'run',f'___run_corresp_{runCID}.txt')
+        with open(fn , 'r') as f:
             corresp_file = json.load( f )
 
-        all_info = None
+        mod_time = os.stat( fn ).st_mtime
+        dt = datetime.fromtimestamp(mod_time)
+
+        all_info = {}
         if 'correspondance' in corresp_file:
             corresp = corresp_file['correspondance']
             all_info = corresp_file
         else:
             corresp = corresp_file
+        all_info['date_created'] = dt
     else:
         print('loadRunCorresp: corresp file not found')
     return corresp, all_info
@@ -5565,6 +6271,8 @@ def _extractPerfNumber( perf_dict, score):
         if score.startswith('special'):
             perf_one_number = min( perf_cur['sens'], perf_cur['spec'] )
         else:
+            if score == 'bacc' and score not in perf_cur:
+                score = 'balanced_accuracy'
             perf_one_number = perf_cur[score]
     else:
         raise ValueError( str(perf_cur) + str(type(perf_cur) ) )
@@ -5578,23 +6286,8 @@ def computeImprovementsPerParcelGroup(output_per_raw, base_perf_prefix,
                                       score = 'special:min_sens_spec',
                                       inv_exclude = True, printLog = False,
                                      ignore_base_prefix_missing = False  ):
-    #exclude
-    #mode = 'exclude'
-
-    import utils_postprocess as pp
-    tpll = pp.multiLevelDict2TupleList(output_per_raw,4,3)
+    tpll = multiLevelDict2TupleList(output_per_raw,4,3)
     tpll_reshaped = list( zip(*tpll) ) # it is a tuple of lists
-
-    #corresp,all_info = loadRunCorresp(tpll[0][-1])
-    #corresps = [loadRunCorresp(tpl[-1])[0] for tpl in tpll]
-    #k0 = set( corresp.keys() )
-    #for c in corresps:
-    #    kcur = set ( c.keys() )
-    #    assert set( kcur ) == set( k0 ),  kcur ^ k0
-    # check corresp consistency
-
-
-    #___run_corresp_16381692938201.txt
 
     n_chars = len('onlyH_act_')
     prefixes = set( tpll_reshaped[1] )
@@ -5622,8 +6315,6 @@ def computeImprovementsPerParcelGroup(output_per_raw, base_perf_prefix,
             rn = tpll[cpi][0]
             medcond = rn.split('_')[-1]
             r = output['XGB_analysis_versions']['all_present_features']
-            #perf_cur = r['perf_dict']['perf_aver']
-            #perf_one_number = min( perf_cur[0], perf_cur[1] )
             perfs_per_medcond[medcond][prefix] = \
                 _extractPerfNumber (r['perf_dict'], score )
         #print(prefix,pgn, perf_cur)
@@ -5739,6 +6430,178 @@ def computeImprovementsPerParcelGroup(output_per_raw, base_perf_prefix,
                 print(prefix,pgn, medcond,improvement * 100)
     return impr_wrt_base_per_medcond_per_pgn, impr_per_medcond_per_pgn, impr_wrtLFP_per_medcond_per_pgn, perfs_aver_per_medcond
 
+def _getPrefixInds(tpll,prefix_to_test):
+    # it respects '%' and '^' wildcards
+    prefix_inds = []
+    for tpli,tpl in enumerate(tpll):
+        rn,pref_cur = tpl[:2]
+        subj = rn.split('_')[0]
+        mainmoveside = gv.gen_subj_info[subj].get('move_side',None)
+        assert mainmoveside is not None
+        movesidelet = mainmoveside[0].upper()
+        moveopsidelet = utils.getOppositeSideStr( movesidelet )
+        pref = prefix_to_test.replace('%', moveopsidelet)
+        pref = pref.replace('^', movesidelet)
+        if pref == pref_cur:
+            prefix_inds += [tpli]
+
+    return prefix_inds
+
+def computeImprovementsPerParcelGroup2(output_per_raw, base_perf_prefix,
+                                      base_perf_low_prefix = None,
+                                      mode = 'only',
+                                      score = 'special:min_sens_spec',
+                                      inv_exclude = True, printLog = False,
+                                     ignore_base_prefix_missing = False,baseprefix = 'onlyH_act_'):
+    # pgn -- parcel group name
+    tpll = multiLevelDict2TupleList(output_per_raw,4,3)
+    tpll_reshaped = list( zip(*tpll) ) # it is a tuple of lists
+
+    n_chars = len(baseprefix) # after this part of the prefix should immediately follow mode string
+    prefixes = list( set( tpll_reshaped[1] ) )
+    #print( list(sorted(prefixes) ) )
+    #prefixes2 = set( [ tpl[1] for tpl in tpll ]  )
+    #assert prefixes == prefixes2, prefixes ^ prefixes2
+
+    #perfs_per_medcond = {'on':[],'off':[]}
+    perfs_per_medcond = {'on':{},'off':{}}
+    perfs_base_per_medcond = {'on':np.nan,'off':np.nan}
+    for prefix in prefixes:
+        #corresp,all_info = loadRunCorresp(tpll[0][-1])
+        #ind,pgn,nice_name = corresp[prefix]
+        part = prefix[n_chars:]
+        if not part.startswith(mode):
+            #print(f'skipping {part} for {mode}, prefix={prefix}')
+            continue
+
+        cur_prefix_inds = _getPrefixInds(tpll,prefix)
+        #cur_prefix_inds = np.where( np.array(tpll_reshaped[1]) == prefix )[0]
+        if len(cur_prefix_inds) != 1:
+            print( f'Wrong number of prefix {prefix} instances {len(cur_prefix_inds) }' )
+            continue
+        for cpi in cur_prefix_inds:
+            output = tpll[cpi][-1]
+            rn = tpll[cpi][0]
+            medcond = rn.split('_')[-1]
+            r = output['XGB_analysis_versions']['all_present_features']
+            perfs_per_medcond[medcond][prefix] = \
+                _extractPerfNumber (r['perf_dict'], score )
+        #print(prefix,pgn, perf_cur)
+    if mode == 'exclude':
+        cur_prefix_inds = _getPrefixInds(tpll,base_perf_prefix)
+        #cur_prefix_inds = np.where( np.array(tpll_reshaped[1]) == base_perf_prefix )[0]
+        assert len(cur_prefix_inds) <= 2
+        for cpi in cur_prefix_inds:
+            output = tpll[cpi][-1]
+            rn = tpll[cpi][0]
+            medcond = rn.split('_')[-1]
+            r = output['XGB_analysis_versions']['all_present_features']
+            perfs_base_per_medcond[medcond] = \
+                _extractPerfNumber (r['perf_dict'], score )
+            #if mode == 'exclude':
+            #    perfs_base_per_medcond[medcond] = extractPerfNumber (r['perf_dict'] )
+            #else:
+            #    if base_perf_prefix is None:
+            #        perfs_base_per_medcond[medcond] = 0.
+            #    else:
+    else:
+        if base_perf_low_prefix is None:
+            # I still need to set zeros for all the medconds present
+            #cur_prefix_inds = np.where( np.array(tpll_reshaped[1]) == base_perf_prefix )[0]
+            cur_prefix_inds = _getPrefixInds(tpll,base_perf_prefix)
+            if len(cur_prefix_inds) != 1:
+                print('cur_prefix_inds =', [ tpll[ci][:-1] for ci in cur_prefix_inds ] )
+                if ignore_base_prefix_missing:
+                    perfs_base_per_medcond[medcond] = 0.
+                else:
+                    raise ValueError('cur_prefix_inds has wrong len')
+            for cpi in cur_prefix_inds:
+                output = tpll[cpi][-1]
+                rn = tpll[cpi][0]
+                medcond = rn.split('_')[-1]
+                perfs_base_per_medcond[medcond] = 0.
+        else:
+            cur_prefix_inds = _getPrefixInds(tpll,base_perf_low_prefix)
+            #cur_prefix_inds = np.where( np.array(tpll_reshaped[1]) == base_perf_low_prefix )[0]
+            assert (len(cur_prefix_inds) >0 ) and len(cur_prefix_inds) <= 2, \
+                f'problem getting base perf {base_perf_low_prefix} = { [ tpll[ci][:-1] for ci in cur_prefix_inds ] }'
+            for cpi in cur_prefix_inds:
+                output = tpll[cpi][-1]
+                rn = tpll[cpi][0]
+                medcond = rn.split('_')[-1]
+                r = output['XGB_analysis_versions']['all_present_features']
+                perfs_base_per_medcond[medcond] = \
+                    _extractPerfNumber (r['perf_dict'], score )
+
+    print(perfs_base_per_medcond)
+
+
+
+    #####################################
+
+    impr_wrt_base_per_medcond_per_pgn = {'on':{}, 'off':{}}
+    for prefix in prefixes:
+        # take the interesting part of the prefix
+        part = prefix[n_chars:]
+        if not part.startswith(mode):  # if it is a wrong prefix, skip
+            continue
+
+        ##############
+        ############
+
+        #cur_prefix_inds = np.where( np.array(tpll_reshaped[1]) == prefix )[0]
+        cur_prefix_inds = _getPrefixInds(tpll, prefix)
+        for cpi in cur_prefix_inds:
+            tpl = tpll[cpi]
+            output = tpl[-1]
+            rn = tpl[0]
+        #for tpl in tpll:
+        #    rn,pref_cur = tpl[:2]
+
+            corresp,all_info = loadRunCorresp(tpll[cpi][-1])
+            ind,pgn,nice_name = corresp[prefix]
+
+            output = tpl[-1]
+            medcond = rn.split('_')[1]
+            print(prefix,pgn)
+            if pgn != 'LFP':
+                if mode == 'only':
+                    assert dict( output['cmd'][0] )['--parcel_group_names'] == pgn
+                elif mode == 'exclude':
+                    assert dict( output['cmd'][0] )['--parcel_group_names'] == '!'+pgn
+
+            # all feats perf
+            r = output['XGB_analysis_versions']['all_present_features']
+            perf_one_number = _extractPerfNumber (r['perf_dict'], score )
+
+            improvement_wrt_base = perf_one_number - perfs_base_per_medcond[medcond]   # prob (range is 0 to 1)
+
+            #improvement = perf_one_number  - perfs_aver_per_medcond[p]   # prob (range is 0 to 1)
+            #LFPkey =f'onlyH_act_{mode}15'
+            #if LFPkey in perfs_per_medcond[medcond]:
+            #    improvement_wrt_LFP = perf_one_number - perfs_per_medcond[medcond][LFPkey]
+            #else:
+            #    improvement_wrt_LFP = None
+
+            if inv_exclude and mode == 'exclude':
+                improvement_wrt_base = -improvement_wrt_base
+            #    improvement = -improvement
+            #    if improvement_wrt_LFP is not None:
+            #        improvement_wrt_LFP =- improvement_wrt_LFP
+
+            impr_wrt_base_per_medcond_per_pgn[medcond][pgn] = improvement_wrt_base * 100  # now in pct
+            #impr_per_medcond_per_pgn[medcond][pgn] = improvement * 100  # now in pct
+            #if improvement_wrt_LFP is not None:
+            #    impr_wrtLFP_per_medcond_per_pgn[medcond][pgn] = improvement_wrt_LFP * 100
+            #if printLog:
+            #    print(prefix,pgn, medcond,improvement * 100)
+
+    #  base_perf_low_prefix]
+    for medcond in perfs_base_per_medcond:
+        impr_wrt_base_per_medcond_per_pgn[medcond]['base_low'] = perfs_base_per_medcond[medcond]
+
+    return impr_wrt_base_per_medcond_per_pgn
+
 def plotTableInfoBrain(impr_per_medcond_per_pgn , medcond,
                        multi_clf_output, head_subj_ind=None,
                        inv_exclude=True, mode='only',
@@ -5794,31 +6657,43 @@ def plotTableInfoBrain(impr_per_medcond_per_pgn , medcond,
 
 
     #############################
-    brain_area_labels = ['unlabeled'] + list( sorted( gp.parcel_groupings_post.keys() ) )
-    intensities = [np.nan] * len(brain_area_labels)
-    srcgrp_new = np.nan * np.ones( len(srcgrp) )
-    for pgn in impr_per_medcond_per_pgn[medcond]:
-        if pgn == 'LFP':
-            continue
+    srcgrp_new, brain_area_labels, intensities = updateSrcGroups(impr_per_medcond_per_pgn[medcond], roi_labels, srcgrp,
+            use_both_sides = True, want_sided = True )
+    #brain_area_labels = ['unlabeled'] + list( sorted( gp.parcel_groupings_post.keys() ) )
+    #intensities = [np.nan] * len(brain_area_labels)
+    #srcgrp_new = np.nan * np.ones( len(srcgrp) )
+    #for pgn in impr_per_medcond_per_pgn[medcond]:
+    #    if pgn in ['LFP'] or pgn.startswith('base_'):
+    #        continue
 
-        parcel_labels = gp.parcel_groupings_post[pgn] #without side information
-        if pgn == 'Cerebellum':
-            sidestr = '_R'
-        else:
-            sidestr = '_L'
-        parcel_inds = [ roi_labels.index(pl + sidestr) for pl in parcel_labels ]
-        #parcel_inds += [ roi_labels.index(pl + '_R') for pl in parcel_labels ]
+    #    #TODO SIDE
+    #    if pgn.endswith('_L') or pgn.endswith('_R'):
+    #        pgn_eff = pgn[:-2]
+    #        sided = True
+    #    elif pgn.endswith('_B'):
+    #        pgn_eff = pgn[:-2]
+    #        sided = False
+    #    else:
+    #        pgn_eff = pgn
+    #        sided = False
+    #    parcel_labels = gp.parcel_groupings_post[pgn_eff] #without side information
+    #    if pgn == 'Cerebellum':
+    #        sidestr = '_R'
+    #    else:
+    #        sidestr = '_L'
+    #    parcel_inds = [ roi_labels.index(pl + sidestr) for pl in parcel_labels ]
+    #    #parcel_inds += [ roi_labels.index(pl + '_R') for pl in parcel_labels ]
 
-        ind = brain_area_labels.index(pgn)
-        for pi in parcel_inds:
-            srcgrp_new[srcgrp==pi]  = ind
+    #    ind = brain_area_labels.index(pgn_eff)
+    #    for pi in parcel_inds:
+    #        srcgrp_new[srcgrp==pi]  = ind
 
-        #brain_area_labels += [pgn]
+    #    #brain_area_labels += [pgn]
 
-        intensity_cur = impr_per_medcond_per_pgn[medcond][pgn] * intensity_mult
-        #print(pgn,ind, intensity_cur)
-        intensities[ind ]= intensity_cur #cmap(intensity_cur)  #* len(parcel_inds)
-    assert np.any( ~np.isnan( srcgrp_new ) )
+    #    intensity_cur = impr_per_medcond_per_pgn[medcond][pgn] * intensity_mult
+    #    #print(pgn,ind, intensity_cur)
+    #    intensities[ind ]= intensity_cur #cmap(intensity_cur)  #* len(parcel_inds)
+    #assert np.any( ~np.isnan( srcgrp_new ) ), srcgrp[ np.isnan( srcgrp_new ) ]
     #intensities = np.zeros(len(roi_labels))
     #intensities
     ###########################################
@@ -5857,6 +6732,9 @@ def plotTableInfoBrain(impr_per_medcond_per_pgn , medcond,
 
     info=dict(coords=coords,
         brain_area_labels=brain_area_labels,
+        roi_labels=roi_labels,
+        srcgrp0 = srcgroups_dict[sgdn],
+        srcgrp = srcgrp,
         srcgrp_new=srcgrp_new,
         color_grouping=roi_lab_codes,
         intensities = intensities,
@@ -5944,11 +6822,71 @@ def plotTableInfoBrain(impr_per_medcond_per_pgn , medcond,
     #plt.colorbar();
     #plotTableInfoBrain(impr_per_medcond_per_pgn, output)
 
+def updateSrcGroups(ipmpp, roi_labels, srcgrp, use_both_sides = True, want_sided = True ):
+    from globvars import gp
+    #medcond = 'on'
+    #ipmpp = info['impr_per_medcond_per_pgn'][medcond]
+    if want_sided:
+        brain_area_labels = ['unlabeled'] + list( sorted( gp.parcel_groupings_post_sided.keys() ) )
+    else:
+        brain_area_labels = ['unlabeled'] + list( sorted( gp.parcel_groupings_post.keys() ) )
+    intensities = [np.nan] * len(brain_area_labels)
+    srcgrp_new = np.nan * np.ones( len(srcgrp) )
+    print(len(ipmpp))
+    for pgn in ipmpp:
+        if (pgn in ['LFP']) or pgn.startswith('base_'):
+            continue
+
+        if pgn.endswith('_L') or pgn.endswith('_R'):
+            if want_sided:
+                pgn_eff = pgn
+            else:
+                pgn_eff = pgn[:-2]
+            sided = True
+        elif pgn.endswith('_B'):
+            pgn_eff = pgn[:-2]
+            sided = False
+        else:
+            pgn_eff = pgn
+            sided = False
+        assert want_sided == sided
+
+        if sided:
+            parcel_labels = gp.parcel_groupings_post_sided[pgn_eff]
+        else:
+            parcel_labels = gp.parcel_groupings_post[pgn_eff] #without side information
+
+        if not use_both_sides:
+            # TODO: use contralat instead of fixed
+            if pgn == 'Cerebellum':
+                sidestr = '_R'
+            else:
+                sidestr = '_L'
+            parcel_inds = [ roi_labels.index(pl + sidestr) for pl in parcel_labels ]
+        else:
+            parcel_inds = [ roi_labels.index(pl) for pl in parcel_labels ]
+        #parcel_inds += [ roi_labels.index(pl + '_R') for pl in parcel_labels ]
+
+        ind = brain_area_labels.index(pgn_eff)
+        for pi in parcel_inds:
+            srcgrp_new[srcgrp==pi]  = ind
+            #print(srcgrp_new[srcgrp==pi])
+
+        #brain_area_labels += [pgn]
+
+        intensity_cur = ipmpp[pgn] #* intensity_mult
+        #print(pgn,ind, intensity_cur)
+        intensities[ind ]= intensity_cur #cmap(intensity_cur)  #* len(parcel_inds)
+    assert np.any( ~np.isnan( srcgrp_new ) ), srcgrp[ np.isnan( srcgrp_new ) ]
+    return srcgrp_new, brain_area_labels, intensities
+
 def getLogFname(mco,folder = '$OSCBAGDIS_DATAPROC_CODE/slurmout'):
     jobid = dict(mco['cmd'][0] )['--SLURM_job_id']
     fname = f'ML_{jobid}.out'
     folder = os.path.expandvars(folder)
     fname_full = pjoin(folder, fname)
+    if not os.path.exists(fname_full):
+        fname_full = pjoin(folder,'_backup', fname)
     return fname_full
 
 def copyLogFname(mco, newfname = '_logfile_to_observe.out' ):
@@ -5973,16 +6911,27 @@ def printLogPart(mco, text_to_find = 'Start classif' ):
     print(lines[lineind, :] )
 
 def filterOutputs(outputs_grouped,rns=None,prefs=None,grps=None,its=None):
+    import utils
+    # % -- main move side let
     outputs_res = {}
     if rns is None:
         rns = outputs_grouped.keys()
     for rn in rns:
+        subj = rn.split('_')[0]
+        mainmoveside = gv.gen_subj_info[subj].get('move_side',None)
+        assert mainmoveside is not None
+        movesidelet = mainmoveside[0].upper()
+        moveopsidelet = utils.getOppositeSideStr( movesidelet )
+
         outputs_res[rn] = {}
         o_cur_rn = outputs_grouped[rn]
         prefs_cur = o_cur_rn.keys()
         if prefs is not None:
             prefs_cur = prefs
         for pref in prefs_cur:
+            pref = pref.replace('%', moveopsidelet)
+            pref = pref.replace('^', movesidelet)
+
             o_cur_pref = o_cur_rn.get(pref, None)
             if o_cur_pref is None:
                 continue
@@ -6017,7 +6966,6 @@ def printOutputInfo(output_per_raw, datinfo = 'prefix', autosort = False, sort_d
 
     assert not ( autosort and (sort_dict is not None) ), 'two sortings at the same time does not make sense'
 
-    import utils_postprocess as pp
     prefix_sort = None
     if sort_dict is not None:
         assert len(sort_dict) == 1
@@ -6027,7 +6975,7 @@ def printOutputInfo(output_per_raw, datinfo = 'prefix', autosort = False, sort_d
             raise ValueError('not implemented')
         prefix_sort = v
 
-    tpll = pp.multiLevelDict2TupleList(output_per_raw,4,3, prefix_sort= prefix_sort)
+    tpll = multiLevelDict2TupleList(output_per_raw,4,3, prefix_sort= prefix_sort)
     for tpl in tpll:
         rn,prefix,grouping,it = tpl[:-1]
 
@@ -6096,5 +7044,6 @@ def recurseMultiLevelDict(d, prefix=None, sep='/'):
             yield from recurseMultiLevelDict(value, prefix + [key])
         else:
             yield sep.join(prefix + [key, value])
+
 
 #print(list(recurse(dirDict)))

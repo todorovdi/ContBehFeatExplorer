@@ -3980,10 +3980,16 @@ def dupValsWithinParcel(labels_cur,srcgroups, val_per_label):
 #     xs = []
 #     ys = []
 #     zs = []
-    BAD_VAL = -10000
+    #BAD_VAL = -10000
     BAD_VAL = 0
     srcgroups[np.isnan(  srcgroups) ] = BAD_VAL
     srcgroups = srcgroups.astype(int)
+
+    # has to be sorted
+    assert isinstance(val_per_label,list) or isinstance(val_per_label,np.ndarray)
+
+    if isinstance(val_per_label,dict):
+        assert set(val_per_label.keys()) == set(labels_cur)
 
     #srcgroups_int = srcgroups[~np.isnan(scrgroups) ].astype(int)
     #u = set(srcgroups_int )
@@ -3995,7 +4001,7 @@ def dupValsWithinParcel(labels_cur,srcgroups, val_per_label):
     assert len(labels_cur) == len(val_per_label), ( len(labels_cur), len(val_per_label) )
     #assert set( u[u>BAD_VAL] ) == set(np.arange(len(labels_cur) ) ), (set( u[u>BAD_VAL] ), set(np.arange(len(labels_cur) ) ) )
     assert set( u ) == set(np.arange(len(labels_cur) ) ), (set( u[u>BAD_VAL] ), set(np.arange(len(labels_cur) ) ) )
-    val_per_label = np.array(val_per_label)
+    #val_per_label = np.array(val_per_label)
     newvals = np.ones(len(srcgroups)) * np.nan
 
 
@@ -4004,7 +4010,10 @@ def dupValsWithinParcel(labels_cur,srcgroups, val_per_label):
         group_code = grpi
         inds = np.where(srcgroups == group_code)[0]
         #print(inds)
-        newvals[inds] = val_per_label[grpi]
+        if isinstance(val_per_label, list) or isinstance(val_per_label, np.ndarray):
+            newvals[inds] = val_per_label[grpi]
+        elif isinstance(val_per_label, dict):
+            newvals[inds] =  val_per_label[lab]
         #x,y,z = positions[inds].T
         #mam.points3d(x,y,z, scale_factor=0.5, color = tuple(clrs[grpi]) )
         #ax_top.scatter(xs,ys,zs,color=tuple(clrs[grpi]), s=msz)
@@ -4315,10 +4324,14 @@ def genRecInfoFn(rawname_,sources_type,src_file_grouping_ind):
     r = '{}_{}_grp{}_src_rec_info.npz'.format(rawname_,sources_type,src_file_grouping_ind)
     return r
 
-def genPrepDatFn(rawn, new_main_side, data_modalities, use_main_LFP_chan, src_file_grouping_ind,
-                 src_grouping):
-    fn_suffix_dat = 'dat_{}_newms{}_mainLFP{}_grp{}-{}.npz'.format(','.join(data_modalities),
-                                                                   new_main_side[0].upper(),
+def genPrepDatFn(rawn, new_main_body_side, data_modalities, use_main_LFP_chan, src_file_grouping_ind,
+                 src_grouping,body_side_to_use):
+    assert isinstance(body_side_to_use,str), body_side_to_use
+    # OMS = old main side
+    # NMS = new main side
+    fn_suffix_dat = 'dat_{}_OMS{}_NMS{}_mainLFP{}_grp{}-{}.npz'.format(','.join(data_modalities),
+                                                                          body_side_to_use,
+                                                                   new_main_body_side[0].upper(),
                                                                 use_main_LFP_chan,
                                                                 src_file_grouping_ind, src_grouping)
 
@@ -4326,10 +4339,11 @@ def genPrepDatFn(rawn, new_main_side, data_modalities, use_main_LFP_chan, src_fi
     return fname
 
 def genStatsFn(rawnames,
-               new_main_side, data_modalities, use_main_LFP_chan, src_file_grouping_ind,
-                 src_grouping, prefix=None):
-    fn_suffix_dat = 'dat_{}_newms{}_mainLFP{}_grp{}-{}.npz'.format(','.join(data_modalities),
-                                                                   new_main_side[0].upper(),
+               new_main_body_side, data_modalities, use_main_LFP_chan, src_file_grouping_ind,
+                 src_grouping, body_side_to_use, prefix=None):
+    fn_suffix_dat = 'dat_{}_OMS{}_NMS{}_mainLFP{}_grp{}-{}.npz'.format(','.join(data_modalities),
+                                                                          body_side_to_use,
+                                                                   new_main_body_side[0].upper(),
                                                                 use_main_LFP_chan,
                                                                 src_file_grouping_ind, src_grouping)
 
@@ -4343,11 +4357,12 @@ def genStatsFn(rawnames,
     return fname_stats
 
 def genStatsMultiBandFn(rawnames,
-               new_main_side, data_modalities, use_main_LFP_chan, src_file_grouping_ind,
-                 src_grouping, bands_precision, prefix=None):
-    fn_suffix_dat = '{}_dat_{}_newms{}_mainLFP{}_grp{}-{}.npz'.format(bands_precision,
+               new_main_body_side, data_modalities, use_main_LFP_chan, src_file_grouping_ind,
+                 src_grouping, bands_precision, body_side_to_use, prefix=None):
+    fn_suffix_dat = '{}_dat_{}_OMS{}_NMS{}_mainLFP{}_grp{}-{}.npz'.format(bands_precision,
                                                                       ','.join(data_modalities),
-                                                                   new_main_side[0].upper(),
+                                                                          body_side_to_use,
+                                                                   new_main_body_side[0].upper(),
                                                                 use_main_LFP_chan,
                                                                 src_file_grouping_ind, src_grouping)
 
@@ -4359,6 +4374,17 @@ def genStatsMultiBandFn(rawnames,
         inds_str = ','.join(l )
         fname_stats = 'stats_{}_{}_'.format(inds_str,nr)  + fn_suffix_dat
     return fname_stats
+
+def genFeatFn(rawname_,st, nch, nfeats, skip, windowsz,
+                src_file_grouping_ind, src_grouping, new_main_body_side, crop_start=None,crop_end=None):
+    crp_str = ''
+    if crop_end is not None:
+        crp_str = '_crop{}-{}'.format(int(crop_start),int(crop_end) )
+    fn = '{}_feats_NMS{}_{}_{}chs_nfeats{}_skip{}_wsz{}_grp{}-{}{}.npz'.\
+        format(rawname_,new_main_body_side,st,nch, nfeats, skip, windowsz,
+                src_file_grouping_ind, src_grouping, crp_str)
+    return fn
+
 
 def genMLresFn(rawnames, sources_type, src_file_grouping_ind, src_grouping,
             prefix, n_channels, nfeats_used,

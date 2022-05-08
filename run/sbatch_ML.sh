@@ -8,11 +8,14 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=128
-
-#SBATCH --time=10:00:00
 #SBATCH --partition=batch
-##SBATCH --mem=60G
-#SBATCH --mem=128G
+
+##SBATCH --time=10:00:00
+##SBATCH --mem=128G
+
+#SBATCH --time=09:30:00
+#SBATCH --mem=50G
+#SBATCH --array=0-88
 
 ##SBATCH --mem=80G
 ##SBATCH --partition=batch
@@ -36,14 +39,9 @@
 
 ##SBATCH --array=0,3
 ##SBATCH --array=166  modLFP for S03
-#SBATCH --array=0-42
 
 # *** start of job script ***
 ##source set_oscabagdis_env_vars.sh
-
-##RUNSTRINGS_FN="_runstrings.txt"
-##mapfile -t RUNSTRINGS < $RUNSTRINGS_FN
-##num_runstrings=${#RUNSTRINGS[*]}
 
 ## export OMP_NUM_THREADS=${SLURM_CPUS_PER_TASK}
 ### srun is for MPI programs
@@ -53,6 +51,9 @@
 #srun --exclusive -n 128 ./mpi-prog1 &
 #srun --exclusive -n 128 ./mpi-prog2 &
 #wait
+##RUNSTRINGS_FN="_runstrings.txt"
+##mapfile -t RUNSTRINGS < $RUNSTRINGS_FN
+##num_runstrings=${#RUNSTRINGS[*]}
 
 jutil env activate -p icei-hbp-2020-0012
 
@@ -87,6 +88,10 @@ pwd
 
 export PYTHONPATH=$PYTHONPATH:$PROJECT/OSCBAGDIS/LOCAL/lib/python3.9/site-packages
 
+EXIT_IF_ANY_FAILS=0
+NFAILS=0
+NRUNS=0
+
 RUNSTRINGS_FN="$CODE/run/_runstrings_ML.txt"
 
 SHIFT_ID=0
@@ -94,7 +99,7 @@ SHIFT_ID=0
 #echo "Running job array number: ${ID} (effctive_id = $EFF_ID) on $HOSTNAME,  $SLURM_JOB_ID, $SLURM_ARRAY_JOB_ID"
 #$OSCBAGDIS_DATAPROC_CODE/run/srun_exec_runstr.sh $RUNSTRINGS_FN $SLURM_ARRAY_JOB_ID $EFF_ID
 
-MAXJOBS=256
+MAXJOBS=256 # better this than 64, otherwise more difficult on the level of indtool
 
 NUMRS=`wc -l $RUNSTRINGS_FN | awk '{print $1;}'`
 echo "Start now"
@@ -104,10 +109,41 @@ while [ $NUMRS -gt $SHIFT_ID ]; do
     break
   fi
   echo "Running job array number: ${ID} (effctive_id = $EFF_ID) on $HOSTNAME,  $SLURM_JOB_ID, $SLURM_ARRAY_JOB_ID"
+  #python -c "1/0"
+
   $OSCBAGDIS_DATAPROC_CODE/run/srun_exec_runstr.sh $RUNSTRINGS_FN $SLURM_ARRAY_JOB_ID $EFF_ID $ID
+  EXCODE=$?
+
+  #EXCODE=0
+  echo "---!!!--- Current run error code: $EXCODE"
+  if [[ $EXCODE -ne 0 ]]; then 
+    NFAILS=$((NFAILS + 1))
+    echo "NFAILS=$NFAILS"
+  fi
+
+  if [[ $EXCODE -ne 0 ]] && [[ $EFF_ID -eq 0 ]]; then
+    echo "Exiting due to bad error code in test :("
+    exit $EXCODE
+  fi
+
+  if [[ $EXCODE -ne 0 ]] && [[ $EXIT_IF_ANY_FAILS -ne 0 ]]; then
+    echo "Exiting due to bad error code :("
+    exit $EXCODE
+  fi
   SHIFT_ID=$((SHIFT_ID + MAXJOBS))
 
+  echo "----------------"
+  echo "----------------"
+  echo "----------------"
+  echo "----------------"
+  echo "FINISHED job array number: ${ID} (effctive_id = $EFF_ID) on $HOSTNAME,  $SLURM_JOB_ID, $SLURM_ARRAY_JOB_ID"
+  NRUNS=$((NRUNS + 1))
   ##########################  ONLY FOR RUNNING OF INDIVID JOBS
-  break
+  #break
   ##########################
 done
+
+
+echo "---!!!--- END OF EVERYTHING: failed $NFAILS of $NRUNS "
+echo "---!!!--- End error code: $NFAILS"
+exit $NFAILS  # added afterrunning job 233971

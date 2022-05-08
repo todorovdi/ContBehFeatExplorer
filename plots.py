@@ -1,5 +1,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
+from os.path import join as pjoin
+import os
 
 def plotStepsWbd(dat_stepped, wbd, sfreq, ax=None):
     # to compare windowing with actual data
@@ -92,8 +94,8 @@ def shadeAnn(ax,anns,ymin,ymax,color='red',alpha=0.2, sfreq=256, skip=32, plot_b
     #return attrs_per_descr, descrs_were_shown
     return attrs_per_descr, descrs
 
-
-def plotMeansPerIt(ax,anns,means_per_it,chi, sfreq=256, plot_bins=0,
+def plotStatsPerIt(ax,anns,means_per_it,stds_per_it,
+                   chi, sfreq=256, plot_bins=0,
                    alpha=0.5,ls=':', attrs_per_descr=None, c=None,lw=None,
                    printLog = False):
     ctr = 0
@@ -104,10 +106,11 @@ def plotMeansPerIt(ax,anns,means_per_it,chi, sfreq=256, plot_bins=0,
         if means_per_it is not None:
             if descr not in means_per_it:
                 if printLog:
-                    print(f'plotMeansPerIt: Warning: {descr} not in means_per_it')
+                    print(f'plotStatsPerIt: Warning: {descr} not in means_per_it')
                 continue
             ctr += 1
             me = means_per_it[descr][chi]
+            std = stds_per_it[descr][chi]
             ys = [me,me]
             xs = np.array( list(pa) )
             if plot_bins:
@@ -118,14 +121,22 @@ def plotMeansPerIt(ax,anns,means_per_it,chi, sfreq=256, plot_bins=0,
             elif c is not None:
                 color = c
             ax.plot(xs,ys, ls=ls, alpha=alpha, c=color, lw=lw)
-    if ctr == 0:
-        print(f'plotMeansPerIt: nothing was plotted because {set(anns.description)} are not part of  {means_per_it.keys()}')
 
+            middle = np.mean(list(pa) )
+            xs = [middle, middle]
+            ys = [me-std, me+std]
+            #print('vline ',xs,ys)
+            ax.plot(xs,ys, ls=ls, alpha=alpha, c=color, lw=lw)
+    if ctr == 0:
+        print(f'plotStatsPerIt: nothing was plotted because {set(anns.description)} are not part of  {means_per_it.keys()}')
 
 def plotDataAnnStat(rawnames,dat_pri,times_pri,chnames_pri,
                    dat_hires_pri=None,times_hires_pri=None,chnames_hires_pri=None,
                    anndict_per_intcat_per_rawn=None,
-                   indsets=None,means_per_iset=None,suptitle='', sfreq=256,
+                   indsets=None,
+                    means_per_iset=None, stds_per_iset=None,
+                    chnames_nicened_pri  = None,
+                    suptitle='', sfreq=256,
                    dat_dict=None,band=None,pdf=None, legend_loc = 'lower right',
                     chis_to_show = None, q_thr = 1e-3, mult_std = 3.5,
                     artif_height_prop = 0.3, ww=6, hh=2):
@@ -141,9 +152,9 @@ def plotDataAnnStat(rawnames,dat_pri,times_pri,chnames_pri,
 
     if chis_to_show is None:
         if (band is not None) and band.startswith('HFO'):
-            chis_to_show = dat_hires_pri[0].shape[0]
+            chis_to_show = range( dat_hires_pri[0].shape[0] )
         else:
-            chis_to_show = dat_pri[0].shape[0]
+            chis_to_show = range( dat_pri[0].shape[0] )
 
     nr = len(chis_to_show)
         #nr = dat_pri[0].shape[0]
@@ -188,6 +199,7 @@ def plotDataAnnStat(rawnames,dat_pri,times_pri,chnames_pri,
 
             me0,std0 = utsne.robustMean(dat_to_plot0,ret_std=1)
             if band is not None:
+                # rescale all to same size?
                 mn1,me1,mx1 = np.quantile(dat_to_plot, q_list)
                 std1 = np.std(dat_to_plot)
                 mn1 = min(0,mn1) # if positive..
@@ -206,6 +218,7 @@ def plotDataAnnStat(rawnames,dat_pri,times_pri,chnames_pri,
                 std = std0
 
                 ax.plot(times, dat_to_plot0  ,c=rawc,alpha=0.1)
+            ax.set_xlim(times[0], times[-1] )
 
 
             ann = anndict_per_intcat_per_rawn[rawn]['beh_state']
@@ -220,7 +233,6 @@ def plotDataAnnStat(rawnames,dat_pri,times_pri,chnames_pri,
             assert iseti0 == iseti
             #means_per_it = stats_multiband_flt_per_ct[ct]['stats_per_indset'][band][iseti][0] #['notrem_L']
 
-            means_per_it = means_per_iset[iseti]  #['notrem_L']
 
             #shadey_aftif = (mn, (mn+mx)/2); shadey_beh_state = ( (mn+mx)/2, mx)
             m = mult_std
@@ -231,12 +243,22 @@ def plotDataAnnStat(rawnames,dat_pri,times_pri,chnames_pri,
             shadey_beh_state[0] = shadey_aftif[1]
             #shadey_beh_state[0] = d * (1-artif_height_prop)
             #spl = me; shadey_aftif = (me - std, spl); shadey_beh_state = ( spl, me+std)
-            ax.set_title(f'{rawn} : {chn}')
+            ttl = f'{rawn} : {chn}'
+            if chnames_nicened_pri is not None:
+                chn_nice = chnames_nicened_pri[rawi][chi]
+                ttl += f' {chn_nice}'
+            ax.set_title(ttl)
             attrs = shadeAnn(ax,ann,*shadey_beh_state,color='red',alpha=0.4, sfreq=sfreq, skip=1, plot_bins = 0,
                      shift_by_anntype = 1, seed=1)
             shadeAnn(ax,ann_artif,*shadey_aftif,color='red',alpha=0.4, sfreq=sfreq, skip=1, plot_bins = 0,
                      shift_by_anntype = 1, seed=4)
-            plotMeansPerIt(ax,ann,means_per_it,chi, c='red', alpha=1.,lw=3)#,attrs_per_descr = attrs)
+
+            if means_per_iset is not None:
+                means_per_it = means_per_iset[iseti]  #['notrem_L']
+                stds_per_it  = stds_per_iset[iseti]  #['notrem_L']
+                #print('means_per_it',rawn,chn,means_per_it)
+                plotStatsPerIt(ax,ann,means_per_it,stds_per_it,
+                    chi, c='red', alpha=1.,lw=3)#,attrs_per_descr = attrs)
             ax.set_ylim( shadey_aftif[0], shadey_beh_state[1] )
             ax.legend(loc=legend_loc)
     plt.suptitle(f'{suptitle}')
@@ -316,7 +338,9 @@ def plotFeatsAndRelDat(rawnames,featnames_sel, dat_pri,chnames_all_pri,
 
 
     rowi_offset = 0
+    # plot extdat
     if extdat_pri is not None:
+        print('plotFeatsAndRelDat: Plotting extdat')
         rowi_offset = 1
 
         for rawi,rawn in enumerate(rawnames):
@@ -351,11 +375,11 @@ def plotFeatsAndRelDat(rawnames,featnames_sel, dat_pri,chnames_all_pri,
 
 
 
-    print('Plotting rawdata')
+    print('plotFeatsAndRelDat: Plotting rawdata')
     # plot raw data
     if dat_pri is not None or dat_hires_pri is not None:
         for rawi,rawn in enumerate(rawnames):
-            print(rawn)
+            print('plotFeatsAndRelDat: ',rawn)
             # LFP main chan would be 007
             for chni,chn in enumerate(chnames_involved):
                 ax = axs[chni + rowi_offset, rawi]
@@ -381,64 +405,65 @@ def plotFeatsAndRelDat(rawnames,featnames_sel, dat_pri,chnames_all_pri,
 
                 if xlim is not None:
                     ax.set_xlim(xlim)
+            #end for over chnames_involved
 
 
+                # Shade artifacts
+                descr_order = None
+                if anndict_per_intcat_per_rawn is not None:
+                    ann = anndict_per_intcat_per_rawn[rawn]['beh_state']
+                    if chn.startswith('msrc'):
+                        ann_artif = anndict_per_intcat_per_rawn[rawn]['artif']['MEG']
+                    else:
+                        ann_artif = anndict_per_intcat_per_rawn[rawn]['artif']['LFP']
+
+                    mn,mx = ax.get_ylim()
+                    shadey_aftif     = [mn, (mn+mx) * 0.5   ]
+                    shadey_beh_state = [shadey_aftif[0] , mx]
+
+                    d = (shadey_aftif[1] - shadey_aftif[0])
+                    shadey_aftif[1] = shadey_aftif[0] + d * artif_height_prop / 0.5
+                    shadey_beh_state[0] = shadey_aftif[1]
+                    ax.axhline(y=shadey_beh_state[0], ls=':' )
+
+                    attrs1, descr_order1 = shadeAnn(ax,ann,*shadey_beh_state,color='red',
+                                                    alpha=legend_alpha, sfreq=sfreq, skip=1, plot_bins = 0,
+                            shift_by_anntype = 1, seed=1,
+                            ann_color_dict=ann_color_dict,
+                            intervals_to_plot = beh_states_to_shade)
+                    attrs2, descr_order2 = shadeAnn(ax,ann_artif,*shadey_aftif,color='red',
+                                                    alpha=legend_alpha_artif, sfreq=sfreq, skip=1, plot_bins = 0,
+                            shift_by_anntype = 1, seed=4,ann_color_dict=ann_color_dict)
+                    descr_order = descr_order1 + descr_order2
 
 
-            descr_order = None
-            if anndict_per_intcat_per_rawn is not None:
-                ann = anndict_per_intcat_per_rawn[rawn]['beh_state']
-                if chn.startswith('msrc'):
-                    ann_artif = anndict_per_intcat_per_rawn[rawn]['artif']['MEG']
-                else:
-                    ann_artif = anndict_per_intcat_per_rawn[rawn]['artif']['LFP']
-
-                mn,mx = ax.get_ylim()
-                shadey_aftif     = [mn, (mn+mx) * 0.5   ]
-                shadey_beh_state = [shadey_aftif[0] , mx]
-
-                d = (shadey_aftif[1] - shadey_aftif[0])
-                shadey_aftif[1] = shadey_aftif[0] + d * artif_height_prop / 0.5
-                shadey_beh_state[0] = shadey_aftif[1]
-                ax.axhline(y=shadey_beh_state[0], ls=':' )
-
-                attrs1, descr_order1 = shadeAnn(ax,ann,*shadey_beh_state,color='red',
-                                                alpha=legend_alpha, sfreq=sfreq, skip=1, plot_bins = 0,
-                        shift_by_anntype = 1, seed=1,
-                        ann_color_dict=ann_color_dict,
-                        intervals_to_plot = beh_states_to_shade)
-                attrs2, descr_order2 = shadeAnn(ax,ann_artif,*shadey_aftif,color='red',
-                                                alpha=legend_alpha_artif, sfreq=sfreq, skip=1, plot_bins = 0,
-                        shift_by_anntype = 1, seed=4,ann_color_dict=ann_color_dict)
-                descr_order = descr_order1 + descr_order2
+                if roi_labels is not None:
+                    chn = utils.nicenMEGsrc_chnames([chn],roi_labels,srcgrouping_names_sorted)
+                    chn = chn[0]
+                #print('aaaaaaa ', f'{rawn} : {chn}')
+                ax.set_title(f'{rawn} : {chn}')
 
 
-            if roi_labels is not None:
-                chn = utils.nicenMEGsrc_chnames([chn],roi_labels,srcgrouping_names_sorted)
-                chn = chn[0]
-            ax.set_title(f'{rawn} : {chn}')
-
-
-            ax.legend(loc=legend_loc)
-            if descr_order is None:
                 ax.legend(loc=legend_loc)
-            else:
-                # default ordering of labels in legend is weird, I want it
-                # consistent
-                handles, labels = ax.get_legend_handles_labels()
-                assert tuple(sorted(labels) ) ==  tuple(sorted(descr_order )), \
-                    (sorted(labels), sorted(descr_order ))
-                handles_reord = [ handles[labels.index(lbl)] \
-                                 for lbl in descr_order ]
+                if descr_order is None:
+                    ax.legend(loc=legend_loc)
+                else:
+                    # default ordering of labels in legend is weird, I want it
+                    # consistent
+                    handles, labels = ax.get_legend_handles_labels()
+                    assert tuple(sorted(labels) ) ==  tuple(sorted(descr_order )), \
+                        (sorted(labels), sorted(descr_order ))
+                    handles_reord = [ handles[labels.index(lbl)] \
+                                    for lbl in descr_order ]
 
-                # just in case, not really needed
-                #p = [ (handles[labels.index(lbl)],lbl) \
-                #                 for lbl in all_it if lbl in labels ]
-                #handles2, labels2 = zip(*p)
+                    # just in case, not really needed
+                    #p = [ (handles[labels.index(lbl)],lbl) \
+                    #                 for lbl in all_it if lbl in labels ]
+                    #handles2, labels2 = zip(*p)
 
-                # sort both labels and handles by labels
-                #labels, handles = zip(*sorted(zip(labels, handles), key=lambda t: t[0]))
-                ax.legend(handles_reord, descr_order, loc=legend_loc)
+                    # sort both labels and handles by labels
+                    #labels, handles = zip(*sorted(zip(labels, handles), key=lambda t: t[0]))
+                    ax.legend(handles_reord, descr_order, loc=legend_loc)
 
 
         rowi_offset += len(chnames_involved)
@@ -868,6 +893,10 @@ def plotFeatsWithEverything(dat_pri, times_pri, X_pri, Xtimes_pri, dat_lfp_hires
                            fband_names_inc_HFO ):
     '''
     plots features AND raw data AND intermediate data separately for reach raw
+    it plots not all chans, but only the special_chns
+    test_plots_descr -- what actually we will plot (each in separate pdf):
+        chn_descrs, feat_types_actual_coupling, relevant_freqs, informal_descr, figname
+
     '''
     from os.path import join as pjoin
     import globvars as gv
@@ -900,15 +929,22 @@ def plotFeatsWithEverything(dat_pri, times_pri, X_pri, Xtimes_pri, dat_lfp_hires
 
         ds = tpd['chn_descrs']
         print('   ',tpd['informal_descr'])
-        desired_chns = [special_chns[chnd] for chnd in ds]
-        fts = tpd['feat_types_actual_coupling']
-        relevant_freqs = tpd['relevant_freqs']
-        print(ds,desired_chns)
-        print(fts,relevant_freqs)
+        if special_chns is not None:
+            desired_chns = [special_chns[chnd] for chnd in ds]
+            fts = tpd['feat_types_actual_coupling']
+            relevant_freqs = tpd['relevant_freqs']
+            print(ds,desired_chns)
+            print(fts,relevant_freqs)
 
-        featnames_sel = selectFeatNames(fts,relevant_freqs,desired_chns, feature_names_all,
-                                        fband_names=fband_names_inc_HFO)
-        print(featnames_sel)
+            featnames_sel = selectFeatNames(fts,relevant_freqs,desired_chns,
+                                            feature_names_all,
+                                            fband_names=fband_names_inc_HFO)
+            print(featnames_sel)
+        else:
+            from featlist import getFreqsFromParseRes
+            featnames_sel = feature_names_all
+            r = parseFeatNames(featnames_sel)
+            relevant_freqs = getFreqsFromParseRes(r)
 
         # select features related to these channels
         plotFeatsAndRelDat(rawnames, featnames_sel, dat_pri,subfeature_order_pri,
@@ -924,6 +960,7 @@ def plotFeatsWithEverything(dat_pri, times_pri, X_pri, Xtimes_pri, dat_lfp_hires
 
 
     #ct = 'medcond'
+        # plot second plot (for intermediate data -- filtered and bandpower) elsewhere
 
         tpl1 = (raw_perband_flt_pri,stats_multiband_flt,'flt')
         tpl2 = (raw_perband_bp_pri, stats_multiband_bp,'bp')
@@ -937,6 +974,7 @@ def plotFeatsWithEverything(dat_pri, times_pri, X_pri, Xtimes_pri, dat_lfp_hires
             #band = 'beta'
             #band = 'tremor'
                 means_per_iset = stat_dict['means'].get(band, None)
+                stds_per_iset = stat_dict['stds'].get(band, None)
                 indsets = stat_dict['indsets']
                 suptitle = f'combin={scale_data_combine_type}  band={band} dat_type={dat_type}'
 
@@ -949,10 +987,13 @@ def plotFeatsWithEverything(dat_pri, times_pri, X_pri, Xtimes_pri, dat_lfp_hires
                 chis = [subfeature_order_newsrcgrp_pri[0].index( chn ) for chn in chnames_involved]
 
                 plotDataAnnStat(rawnames, dat_pri, times_pri, subfeature_order_pri,
-                                dat_lfp_hires_pri,times_hires_pri,subfeature_order_lfp_hires_pri,
+                                dat_lfp_hires_pri,times_hires_pri,
+                                subfeature_order_lfp_hires_pri,
                                 anndict_per_intcat_per_rawn,
-                                indsets,means_per_iset,suptitle=suptitle,
-                                dat_dict=dat_dict,band=band,legend_loc='upper left',
+                                indsets,means_per_iset,stds_per_iset,
+                                suptitle=suptitle,
+                                dat_dict=dat_dict,band=band,
+                                legend_loc='upper left',
                             chis_to_show = chis)
                 plt.tight_layout()
                 pdf.savefig()
@@ -1154,7 +1195,6 @@ def plot3DValPerParcel(vals_per_source, val_LFP, vis_info, title,
         CBAR_STATE['bgcolor'] = 'white'
 
 
-    from os.path import join as pjoin
     import globvars as gv
 
     sind_str = ''
@@ -1329,3 +1369,217 @@ def plot3DValPerParcel(vals_per_source, val_LFP, vis_info, title,
 
 
     return sc
+
+
+def plotBrainPerSubj(sind_strs, vis_info_per_subj, source_coords, subdir, clim,
+                    countinfo,
+                     fix_vis_info = True,
+    plot_intremed = True,
+    figtitle_inc_durations = False,
+    figtitle_inc_LFP_plus_best = False,
+    use_mod_sourcegrid = 1,
+    show_supp = 0,
+    fit_to_brain_def = 0,
+    use_common_colorbar = 1,
+    colorbar_individ_show = 0,
+    base_key_name = 'base_low',
+    hhdef = 900,
+    wwdef = 300*4 + 200,
+    crop_out_def = (0,230,0,480),  #x,-y_top,-x_right,-y_bottom  # y counted top to bottom
+    radius_project = 1.3,
+    fit_to_brain = 0,
+    verbose=0,
+    save = True):
+
+
+    import globvars as gv
+    import utils
+
+    ####################################################################
+
+    if not use_common_colorbar:
+        clim = None
+
+    print('clim = ',clim)
+
+    renders = []
+
+    subdir_fig = pjoin(gv.dir_fig ,subdir) #'output'
+    if not os.path.exists(subdir_fig):
+        os.makedirs(subdir_fig)
+    #plot_intremed = False
+
+
+    ERRORS = []
+    empty = np.zeros( (hhdef, wwdef, 4) )
+    all_renders = np.zeros( (len(sind_strs) * hhdef, 2* wwdef, 4) )
+    fig_fnames_full = []
+    figtitles = []
+    plotinfos = {}
+    modes = ['LFPand_only']
+
+    for rowi,sind_str in enumerate(sind_strs):
+    #for sind_str in ['S03']:
+        if not fix_vis_info:
+            if sind_str == 'S07':
+                fit_to_brain = 0
+                radius_project = 2.1
+            else:
+                fit_to_brain = fit_to_brain_def
+                radius_project = 1.3
+        #infos[sind_str] = {}
+
+        for mode in  modes:  # exclude
+            for mmci,medcond in enumerate( ['off', 'on'] ):
+                plotinfo_cur = {}
+                plotinfos[(sind_str,medcond,mode)] = plotinfo_cur
+                if medcond == 'on' and sind_str == 'S03':
+                    ww2,hh2 = wwdef,hhdef
+                    x2,y2=0,0
+                    if crop_out is not None:
+                        x2 += crop_out_def[0]
+                        y2 += crop_out_def[1]
+                        ww2 -= crop_out_def[2]
+                        hh2 -= crop_out_def[3]
+                    render_result = empty[y2:y2+hh2,:][:,x2:x2+ww2]
+                    renders += [render_result]
+                    continue
+                ttl = f'brain_map_area_strength_{sind_str}_{medcond}'
+                print('Starting producing figure ',ttl)
+                fname_full = pjoin(gv.data_dir,subdir,f'EXPORT_{ttl}_medcond={medcond}_mode={mode}.npz')
+                f = np.load(fname_full,allow_pickle=1)
+                info_rel_LFP = f['info'][()]
+
+                fname_full2 = pjoin(gv.data_dir,subdir,\
+                    f'EXPORT_{ttl}_medcond={medcond}_mode=only.npz')
+                f2 = np.load(fname_full2,allow_pickle=1)
+                info_abs = f2['info'][()]
+
+                if sind_str == 'S01':
+                    info0 = info_rel_LFP
+
+                plotinfo_cur['fname_full'] = fname_full
+                plotinfo_cur['fname_full2'] = fname_full2
+                plotinfo_cur['info_pgn_rel_LFP'] = info_rel_LFP
+                plotinfo_cur['info_pgn_abs'] = info_abs
+
+                #infos[sind_str][medcond]['info2'] = info2
+
+                d = dict( zip(info_rel_LFP['brain_area_labels'], info_rel_LFP['intensities']) )
+                #intensitites = np.array(info['intensities'][1:] ) #/100
+                intensitites = np.array(info_rel_LFP['intensities'] ) #/100
+
+                try:
+                    vals_per_source = utils.dupValsWithinParcel(info_rel_LFP['brain_area_labels'],
+                                                                info_rel_LFP['srcgrp_new'], intensitites)
+                    #vals_per_source_list += [vals_per_source.copy()]
+            #         bads = np.isnan(vals_per_source)
+            #         #vals_per_source[bads ] = np.min( vals_per_source[ ~bads ]  )
+            #         vals_per_source[ bads ] = 0
+                    print('vals_per_source  min=', np.min( vals_per_source[~np.isnan(vals_per_source) ]),
+                          np.max( vals_per_source[~np.isnan(vals_per_source) ])
+
+                    if fix_vis_info:
+                        vi = vis_info_per_subj[sind_strs[0]  ]
+                        vi = dict(vi.items() ) # copy
+                        vi['headsurfgrid_verts'] = info0['coords']
+                        vi['headsurfgrid_mod_verts'] = source_coords
+                    else:
+                        vi = vis_info_per_subj[sind_str]
+                        vi = dict(vi.items() ) # copy
+                        vi['headsurfgrid_verts'] = info_rel_LFP['coords']
+
+                    title = f'{sind_str}_medcond={medcond.upper()}_mode={mode}_fit{fit_to_brain}'
+                    LFP_val = info_rel_LFP['impr_per_medcond_per_pgn'][medcond].get(base_key_name, None)
+                    #continue
+                    if LFP_val is None:
+                        LFP_val = info_abs['impr_per_medcond_per_pgn'][medcond][base_key_name]
+
+                    CB_vals = d.get("Cerebellum",None)
+                    if CB_vals is None:
+                        CB_vals = d["Cerebellum_L"],d["Cerebellum_R"]
+
+                    print(f'title={title}, CB intensity={CB_vals}, LFP={LFP_val}%, clim={clim}' )
+
+                    LFP_val = LFP_val * 100
+                    plotinfo_cur['LFP_val_mode=only'] = LFP_val
+                    plotinfo_cur['countinfo'] = countinfo[f'{sind_str}_{medcond}']
+
+                    impr_absolute = info_abs['impr_per_medcond_per_pgn'][medcond]
+                    best_area = max(impr_absolute, key=impr_absolute.get)
+                    #best = info2[best_area] #NO, it is single area W/O LFP!
+                    best = np.max(intensitites[~np.isnan(intensitites)]) + LFP_val
+                    #assert np.abs(best - best_) < 1e-2
+    #                 figtitle = f'{sind_str} {medcond.upper()}' +\
+    #                 f',   LFP perf={LFP_val:.1f}%,  LFP+{best_area}={best:.1f}%'
+                    figtitle = f'{sind_str} {medcond.upper()}' +\
+                    f',   LFP perf={LFP_val:.0f}%\n'
+                    if figtitle_inc_LFP_plus_best:
+                        figtitle += f'LFP+{best_area}={best:.0f}%'
+                    #figtitle += '\n' + countinfo2[f'{sind_str}_{medcond}']
+                    if figtitle_inc_durations:
+                        figtitle += '\n' + plotinfo_cur['countinfo']
+
+
+                    plotinfo_cur['figtitle'] = figtitle
+
+
+                    # max(my_dict, key=my_dict.get)
+                    #for fit_to_brain in [ 0,1]:
+                    #info['srcgrp_new'], info['color_group_labels'],
+                    figtitle_on_individ_plot = figtitle #+ f',   LFP perf={LFP_val:.2f}'
+                    figtitle_on_individ_plot = ''
+
+                    if show_supp:
+                        hh = None
+                    else:
+                        hh = hhdef
+                    #vis_info_per_subj[sind_str]
+                    val_LFP_for_3D = None #val_LFP
+                    if save:
+                        sc = plot3DValPerParcel(vals_per_source, val_LFP_for_3D, vi,
+                            figtitle_on_individ_plot, show_supp=show_supp, fit_supp_to_brain = fit_to_brain,
+                            radius_project=radius_project,
+                            brain_translucent=False , bgcolor='black',
+                            sources_visible = False,
+                            fit_to_brain= fit_to_brain, use_mod_sourcegrid=use_mod_sourcegrid,
+                            clim = clim, views=['top', 'left', 'right', 'bottom'],
+                            ww = wwdef, hh = hh,
+                            colorbar = colorbar_individ_show)
+
+                except AssertionError as e:
+                    #sys.exc_info()
+                    ERRORS += [(ttl + '_' + mode, e, traceback.format_exc())]
+                    print(str(e))
+                    continue
+
+
+                figfname_full= pjoin(gv.code_dir, subdir_fig,
+                        f'{title}_visbrain_rad{radius_project}.png')
+                figfname_crp_full= pjoin(gv.code_dir, subdir_fig,
+                        f'{title}_visbrain_rad{radius_project}_crp.png')
+                fig_fnames_full += [figfname_full]
+                figtitles += [figtitle]
+                if show_supp:
+                    crop_out = None
+                else:
+                    crop_out = crop_out_def
+
+                if save:
+                    render_result = plots.saveRenderVisBrainScene(sc,figfname_full, render_only = not plot_intremed,
+                                            crop_out = None)
+                    render_result = plots.saveRenderVisBrainScene(sc,figfname_crp_full, render_only = not plot_intremed,
+                                            crop_out = crop_out)
+                else:
+                    render_result = None
+
+
+
+                if save and (not show_supp):
+                    all_renders[rowi * hhdef:(rowi+1) * hhdef,:,:][:, mmci * wwdef: (mmci+1) * wwdef, : ] = sc.render()
+                #sc,render_result = r
+                renders += [render_result]
+                plotinfo_cur['render_result'] = render_result
+                plotinfo_cur['figfname_full'] = figfname_full
+
+    return plotinfos

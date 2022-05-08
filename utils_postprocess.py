@@ -791,6 +791,7 @@ def printSizeInfo(res_cur,depthcur=0,depthleft=0, units=1024**2, minsize=1):
     for k,s in  sorted( zip(keys,sz_per_key), key=lambda x: x[1], reverse=1 ) :
         if s/units >= minsize:
             print(f'{indent}{s/ units:.4f} Mb -- size of {k}' )
+    return sz_per_key
 
 
 from collections.abc import Iterable
@@ -960,6 +961,7 @@ def multiLevelDict2TupleList(d,min_depth=0,max_depth=99999, cur_depth = 0, prefi
         r = list(r)
     return r
 
+
 def groupOutputs(output_per_raw, prefixes = None, label_groupings=None,
                  int_types_sets=None, filter_by_spec=None, printLog=False):
     '''
@@ -1007,3 +1009,53 @@ def groupOutputs(output_per_raw, prefixes = None, label_groupings=None,
                 outputs_grouped[key] = []
             outputs_grouped[key] += [ tuple(spec_cur), oo[-1] ]
     return outputs_grouped
+
+
+def getBestLFP_clToMove(best_LFP_dict,subj,metric='balanced_accuracy',
+                        grp = 'merge_nothing', it = 'basic',
+                        prefix_type='modLFP_onlyH_act',
+                        brain_side='contralat_to_move',
+                        disjoint=True, exCB=False, drop_type='only'):
+    # disjoint either positive (bool) or negative (=subskip value)
+    import globvars as gb
+    mainmoveside = gv.gen_subj_info[subj].get('move_side',None)
+    maintremside = gv.gen_subj_info[subj].get('tremor_side',None)
+    if brain_side == 'contralat_to_move':
+        assert mainmoveside is not None
+        side = utils.getOppositeSideStr( mainmoveside )
+    elif brain_side in ['left','right','both']:
+        side = brain_side
+    elif brain_side in ['left_exCB', 'right_exCB']:
+        side = brain_side.split('_')[0]  # becasue STN is not in Cerebellum
+    else:
+        raise ValueError(f'wrong side {brain_side}')
+
+    if brain_side == 'both':
+        assert not exCB   # just because of runstrings I used to produce best LFP json
+    side_det_str = f'brain{side}'
+    #movesidelet = mainmoveside_cur[0].upper()
+    #contralat_to_move_sidelet = utils.getOppositeSideStr( movesidelet )
+    #side_det_str = f'brain{contralat_to_move_side}'
+    if exCB:
+        side_det_str += '_exCB'
+    if disjoint > 0:
+        side_det_str += '_disjoint'
+    elif disjoint < 0:
+        subskip = -disjoint
+        subskip2str = {8:'_disjoint',4:'_semidisjoint', 1:'' }
+        side_det_str += subskip2str[subskip]
+
+    if brain_side == 'contralat_to_move':
+        best_kind = 'best_LFP_contralat_to_move'
+    else:
+        best_kind = 'best_LFP'
+
+    g = f'{prefix_type}_{side_det_str},{grp},{it}'
+    best = best_LFP_dict[subj][g][metric][best_kind]
+
+    if drop_type != 'both':
+        best = best[drop_type]
+
+    if side != 'both':
+        assert best[3] == side[0].upper(), (best,side)  # otherwise we'll get 0 features
+    return best
