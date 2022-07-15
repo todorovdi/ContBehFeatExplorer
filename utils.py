@@ -953,7 +953,7 @@ def prepFreqs(min_freq = 3, max_freq = 400, min_freqres=2,
 
     return freqs, n_cycles, Ws, wsz_max
 
-def tfr(dat, sfreq, freqs, n_cycles, wsz, decim=1, n_jobs = None, mode ='valid'):
+def tfr(dat, sfreq, freqs, n_cycles, wsz, decim=1, n_jobs = None, mode ='valid',by_taper=False):
     '''
     takes 2-dim array dat nchans x nbins
     wsz is determined inside mne but I don't want to rewrite too much of their code
@@ -989,25 +989,34 @@ def tfr(dat, sfreq, freqs, n_cycles, wsz, decim=1, n_jobs = None, mode ='valid')
     #                                             n_jobs=n_jobs, decim =decim)
     print('tfr_array_multitaper input shape=',dat_.shape)
     # parallel only over channels
-    if mne.__version__ == '0.24.1':
-        tfrres = mne.time_frequency.tfr_array_multitaper(dat_, sfreq, freqs, n_cycles,
-                                                    n_jobs=n_jobs, decim =decim)
-        print('tfr_array_multitaper output shape=',tfrres.shape)
-        tfrres = tfrres[0]
-    else:
-        tfrres = mne.time_frequency.tfr_array_multitaper(dat_, sfreq, freqs, n_cycles,
-                                                    n_jobs=n_jobs, decim =decim)
-        print('tfr_array_multitaper output shape=',tfrres.shape)
+    tfrres = mne.time_frequency.tfr_array_multitaper(dat_, sfreq, freqs, n_cycles,
+                                                n_jobs=n_jobs, decim =decim, output='complex')
+    if tfrres.ndim == 5:
         tfrres = tfrres[0]
         # WARNING: naive average over tapers. Perhaps it's wrong for complex,
         # but let's solve it some other day
-        tfrres = tfrres.mean(axis=1)
-        #                                            n_jobs=n_jobs, decim =decim, output='complex')
-        #_compute_tfr( )
+        if not by_taper:
+            tfrres = tfrres.mean(axis=1)
+    else:
+        tfrres = tfrres[0]
 
-        #  elif output in ['complex', 'phase'] and method == 'multitaper':
-        #out = np.empty((n_chans, n_tapers, n_epochs, n_freqs, n_times), dtype)
-        #out = out.transpose(2, 0, 1, 3, 4)  -- epochs chans tapers
+    #if mne.__version__ == '0.24.1':
+    #    print('tfr_array_multitaper output shape=',tfrres.shape)
+    #    tfrres = tfrres[0]
+    #else:
+    #    tfrres = mne.time_frequency.tfr_array_multitaper(dat_, sfreq, freqs, n_cycles,
+    #                                                n_jobs=n_jobs, decim =decim)
+    #    print('tfr_array_multitaper output shape=',tfrres.shape)
+    #    tfrres = tfrres[0]
+    #    # WARNING: naive average over tapers. Perhaps it's wrong for complex,
+    #    # but let's solve it some other day
+    #    tfrres = tfrres.mean(axis=1)
+    #    #                                            n_jobs=n_jobs, decim =decim, output='complex')
+    #    #_compute_tfr( )
+
+    #    #  elif output in ['complex', 'phase'] and method == 'multitaper':
+    #    #out = np.empty((n_chans, n_tapers, n_epochs, n_freqs, n_times), dtype)
+    #    #out = out.transpose(2, 0, 1, 3, 4)  -- epochs chans tapers
     assert tfrres.ndim == 3
 
 
@@ -1075,7 +1084,10 @@ def tfr(dat, sfreq, freqs, n_cycles, wsz, decim=1, n_jobs = None, mode ='valid')
 
         first_ind = (wsz // 2) // decim
         last_offset = (wsz // 2) // decim
-        tfrres = tfrres[:,:,first_ind:-last_offset]
+        if by_taper:
+            tfrres = tfrres[:,:,:,first_ind:-last_offset]
+        else:
+            tfrres = tfrres[:,:,first_ind:-last_offset]
 
         window_boundaries_st =  np.arange(0,nbins_orig, decim  ) # we start from zero if wsz divide 2 and decim well
         window_boundaries_end = window_boundaries_st + wsz
@@ -3635,7 +3647,10 @@ def imputeInterpArtif(X, anns_artif, featnames, wbd_merged=None, nbins_total=Non
 
     import pandas as pd
     df = pd.DataFrame(X_artif_nan)
-    df = df.interpolate(axis=0)
+    df.interpolate(axis=0, method='linear', inplace=True)  # 1 would be across column
+    # interpolate does not correct values that are in the very beginning of the index :(
+    # fill them with 0 by hand
+    df.fillna(0,inplace=True)
     return df.to_numpy()
     #return df
 

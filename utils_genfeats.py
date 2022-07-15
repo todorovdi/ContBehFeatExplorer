@@ -907,6 +907,14 @@ def prepTFR(rawnames,anndict_per_intcat_per_rawn,
             dat_for_tfr = utils.imputeInterpArtif(dat_for_tfr.T,  artif_cur['LFP'] + artif_cur['MEG'], \
                                     chnames_tfr, sfreq=sfreq, in_place=False).T
 
+            if use_lfp_HFO:
+                dat_for_tfr2 = dat_lfp_hires_pri[rawind]
+                dat_for_tfr2 = utils.imputeInterpArtif(dat_for_tfr2.T,  artif_cur['LFP'], \
+                                        subfeature_order_lfp_hires, sfreq=sfreq_hires, in_place=False).T
+
+            assert not ( np.any( np.isnan ( dat_for_tfr ) ) or np.any( np.isinf ( dat_for_tfr ) ) )
+            assert not ( np.any( np.isnan ( dat_for_tfr2 ) ) or np.any( np.isinf ( dat_for_tfr2 ) ) )
+
 
             tfrres_,wbd = utils.tfr(dat_for_tfr, sfreq, freqs, n_cycles,
                                     windowsz, decim = skip // skip_div_TFR,
@@ -917,17 +925,14 @@ def prepTFR(rawnames,anndict_per_intcat_per_rawn,
             else:
                 tfrres = tfrres_
 
+            assert not ( np.any( np.isnan ( tfrres ) ) or np.any( np.isinf ( tfrres ) ) )
             if use_lfp_HFO:
 
                 #dat_for_tfr = dat_lfp_hires_scaled
                 #dat_for_tfr = dat_lfp_hires
-                dat_for_tfr = dat_lfp_hires_pri[rawind]
-
-                dat_for_tfr = utils.imputeInterpArtif(dat_for_tfr.T,  artif_cur['LFP'], \
-                                        subfeature_order_lfp_hires, sfreq=sfreq_hires, in_place=False).T
 
                 print('Starting TFR for LFP HFO data #{} with shape {}'.format(rawind,dat_for_tfr.shape) )
-                tfrres_LFP_,wbd_HFO = utils.tfr(dat_for_tfr, sfreq_hires, freqs_inc_HFO, n_cycles_inc_HFO,
+                tfrres_LFP_,wbd_HFO = utils.tfr(dat_for_tfr2, sfreq_hires, freqs_inc_HFO, n_cycles_inc_HFO,
                                     windowsz_hires, decim = skip_hires // skip_div_TFR, n_jobs=n_jobs_tfr)
                 if skip_div_TFR > 1:
                     raise ValueError('wbd not debugged for that')
@@ -949,6 +954,8 @@ def prepTFR(rawnames,anndict_per_intcat_per_rawn,
                 # goes first
                 #tfrres = np.concatenate( [tfrres, tfrres_LFP_LFO], axis=0 )
                 #chnames_tfr = chnames_tfr.tolist()  + subfeature_order_lfp_hires
+                assert not ( np.any( np.isnan ( tfrres_LFP_LFO ) ) or \
+                            np.any( np.isinf ( tfrres_LFP_LFO ) ) )
 
                 tfrres = np.concatenate( [tfrres_LFP_LFO, tfrres], axis=0 )
                 chnames_tfr =  subfeature_order_lfp_hires + chnames_tfr.tolist()
@@ -1152,7 +1159,7 @@ def prepCSD(cross_types,tfrres_pri,tfrres_LFP_HFO_pri,
                 tmp = tfrres_cur.reshape( (sh[0] * sh[1], sh[2] ) ).T
                 #scaler.fit( tmp )
 
-                tfr_mean,tfr_std = utsne.robustMean(tmp, axis=-1,ret_std=True,per_dim=1)
+                tfr_mean,tfr_std = robustMean(tmp, axis=-1,ret_std=True,per_dim=1)
                 tfrres_cur_ = (tmp - tfr_mean[:,None])/ tfr_std[:,None]
                 tfrres_cur_ = tfrres_cur_.reshape(  (sh[0], sh[1], sh[2] ) )
             csd_cur, csdord = tfr2csd(tfrres_cur_, sfreq, returnOrder=1,
