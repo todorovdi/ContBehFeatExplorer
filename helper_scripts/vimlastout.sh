@@ -1,4 +1,5 @@
 #!/usr/bin/bash
+slurmout_path=$CODE/slurmout
 ###!/usr/bin/python3
 #if [ $# -lt 1 ]; then
 #  echo "Need 1 argument -- index of job"
@@ -7,11 +8,11 @@
 #fi
 
 if [ $# -eq 0 ]; then
-  lastfilestr=`ls -ltr slurmout/*.out  | grep -v ^d | tail -1`
+  lastfilestr=`ls -ltr $slurmout_path/*.out  | grep -v ^d | tail -1`
 elif [ $# -eq 1 ]; then
-  lastfilestr=`ls -ltr slurmout/*_*_$1.out  | grep -v ^d | tail -1`
+  lastfilestr=`ls -ltr $slurmout_path/*_*_$1.out  | grep -v ^d | tail -1`
 elif [ $# -eq 2 ]; then
-  lastfilestr=`ls -ltr slurmout/*_$1_$2.out | grep -v ^d | tail -1`
+  lastfilestr=`ls -ltr $slurmout_path/*_$1_$2.out | grep -v ^d | tail -1`
 fi
 
 #echo "$lastfilestr"

@@ -406,6 +406,8 @@ def collectDataFromMultiRaws(rawnames, raws_permod_both_sides, sources_type,
     return dat_pri, dat_lfp_hires_pri, extdat_pri, anns_pri, anndict_per_intcat_per_rawn, times_pri,\
     times_hires_pri, subfeature_order_pri, subfeature_order_lfp_hires_pri, aux_info_per_raw
 
+#def computeTFRandCSD():
+
 # found on stackoverflow by someone called NaN. Some black magic I don't quite
 # understand
 def stride(a, win=(3, 3), stepby=(1, 1)):

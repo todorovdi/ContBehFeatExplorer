@@ -653,6 +653,14 @@ print('nPCA_comp = ',nPCA_comp)
 print(f'''do_XGB={do_XGB}, XGB_tree_method={XGB_tree_method},
           allow_CUDA={allow_CUDA}, allow_CUDA_MNE={allow_CUDA_MNE},
           gpus found={gv.GPUs_list}''')
+if allow_CUDA and gv.CUDA_state == 'ok':
+    #mne.utils.set_config('MNE_USE_CUDA', 'true')
+    mne.cuda.init_cuda()
+#if allow_CUDA:
+#    if len(gv.GPUs_list):
+#        print('GPU found, total GPU available = ',gv.GPUs_list)
+#    else:
+#        print('GPU not found')
 
 ############################
 rn_str = ','.join(rawnames)
@@ -2273,13 +2281,20 @@ if do_Classif:
                     print( r0['confmat_aver'] * 100 )
 
                     from utils_tSNE import extractSubperfs
-                    perf_per_cp = extractSubperfs(X_cur,class_labels_good_for_classif,
-                                    class_labels_good_for_classif_nm,
-                                    revdict_lenc, revdict_lenc_nm,
-                                    class_ind_to_check_lenc,
-                                    class_ind_to_check_lenc_nm,
-                                    r0['clf_objs' ], r0['test_indices_list'],
-                                    confmat = r0['confmat_aver'])
+                    import traceback
+                    perf_per_cp = None
+                    try:
+                        perf_per_cp = extractSubperfs(X_cur,class_labels_good_for_classif,
+                                        class_labels_good_for_classif_nm,
+                                        revdict_lenc, revdict_lenc_nm,
+                                        class_ind_to_check_lenc,
+                                        class_ind_to_check_lenc_nm,
+                                        r0['clf_objs' ], r0['test_indices_list'],
+                                        confmat = r0['confmat_aver'])
+                    except AssertionError as e:
+                        traceback_info = traceback.format_exc()
+                        rc['perf_per_cp' ] =  None
+                        rc['perf_per_cp_exc' ] =  (e, traceback_info)
                     rc['perf_per_cp' ] =  perf_per_cp
 
                     # here we do NO want the main interval typ to be of

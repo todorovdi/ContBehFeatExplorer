@@ -537,6 +537,9 @@ def filterFeats(feature_names_all, chnames_LFP, LFP_related_only, parcel_types,
         # sided
         all_parcels= roi_labels[gp.src_grouping_names_order[src_file_grouping_ind]]
 
+        motorlike_parcels = gp.parcel_groupings_post['Sensorimotor']
+        #motorlike_parcels = gp.areas_list_aal_my_guess
+
         bad_parcels = []
         if 'motor-related' in parcel_group_names:
             assert 'not_motor-related' not in parcel_group_names
@@ -544,11 +547,11 @@ def filterFeats(feature_names_all, chnames_LFP, LFP_related_only, parcel_types,
             # over all parcels
             for pcl1 in all_parcels:
                 pcl1_sideless = pcl1[:-2]
-                if pcl1_sideless not in gp.areas_list_aal_my_guess:
+                if pcl1_sideless not in motorlike_parcels:
                     bad_parcels += [pcl1_sideless + '_L' ]
                     bad_parcels += [pcl1_sideless + '_R' ]
                 # over motor without side
-                #for pcl2 in gp.areas_list_aal_my_guess:
+                #for pcl2 in motorlike_parcels:
                 #    # if
                 #    if pcl1.find(pcl2) < 0:
                 #        bad_parcels += [pcl1]
@@ -557,11 +560,11 @@ def filterFeats(feature_names_all, chnames_LFP, LFP_related_only, parcel_types,
         if 'not_motor-related' in parcel_group_names:
             # since parcel_types can be wihout side
             assert 'motor-related' not in parcel_group_names
-            for pcl1_sideless in gp.areas_list_aal_my_guess:
+            for pcl1_sideless in motorlike_parcels:
                 bad_parcels += [pcl1_sideless + '_L' ]
                 bad_parcels += [pcl1_sideless + '_R' ]
             #for pcl1 in all_parcels:
-            #    for pcl2 in gp.areas_list_aal_my_guess:
+            #    for pcl2 in motorlike_parcels:
             #        if pcl1.find(pcl2) >= 0:
             #            bad_parcels += [pcl1]
 

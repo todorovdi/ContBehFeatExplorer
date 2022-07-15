@@ -8,6 +8,7 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=128
+##SBATCH --partition=gpus
 #SBATCH --partition=batch
 
 ##SBATCH --time=10:00:00
@@ -15,7 +16,7 @@
 
 #SBATCH --time=09:30:00
 #SBATCH --mem=50G
-#SBATCH --array=0-88
+#SBATCH --array=0-256
 
 ##SBATCH --mem=80G
 ##SBATCH --partition=batch
@@ -55,11 +56,19 @@
 ##mapfile -t RUNSTRINGS < $RUNSTRINGS_FN
 ##num_runstrings=${#RUNSTRINGS[*]}
 
+#As there is only one GPU per node no additional option for the number of GPUs has to be given (--gres=gpu:1 is the default).
+#SBATCH --gres=gpu:1
+
+#exit 0
+
 jutil env activate -p icei-hbp-2020-0012
 
 JOBID=$SLURM_JOB_ID
 ID=$SLURM_ARRAY_TASK_ID
 
+    
+    #import pycuda
+    
 
 ##export PROJECT=$HOME/shared/OSCBAGDIS/data_proc
 ##export DATA=$HOME/shared/
@@ -80,6 +89,7 @@ module load Stages/2022
 module load GCC
 module load R
 module load Python
+module load CUDA
 
 echo "DATA_DUSS=$DATA_DUSS"
 
@@ -87,6 +97,7 @@ source $CODE/__workstart.sh
 pwd
 
 export PYTHONPATH=$PYTHONPATH:$PROJECT/OSCBAGDIS/LOCAL/lib/python3.9/site-packages
+export MNE_USE_CUDA=1
 
 EXIT_IF_ANY_FAILS=0
 NFAILS=0
@@ -103,7 +114,7 @@ MAXJOBS=256 # better this than 64, otherwise more difficult on the level of indt
 
 NUMRS=`wc -l $RUNSTRINGS_FN | awk '{print $1;}'`
 echo "Start now"
-echo "SBATCH TYPE: CPU MULTIRUN"
+echo "SBATCH TYPE: GPU MULTIRUN"
 while [ $NUMRS -gt $SHIFT_ID ]; do
   EFF_ID=$((ID+SHIFT_ID))
   if [ $EFF_ID -ge $NUMRS ]; then

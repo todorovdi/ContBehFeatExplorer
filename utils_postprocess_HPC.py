@@ -751,7 +751,7 @@ def plotCalcOutput(subdir, output_per_raw, to_show = [('trem_vs_all','merge_noth
         addBestParcelGroups(output_per_raw, table_info_per_perf_type, perf_tuple, score )
 
         k = list( table_info_per_perf_type.keys() )[0]
-        axs = postp.plotTableInfos_onlyBar(table_info_per_perf_type,
+        axs = plotTableInfos_onlyBar(table_info_per_perf_type,
                                            perf_tuple=perf_tuple,
                               output_subdir=subdir,use_recalc_perf=False,
                               prefixes_sorted=prefixes_final, prefix2final_name=prefix2final_name,
@@ -820,7 +820,8 @@ def plotCalcOutput(subdir, output_per_raw, to_show = [('trem_vs_all','merge_noth
 
 
 def addBestParcelGroups(output_per_raw, table_info_per_perf_type,
-                        perf_tuple, score='special:min(sens,spec)',do_add=True):
+                        perf_tuple, score='special:min(sens,spec)',do_add=True,
+                       remove_redundant_quasibest = True ):
     # modifies in place
     import re
     #import utils_postprocess_HPC as postp
@@ -988,7 +989,7 @@ def addBestParcelGroups(output_per_raw, table_info_per_perf_type,
             name_nice2 = d[prefix_LFP_best]['name_nice_best']
 
             prefix_quasibest = prefix_LFP_best.replace('onlyH_act_LFPand_best','onlyH_act_LFPand_quasibest')
-            if c1 and c2:
+            if (c1 and c2) or (not remove_redundant_quasibest):
                 #print(pdiff)
                 #assert nice_name.split()[-1].find( name_nice1.split()[-1] ) >= 0,  (nice_name_alt,  name_nice1)
                 #assert nice_name_alt.find(name_nice1) >= 0, (nice_name_alt,  name_nice1)
@@ -1006,7 +1007,7 @@ def addBestParcelGroups(output_per_raw, table_info_per_perf_type,
                     d[prefix_LFP_best]['name_nice_best'] = nice_name_alt
                     d[prefix_LFP_best]['parcel_group_name'] = pgn
 
-                if prefix_quasibest in d:
+                if prefix_quasibest in d and remove_redundant_quasibest:
                     del d[prefix_quasibest]
 
 
@@ -1081,7 +1082,8 @@ def plotOnePrefQuick(rawnames,table_info_per_perf_type, perf_to_use, pref = 'onl
 
         for coli,score in enumerate(scores):
             val = aa[tpl][pref_eff][score]
-            print(rn, axi, val * 100 )
+            if score == 'bacc':
+                print(pref, rn, score, f'{int(val * 100 )}%' )
 
             ax = axs[axi,coli]
             ax.barh([medcond ],[val * 100] )

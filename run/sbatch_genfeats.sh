@@ -10,9 +10,13 @@
 #SBATCH --cpus-per-task=128
 
 ###SBATCH --time=23:00:00
-#SBATCH --time=02:00:00
+#SBATCH --time=02:30:00
+##SBATCH --partition=gpus
 #SBATCH --partition=batch
-#SBATCH --mem=60G
+#SBATCH --mem=128G
+
+##SBATCH --partition=batch
+##SBATCH --mem=60G
 
 ## max array size = 256  (as shown by scontrol show config)
 ## 22 decent dataset 
@@ -51,6 +55,7 @@ ID=$SLURM_ARRAY_TASK_ID
 SHIFT_ID=0
 EFF_ID=$((ID+SHIFT_ID))
 echo "Running job array number: ${ID} (effctive_id = $EFF_ID) on $HOSTNAME,  $SLURM_JOB_ID, $SLURM_ARRAY_JOB_ID"
+export MNE_USE_CUDA=1
 
 
 ##export PROJECT=$HOME/shared/OSCBAGDIS/data_proc
@@ -72,6 +77,7 @@ module load Stages/2022
 module load GCC
 module load R
 module load Python
+module load CUDA
 
 echo "DATA_DUSS=$DATA_DUSS"
 

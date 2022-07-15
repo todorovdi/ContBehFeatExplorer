@@ -42,11 +42,10 @@ data_modalities = ['LFP', 'msrc']
 #data_modalities = ['LFP']
 #data_modalities = ['msrc']
 
-feat_types_all = gv.feat_types_all
 #features_to_use = [ 'con',  'H_act', 'H_mob', 'H_compl']  #csd includes tfr in my implementation
 #features_to_use = [ 'con',  'H_act', 'H_mob', 'H_compl', 'bpcorr']
 #features_to_use = [ 'con',  'H_act', 'H_mob', 'H_compl']
-features_to_use = feat_types_all
+features_to_use = gv.feat_types_all
 #features_to_use = [ 'H_act', 'H_mob', 'H_compl']  #csd includes tfr in my implementation
 #assert 'bandcorrel' not in features_to_use, 'Not implemented yet'
 #cross_types = [ ('LFP.*','.?src.*'), ('.*src_Cerebellum.*' , '.*motor-related.*' ) ]  # only couplings of LFP to sources
@@ -160,7 +159,8 @@ prescale_data = 1
 logH = 1
 feat_stats_artif_handling = 'reject'
 
-coupling_types = ['self', 'motorlike_vs_motorlike', 'LFP_vs_all']
+#coupling_types = ['self', 'motorlike_vs_motorlike', 'LFP_vs_all']
+coupling_types = ['self', 'motorlike_vs_motorlike_within_hemi', 'LFP_vs_all']
 DEBUG_shorten_couplings = 'no'   # use small set of channel coupling for faster computations
 ##############################
 
@@ -286,7 +286,7 @@ for opt,arg in pars.items():
         features_to_use_pre = arg.split(',')
         features_to_use = []
         for ftu in features_to_use_pre:
-            assert ftu in feat_types_all, ftu
+            assert ftu in gv.feat_types_all, ftu
             if ftu == 'Hjorth':
                 features_to_use += ['H_mob', 'H_act', 'H_compl' ]
             else:
@@ -410,15 +410,21 @@ rawnstr = ','.join(rawnames)
 test_mode = int(rawnames[0][1:3]) > 50
 crop_to_integer_second = False
 
+print('run_genfeats: n_jobs = {}, MNE_USE_CUDA = {}'.\
+      format(n_jobs, mne.utils.get_config('MNE_USE_CUDA')) )
 if allow_CUDA and gv.CUDA_state == 'ok':
+    #mne.utils.set_config('MNE_USE_CUDA', 'true')  # this hast be run once and NOT in parallel, otherwise config file gets currupted
     mne.cuda.init_cuda()
-print('run_genfeats: n_jobs = {}, MNE_USE_CUDA = {}'.format(n_jobs, mne.utils.get_config('MNE_USE_CUDA')) )
 #############
+motorlike_parcels = gp.parcel_groupings_post['Sensorimotor']
+#motorlike_parcels = gp.areas_list_aal_my_guess)
+
 assert set(coupling_types).issubset(set( gv.data_coupling_types_all ) )
 
 cross_types =  []
 if 'self' in coupling_types:
     cross_types += [ ('msrc_self','msrc_self'), ('LFP_self','LFP_self') ]
+# couples both within and across hemispheres
 if 'LFP_vs_all' in coupling_types:
     cross_types += [ ('LFP.*','.?src.*') ]
 if 'CB_vs_all' in coupling_types:
@@ -428,10 +434,10 @@ else:
     exclude_CB_interactions = 0
 
 if 'motorlike_vs_motorlike' in coupling_types:
-    for lbli in range(len(gp.areas_list_aal_my_guess)):
-        for lblj in range(lbli+1, len(gp.areas_list_aal_my_guess)):
-            lab1 = gp.areas_list_aal_my_guess[lbli]
-            lab2 = gp.areas_list_aal_my_guess[lblj]
+    for lbli in range(len(motorlike_parcels)):
+        for lblj in range(lbli+1, len(motorlike_parcels)):
+            lab1 = motorlike_parcels[lbli]
+            lab2 = motorlike_parcels[lblj]
             if exclude_CB_interactions and (lab1.find('Cerebellum') >= 0\
                     or lab2.find('Cerebellum') >= 0):
                 continue
@@ -440,6 +446,32 @@ if 'motorlike_vs_motorlike' in coupling_types:
             templ2 = '.?src_{}.*'.format(lab2)
             cross_types += [  (templ1 ,templ2 )  ]
             #for sides
+
+# couples ONLY WITHIN hemispheres
+if 'LFP_vs_all_within_hemi' in coupling_types:
+    cross_types += [ ('LFPL*','.?srcL*') ]
+    cross_types += [ ('LFPR*','.?srcR*') ]
+if 'CB_vs_all_within_hemi' in coupling_types:
+    raise ValueError('not implemented')
+else:
+    exclude_CB_interactions = 1
+
+
+if 'motorlike_vs_motorlike_within_hemi' in coupling_types:
+    for sidelet in ['L','R']:
+        for lbli in range(len(motorlike_parcels)):
+            for lblj in range(lbli+1, len(motorlike_parcels) ):
+                lab1 = motorlike_parcels[lbli]
+                lab2 = motorlike_parcels[lblj]
+                if exclude_CB_interactions and (lab1.find('Cerebellum') >= 0\
+                        or lab2.find('Cerebellum') >= 0):
+                    continue
+                #side = ?
+                templ1 = '.?src_{}*'.format(lab1 + sidelet)
+                templ2 = '.?src_{}*'.format(lab2 + sidelet)
+                cross_types += [  (templ1 ,templ2 )  ]
+                #for sides
+
 
 #ann_MEGartif_prefix_to_use = '_ann_MEGartif'
 ann_MEGartif_prefix_to_use = '_ann_MEGartif_flt'
@@ -1398,14 +1430,14 @@ if 'con' in features_to_use:
         if normalize_TFR == 'across_datasets':
             print('Start computing TFR stats for normalization')
             s1,s2,s3 = tfrres_pri[0].shape
-            s = np.zeros( (s1,s2 ), dtype=np.complex )
+            s = np.zeros( (s1,s2 ), dtype=complex )
             nb = 0
             for tfrres_cur in tfrres_pri:
                 s += np.sum(tfrres_cur, axis=-1)
                 nb += tfrres_cur.shape[-1]
             tfr_mean = s / nb
 
-            var = np.zeros( (s1,s2 ), dtype=np.complex )
+            var = np.zeros( (s1,s2 ), dtype=complex )
             for tfrres_cur in tfrres_pri:
                 y = tfrres_cur - tfr_mean[:,:,None]
                 var += np.sum( y * np.conj(y) , axis=-1)
@@ -1413,14 +1445,14 @@ if 'con' in features_to_use:
 
 
             s1,s2,s3 = tfrres_LFP_HFO_pri[0].shape
-            s = np.zeros( (s1,s2 ), dtype=np.complex )
+            s = np.zeros( (s1,s2 ), dtype=complex )
             nb = 0
             for tfrres_cur in tfrres_LFP_HFO_pri:
                 s += np.sum(tfrres_cur, axis=-1)
                 nb += tfrres_cur.shape[-1]
             tfr_LFP_HFO_mean = s / nb
 
-            var = np.zeros( (s1,s2 ), dtype=np.complex )
+            var = np.zeros( (s1,s2 ), dtype=complex )
             for tfrres_cur in tfrres_LFP_HFO_pri:
                 y = tfrres_cur - tfr_LFP_HFO_mean[:,:,None]
                 var += np.sum( y * np.conj(y) , axis=-1)

@@ -3801,10 +3801,13 @@ def prepareSourceGroups(labels,srcgroups_all):
 
     #--------------
 
-    motorlike_both_sides = [0] * len(gp.areas_list_aal_my_guess)*2
+    motorlike_parcels = gp.parcel_groupings_post['Sensorimotor']
+    #motorlike_parcels = gp.areas_list_aal_my_guess
+
+    motorlike_both_sides = [0] * len(motorlike_parcels)*2
     for i in range(len(motorlike_both_sides)):
         side_let = ['_L','_R'][i % 2]
-        motorlike_both_sides[i] = gp.areas_list_aal_my_guess[ i // 2 ] + side_let
+        motorlike_both_sides[i] = motorlike_parcels[ i // 2 ] + side_let
     #motorlike_both_sides
 
 

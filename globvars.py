@@ -30,7 +30,6 @@ global gparams
 global artifact_intervals
 global code_dir
 global data_dir
-global fig_dir
 global dir_fig
 global dir_fig_preproc
 global fbands
@@ -73,7 +72,6 @@ if os.environ.get('OUTPUT_OSCBAGDIS') is not None:
     dir_fig = os.path.expandvars('$OUTPUT_OSCBAGDIS')
 else:
     dir_fig = '.'
-fig_dir = dir_fig
 
 param_dir = pjoin(code_dir,'params')
 
@@ -105,6 +103,7 @@ try:
     except AttributeError as e:
         print(f'CUDA presence: {e}')
     CUDA_state = 'ok'
+    print('GPU found, total GPU available = ',GPUs_list)
 except (ImportError,ValueError) as e:
     if not hostname.startswith('jsfc'):
         print(e)
@@ -194,7 +193,7 @@ class globparams:
         print("NOW is ", dt.strftime(self.time_format_str) )
 
         self.hostname = socket.gethostname()
-        if not self.hostname.startswith('jsfc'):
+        if self.hostname.startswith('jsfc'):
             print('Hostname = ',self.hostname)
         else:
             try:
@@ -240,6 +239,8 @@ class globparams:
 
 
         self.int_types_basic = ['trem', 'notrem', 'hold', 'move']
+        self.int_types_basic_sided = ['trem_L', 'notrem_L', 'hold_L', 'move_L'] + \
+                ['trem_R', 'notrem_R', 'hold_R', 'move_R']
         #self.int_types_trem_and_mov = ['trem', 'hold', 'move']
         #self.int_types_trem_and_rest = ['trem', 'notrem']
         self.int_types_aux = ['undef', 'holdtrem', 'movetrem']

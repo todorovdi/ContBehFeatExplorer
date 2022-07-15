@@ -13,7 +13,7 @@
 ##SBATCH --time=10:00:00
 ##SBATCH --mem=128G
 
-#SBATCH --time=09:30:00
+#SBATCH --time=06:30:00
 #SBATCH --mem=50G
 #SBATCH --array=0-88
 
@@ -43,6 +43,10 @@
 # *** start of job script ***
 ##source set_oscabagdis_env_vars.sh
 
+##RUNSTRINGS_FN="_runstrings.txt"
+##mapfile -t RUNSTRINGS < $RUNSTRINGS_FN
+##num_runstrings=${#RUNSTRINGS[*]}
+
 ## export OMP_NUM_THREADS=${SLURM_CPUS_PER_TASK}
 ### srun is for MPI programs
 ###  sbatch <jobscript> 
@@ -51,9 +55,6 @@
 #srun --exclusive -n 128 ./mpi-prog1 &
 #srun --exclusive -n 128 ./mpi-prog2 &
 #wait
-##RUNSTRINGS_FN="_runstrings.txt"
-##mapfile -t RUNSTRINGS < $RUNSTRINGS_FN
-##num_runstrings=${#RUNSTRINGS[*]}
 
 jutil env activate -p icei-hbp-2020-0012
 
@@ -103,7 +104,7 @@ MAXJOBS=256 # better this than 64, otherwise more difficult on the level of indt
 
 NUMRS=`wc -l $RUNSTRINGS_FN | awk '{print $1;}'`
 echo "Start now"
-echo "SBATCH TYPE: CPU MULTIRUN"
+echo "SBATCH TYPE: CPU SINGLERUN"
 while [ $NUMRS -gt $SHIFT_ID ]; do
   EFF_ID=$((ID+SHIFT_ID))
   if [ $EFF_ID -ge $NUMRS ]; then
@@ -140,7 +141,7 @@ while [ $NUMRS -gt $SHIFT_ID ]; do
   echo "FINISHED job array number: ${ID} (effctive_id = $EFF_ID) on $HOSTNAME,  $SLURM_JOB_ID, $SLURM_ARRAY_JOB_ID"
   NRUNS=$((NRUNS + 1))
   ##########################  ONLY FOR RUNNING OF INDIVID JOBS
-  #break
+  break # BECAUSE WE ARE IN single .sh file
   ##########################
 done
 
