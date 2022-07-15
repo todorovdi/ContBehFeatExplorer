@@ -73,6 +73,7 @@ if os.environ.get('OUTPUT_OSCBAGDIS') is not None:
 else:
     dir_fig = '.'
 
+fig_dir = dir_fig
 param_dir = pjoin(code_dir,'params')
 
 with open(pjoin(code_dir,'subj_info.json') ) as info_json:
@@ -199,8 +200,8 @@ class globparams:
             try:
                 from jupyter_helpers.notifications import Notifications
                 p = '/usr/share/sounds/gnome/default/alerts/'
-                sound_file  = '../beep-06.mp3'
-                sound_file2 = '../glitch-in-the-matrix-600.mp3'
+                sound_file  = pjoin(code_dir,'beep-06.mp3')
+                sound_file2 = pjoin(code_dir,'glitch-in-the-matrix-600.mp3')
                 #p1 = p + 'glass.ogg'; p2 = p + 'sonar.ogg';
                 p1 = sound_file; p2 = sound_file2
                 Notifications(success_audio=p1, time_threshold=2,

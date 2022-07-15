@@ -987,9 +987,31 @@ def tfr(dat, sfreq, freqs, n_cycles, wsz, decim=1, n_jobs = None, mode ='valid')
     dat_ = dat[None,:]
     #tfrres = mne.time_frequency.tfr_array_morlet(dat_, sfreq, freqs, n_cycles,
     #                                             n_jobs=n_jobs, decim =decim)
-    tfrres = mne.time_frequency.tfr_array_multitaper(dat_, sfreq, freqs, n_cycles,
-                                                 n_jobs=n_jobs, decim =decim)
-    tfrres = tfrres[0]
+    print('tfr_array_multitaper input shape=',dat_.shape)
+    # parallel only over channels
+    if mne.__version__ == '0.24.1':
+        tfrres = mne.time_frequency.tfr_array_multitaper(dat_, sfreq, freqs, n_cycles,
+                                                    n_jobs=n_jobs, decim =decim)
+        print('tfr_array_multitaper output shape=',tfrres.shape)
+        tfrres = tfrres[0]
+    else:
+        tfrres = mne.time_frequency.tfr_array_multitaper(dat_, sfreq, freqs, n_cycles,
+                                                    n_jobs=n_jobs, decim =decim)
+        print('tfr_array_multitaper output shape=',tfrres.shape)
+        tfrres = tfrres[0]
+        # WARNING: naive average over tapers. Perhaps it's wrong for complex,
+        # but let's solve it some other day
+        tfrres = tfrres.mean(axis=1)
+        #                                            n_jobs=n_jobs, decim =decim, output='complex')
+        #_compute_tfr( )
+
+        #  elif output in ['complex', 'phase'] and method == 'multitaper':
+        #out = np.empty((n_chans, n_tapers, n_epochs, n_freqs, n_times), dtype)
+        #out = out.transpose(2, 0, 1, 3, 4)  -- epochs chans tapers
+    assert tfrres.ndim == 3
+
+
+        # (n_epochs, n_chans, n_tapers, n_freqs, n_times)
     # dpss window len = len(np.arange(0, n_cycles_cur/freq_cur, 1/sfreq) )
 
     # when we call cwt_gen_, we use in _compute_tfr we use mode == 'same'
@@ -1175,6 +1197,8 @@ def _compute_tfr(epoch_data, freqs, sfreq=1.0, method='morlet',
     elif method == 'multitaper':
         Ws = _make_dpss(sfreq, freqs, n_cycles=n_cycles,
                         time_bandwidth=time_bandwidth, zero_mean=zero_mean)
+
+    print(f'prepared {len(Ws)} dpss')
 
     # Check wavelets
     if len(Ws[0][0]) > epoch_data.shape[2]:

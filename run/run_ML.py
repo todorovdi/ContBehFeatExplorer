@@ -2726,7 +2726,8 @@ if do_Classif:
                    'class_labels_good_for_classif': class_labels_good_for_classif,
                    'pars':pars,
                    'info':ML_info,
-                   'cmd':(opts,args) }
+                   'cmd':np.array([opts,args],dtype=object),
+                   'cmd_opts':opts,'cmd_args':args}
             if do_LDA:
                 d.update({'LDA_analysis_versions':  LDA_analysis_versions,
                             'transformed_imputed':LDA_analysis_versions['all_present_features']['fit_to_all_data']['X_transformed'],

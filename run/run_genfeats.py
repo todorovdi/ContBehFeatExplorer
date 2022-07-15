@@ -1175,9 +1175,6 @@ for rawi in range(len(rawnames)):
     del fname_csd_full
 
 
-cond_load_CSD = (load_CSD > 0) and np.all(gs_csd > 0)
-cond2_CSD = ( (load_CSD == 1) or \
-                        (load_CSD == 2 and np.all(gs_csd > 1) ) )
 
 #sys.exit(0)
 
@@ -1210,421 +1207,49 @@ newchns = aa + np.array(chnames_tfr)[lfpinds].tolist()
 #######################################################
 
 if (not (use_existing_TFR and have_TFR) ) and 'con' in features_to_use:
-    cond_load_TFR = (load_TFR > 0) and np.all(gs_tfr > 0)
-    cond2 = ( (load_TFR == 1) or \
-                            (load_TFR == 2 and np.all(gs_tfr > 1) ) )
-    print("__ TFR LOAD? cond_load_TFR = {} , cond2 = {}, {}".
-            format(cond_load_TFR, cond2, fname_tfr_full_pri) )
-    #if load_TFR == 2
+    from utils_genfeats import prepTFR,prepCSD
+    tfrr = prepTFR(rawnames,anndict_per_intcat_per_rawn,
+             dat_pri,subfeature_order,sfreq,windowsz,skip,freqs,n_cycles,
+             use_lfp_HFO,
+             dat_lfp_hires_pri,subfeature_order_lfp_hires,
+             sfreq_hires, windowsz_hires,skip_hires,
+             skip_div_TFR,freqs_inc_HFO,n_cycles_inc_HFO,
+             load_TFR,save_TFR,gs_tfr,fname_tfr_full_pri,
+             load_CSD,save_CSD,gs_csd,
+             n_jobs_tfr)
+    tfrres_pri = tfrr['tfrres_pri']
+    tfrres_LFP_HFO_pri = tfrr['tfrres_LFP_HFO_pri']
+    chnames_tfr_ = tfrr['chnames_tfr']
+    tfrres_wbd_pri = tfrr['tfrres_wbd_pri']
+    tfrres_wbd_HFO_pri = tfrr['tfrres_wbd_HFO_pri']
+    assert tuple(chnames_tfr_) == tuple(chnames_tfr)
+    gc.collect()
 
-    # if we will load CSD, we don't need TFR
-    if cond_load_TFR and cond2  and not ( cond_load_CSD and cond2_CSD ):
-        tfrres_pri = [0] *len(rawnames)
-        tfrres_wbd_pri = [0] *len(rawnames)
-        tfrres_wbd_HFO_pri = [0] *len(rawnames)
-        tfrres_LFP_HFO_pri = [0] *len(rawnames)
-        for rawi in range(len(rawnames) ):
-            fname_tfr_full = fname_tfr_full_pri[rawi]
-            print('Start loading TFR from {}'.format(fname_tfr_full) )
-            tfrf = np.load(fname_tfr_full, allow_pickle=True)
-            tfrres_pri[rawi] = tfrf['tfrres']
-            tfrres_wbd_pri[rawi] = tfrf['tfrres_wbd']
-            tfrres_wbd_HFO_pri[rawi] = tfrf['tfrres_wbd_HFO']
-            tfrres_LFP_HFO_pri[rawi] = tfrf['tfrres_LFP_HFO']
-            chnames_tfr = tfrf['chnames_tfr'][()]
-            del fname_tfr_full
-        #chnames_tfr = list(names_src)  + subfeature_order_lfp_hires
-        #    tfrf = np.load(fname_tfr_full, allow_pickle=True)
-        #    tfrres_pri_dict = tfrf['tfrres'][()]
-        #    tfrres_wbd_pri_dict = tfrf['tfrres_wbd_pri'][()]
-        #    tfrres_wbd_HFO_pri_dict = tfrf['tfrres_wbd_HFO_pri'][()]
-        #    tfrres_LFP_HFO_pri_dict = tfrf['tfrres_LFP_HFO_pri'][()]
-        #    chnames_tfr = tfrf['chnames_tfr'][()]
-        #for i in range(len(tfrres_pri)):
-        #    tfrres_pri[i] = tfrres_pri_dict[i]
-        #    tfrres_wbd_pri[i] = tfrres_wbd_pri_dict[i]
-        #    tfrres_wbd_HFO_pri[i] = tfrres_wbd_HFO_pri_dict[i]
-        #    tfrres_LFP_HFO_pri[i] = tfrres_LFP_HFO_pri_dict[i]
-    elif not ( cond_load_CSD and cond2_CSD ):
-        tfrres_pri = []
-        tfrres_wbd_pri = []
-        tfrres_wbd_HFO_pri = []
-        #tfrres_LFP_LFO_pri = []
-        tfrres_LFP_HFO_pri = []
+    #if 'con' in features_to_use:
+    csdr = prepCSD(cross_types,tfrres_pri,tfrres_LFP_HFO_pri,
+            chnames_tfr,subfeature_order,newchns,
+            roi_labels,srcgrouping_names_sorted,sfreq,
+            newchn_grouping_ind,
+            normalize_TFR, DEBUG_shorten_couplings, log_during_csd,
+            load_CSD,save_CSD,gs_csd,fname_csd_full_pri)
+    gc.collect()
 
-        for rawind,dat_cur in enumerate(dat_pri):
-            #print('Starting TFR for data with shape ',dat_scaled.shape)
+    csd_pri = csdr['csd_pri']
+    csdord_pri = csdr['csdord_pri']
+    csd_LFP_HFO_pri = csdr['csd_LFP_HFO_pri']
+    csdord_LFP_HFO_pri = csdr['csdord_LFP_HFO_pri']
+    res_couplings = csdr['res_couplings']
+    ntimebins_pri = csdr['ntimebins_pri']
+    parcel_couplings = csdr['parcel_couplings']
+    LFP2parcel_couplings = csdr['LFP2parcel_couplings']
+    LFP2LFP_couplings = csdr['LFP2LFP_couplings']
 
-            #dat_scaled_src,names_src = utsne.selFeatsRegex(dat_scaled, subfeature_order, ['msrc.*'])
-            #dat_scaled_lfp,names_lfp = utsne.selFeatsRegex(dat_scaled, subfeature_order, ['LFP.*'])
-            #dat_src,names_src = utsne.selFeatsRegex(dat_cur, subfeature_order, ['msrc.*'])
-            #dat_lfp,names_lfp = utsne.selFeatsRegex(dat_cur, subfeature_order, ['LFP.*'])
-            dat_cur_src,names_src = utsne.selFeatsRegex(dat_cur, subfeature_order, ['msrc.*'])
-            dat_cur_lfp,names_lfp = utsne.selFeatsRegex(dat_cur, subfeature_order, ['LFP.*'])
-            # if we use hires LFP raw, better to do entire TFR on LFP
-            if use_lfp_HFO:
-                #dat_for_tfr = dat_scaled_src
-                dat_for_tfr = dat_cur_src
-                chnames_tfr = names_src
-            else:
-                #dat_for_tfr = dat_scaled
-                dat_for_tfr = dat_cur
-                chnames_tfr = subfeature_order
-
-            # perhaps we want to ensure that wavelets intersect well. Then it's
-            # better to use smaller skip and then downsample
-            print('Starting TFR for data #{} with shape {}'.format(rawind,dat_for_tfr.shape) )
-            assert ( skip - (skip // skip_div_TFR)  * skip_div_TFR ) < 1e-10
-
-
-            rawn = rawnames[rawind]
-            artif_cur = anndict_per_intcat_per_rawn[rawn]['artif']
-            dat_for_tfr = utils.imputeInterpArtif(dat_for_tfr.T,  artif_cur['LFP'] + artif_cur['MEG'], \
-                                    chnames_tfr, sfreq=sfreq, in_place=False).T
-
-
-            tfrres_,wbd = utils.tfr(dat_for_tfr, sfreq, freqs, n_cycles,
-                                    windowsz, decim = skip // skip_div_TFR,
-                                    n_jobs=n_jobs_tfr)
-            if skip_div_TFR > 1:
-                raise ValueError('wbd not debugged for that')
-                tfrres = utsne.downsample(tfrres_, skip_div_TFR, axis=-1)
-            else:
-                tfrres = tfrres_
-
-            if use_lfp_HFO:
-
-                #dat_for_tfr = dat_lfp_hires_scaled
-                #dat_for_tfr = dat_lfp_hires
-                dat_for_tfr = dat_lfp_hires_pri[rawind]
-
-                dat_for_tfr = utils.imputeInterpArtif(dat_for_tfr.T,  artif_cur['LFP'], \
-                                        subfeature_order_lfp_hires, sfreq=sfreq_hires, in_place=False).T
-
-                print('Starting TFR for LFP HFO data #{} with shape {}'.format(rawind,dat_for_tfr.shape) )
-                tfrres_LFP_,wbd_HFO = utils.tfr(dat_for_tfr, sfreq_hires, freqs_inc_HFO, n_cycles_inc_HFO,
-                                    windowsz_hires, decim = skip_hires // skip_div_TFR, n_jobs=n_jobs_tfr)
-                if skip_div_TFR > 1:
-                    raise ValueError('wbd not debugged for that')
-                    tfrres_LFP = utsne.downsample(tfrres_LFP_, skip_div_TFR, axis=-1)
-                else:
-                    tfrres_LFP = tfrres_LFP_
-
-
-                tfrres_LFP_LFO = tfrres_LFP[:,:len(freqs),:]
-                tfrres_LFP_HFO = tfrres_LFP[:,len(freqs):,:]
-
-                #tfrres_LFP_LFO_pri += [tfrres_LFP_HFO] # for debug
-                tfrres_LFP_HFO_pri += [tfrres_LFP_HFO]
-                tfrres_wbd_HFO_pri += [wbd_HFO]
-
-                # OLD ver, confusing because changes order, in orig data LFP
-                # goes first
-                #tfrres = np.concatenate( [tfrres, tfrres_LFP_LFO], axis=0 )
-                #chnames_tfr = chnames_tfr.tolist()  + subfeature_order_lfp_hires
-
-                tfrres = np.concatenate( [tfrres_LFP_LFO, tfrres], axis=0 )
-                chnames_tfr =  subfeature_order_lfp_hires + chnames_tfr.tolist()
-
-                # make sure lfp goes first always (check only the first chan), 3 symbols
-                assert chnames_tfr[0][:3] == subfeature_order[0][:3]
-
-                # no I have to do it later, I cannot vstack because it has differtn
-                # freq count
-                #assert tfrres.shape[-1] = tfrres_LFP.shape[-1]
-                #tfrres = np.vstack( [tfrres, tfrres_LFP] )
-                #subfeature_order = chnames_tfr + subfeature_order_lfp_hires
-
-            tfrres_pri += [ tfrres ]
-            tfrres_wbd_pri += [wbd]
-            assert not ( np.any( np.isnan ( tfrres ) ) or np.any( np.isinf ( tfrres ) ) )
-            gc.collect()
-
-        if save_TFR:
-            # savez does not like list of dicts :(
-            for rawi in range(len(rawnames) ):
-                fname_tfr_full = fname_tfr_full_pri[rawi]
-                print('TFR saved to ',fname_tfr_full)
-                np.savez(fname_tfr_full, tfrres=tfrres_pri[rawi],
-                         tfrres_LFP_HFO=tfrres_LFP_HFO_pri[rawi],
-                            tfrres_wbd = tfrres_wbd_pri[rawi],
-                         tfrres_wbd_HFO = tfrres_wbd_HFO_pri[rawi],
-                        chnames_tfr = chnames_tfr)
-            #dct = dict( enumerate(tfrres_pri) )
-            #dct2 =dict( enumerate(tfrres_LFP_HFO_pri) )
-            #dct3 =dict(enumerate(tfrres_wbd_pri))
-            #dct4 =dict(  enumerate(tfrres_wbd_HFO_pri))
-            #np.savez(fname_tfr_full, tfrres_pri=dct, tfrres_LFP_HFO_pri=dct2,
-            #            tfrres_wbd_pri = dct3, tfrres_wbd_HFO_pri = dct4,
-            #            chnames_tfr = chnames_tfr)
-
-        if do_cleanup:
-            del tfrres
-
-ntimebins_pri = []
-if 'con' in features_to_use:
-    if cond_load_CSD and cond2_CSD:
-        csd_pri = [0]    * len( rawnames )
-        csdord_pri = [0] * len( rawnames )
-        csd_LFP_HFO_pri    = [0] * len( rawnames )
-        csdord_LFP_HFO_pri = [0] * len( rawnames )
-        tfrres_wbd_pri = [0]    * len( rawnames )
-        for rawi in range(len(rawnames) ):
-            fname_csd_full = fname_csd_full_pri[rawi]
-            print('Start loading CSD from {}'.format(fname_csd_full) )
-            csdf = np.load(fname_csd_full, allow_pickle=True)
-            csd_pri[rawi]    = csdf['csd']
-            csdord_pri[rawi] =csdf['csdord']
-            csd_LFP_HFO_pri[rawi]    = csdf['csd_LFP_HFO']
-            csdord_LFP_HFO_pri[rawi] =csdf['csdord_LFP_HFO']
-            tfrres_wbd_pri[rawi] = csdf['tfrres_wbd']
-            del fname_csd_full
-        #print('Start loading CSD from {}'.format(fname_csd_full) )
-        #csdf = np.load(fname_csd_full, allow_pickle=True)
-        #csd_pri_    = csdf['csd_pri'][()]
-        #csdord_pri_ =csdf['csdord_pri'][()]
-        #csd_LFP_HFO_pri_    = csdf['csd_LFP_HFO_pri'][()]
-        #csdord_LFP_HFO_pri_ =csdf['csdord_LFP_HFO_pri'][()]
-
-        #tfrres_wbd_pri_dict = csdf['tfrres_wbd_pri'][()]
-
-
-        #csd_pri = [0]    * len( csd_pri_.keys() )
-        #csdord_pri = [0] * len( csdord_pri_.keys() )
-        #csd_LFP_HFO_pri    = [0] * len( csd_LFP_HFO_pri_.keys() )
-        #csdord_LFP_HFO_pri = [0] * len( csdord_LFP_HFO_pri_.keys() )
-        #tfrres_wbd_pri = [0]    * len( tfrres_wbd_pri_dict.keys() )
-
-        #for i in range(len(csdord_pri) ):
-        #    csd_pri[i]    = csd_pri_[i]
-        #    csdord_pri[i] = csdord_pri_[i]
-        #    csd_LFP_HFO_pri   [i] = csd_LFP_HFO_pri_   [i]
-        #    csdord_LFP_HFO_pri[i] = csdord_LFP_HFO_pri_[i]
-        #    tfrres_wbd_pri[i]    = tfrres_wbd_pri_dict[i]
-
-
-        newchns=list( csdf['newchns'][()] )
-        res_couplings=csdf['res_couplings'][()]
-        ind_distr, ind_distr_parcels, ind_pairs_parcelsLFP, \
-            parcel_couplings, LFP2parcel_couplings, LFP2LFP_couplings = res_couplings
-
-        _,names_src = utsne.selFeatsRegex(None, subfeature_order, ['msrc.*'])
-        _,names_lfp = utsne.selFeatsRegex(None, subfeature_order, ['LFP.*'])
-        chnames_tfr = list(names_lfp) + list(names_src)
-    else:
-        chnames_nicened = utils.nicenMEGsrc_chnames(chnames_tfr, roi_labels, srcgrouping_names_sorted,
-                                prefix='msrc_')
-
-        # since I have TFR in separate chunks, I implement the computation by hand
-        # note that it is different from rescaling of the raws in the beginning
-        # -- here I don't need to unify the scales, only to get rid of too
-        # small values (because later when computing CSD I will mutiply them
-        # and it falls below double precision)
-        # here I don't really care about normalizing robustly (I will normalize
-        # again after features are constructed anyway). I just want to multiply
-        # everything by the same number that's all. More accurate way would be to
-        # use my rescaling code with 'entire' and some data set grouping
-        # but it does not work for multidim arrays so far
-        # the way I do it below works only if datasets don't have data many oders
-        # of magnitude different between each other
-        if normalize_TFR == 'across_datasets':
-            print('Start computing TFR stats for normalization')
-            s1,s2,s3 = tfrres_pri[0].shape
-            s = np.zeros( (s1,s2 ), dtype=complex )
-            nb = 0
-            for tfrres_cur in tfrres_pri:
-                s += np.sum(tfrres_cur, axis=-1)
-                nb += tfrres_cur.shape[-1]
-            tfr_mean = s / nb
-
-            var = np.zeros( (s1,s2 ), dtype=complex )
-            for tfrres_cur in tfrres_pri:
-                y = tfrres_cur - tfr_mean[:,:,None]
-                var += np.sum( y * np.conj(y) , axis=-1)
-            tfr_std = np.sqrt( var / nb )
-
-
-            s1,s2,s3 = tfrres_LFP_HFO_pri[0].shape
-            s = np.zeros( (s1,s2 ), dtype=complex )
-            nb = 0
-            for tfrres_cur in tfrres_LFP_HFO_pri:
-                s += np.sum(tfrres_cur, axis=-1)
-                nb += tfrres_cur.shape[-1]
-            tfr_LFP_HFO_mean = s / nb
-
-            var = np.zeros( (s1,s2 ), dtype=complex )
-            for tfrres_cur in tfrres_LFP_HFO_pri:
-                y = tfrres_cur - tfr_LFP_HFO_mean[:,:,None]
-                var += np.sum( y * np.conj(y) , axis=-1)
-            tfr_LFP_HFO_std = np.sqrt( var / nb )
-
-        LFP2LFP_only_self = True  # that we don't want to compute cross couplings LFP to LFP
-        # we DO NOT want only upper diag because cross_types does not
-        # does not contain symmetric entries
-        res_couplings = ugf.selectIndPairs(chnames_nicened, chnames_tfr, cross_types, upper_diag=False,
-                                LFP2LFP_only_self=LFP2LFP_only_self, cross_within_parcel=False)
-
-        ind_distr, ind_distr_parcels, ind_pairs_parcelsLFP, \
-            parcel_couplings, LFP2parcel_couplings, LFP2LFP_couplings = res_couplings
-        import itertools
-        ind_distr_merged = list(itertools.chain.from_iterable(ind_distr))
-        print('Starting CSD for {} pairs'.format( len(ind_distr_merged) ) )
-
-        # chreate new chnames
-        #parcels_present = []
-        #pp2side = {}
-        #for chn in chnames_tfr:
-        #    if chn.startswith('LFP'):
-        #        continue
-        #    side1, gi1, parcel_ind1, si1 = utils.parseMEGsrcChnameShort(chn)
-        #    if parcel_ind1 in pp2side:
-        #        assert pp2side[parcel_ind1] == side1, 'Side inconsistency within parcel!'
-        #    pp2side[parcel_ind1] = side1
-        #    parcels_present += [parcel_ind1]
-
-        #pp = list(sorted(set(parcels_present)))
-        #aa = ['msrc{}_{}_{}_c{}'.format(pp2side[p],newchn_grouping_ind,p,0) for p in pp]
-        #lfpinds = utsne.selFeatsRegexInds(chnames_tfr,'LFP.*')
-        #newchns = aa + np.array(chnames_tfr)[lfpinds].tolist()
-
-        csd_pri = [];
-        csdord_pri = []
-        for tfri,tfrres_cur in enumerate(tfrres_pri):
-            tfrres_cur_ = tfrres_cur
-            if normalize_TFR == 'across_datasets':
-                tfrres_cur_ =  (tfrres_cur - tfr_mean[:,:,None] ) / tfr_std[:,:,None]
-            elif normalize_TFR == 'separately':
-                # RobustScaler does not work with complex data, even if I fit
-                # to absolute values :(
-                #scaler = RobustScaler(quantile_range=(percentileOffset,100-percentileOffset) ,
-                #                      with_centering=True)
-                sh = tfrres_cur.shape
-                tmp = tfrres_cur.reshape( (sh[0] * sh[1], sh[2] ) ).T
-                #scaler.fit( tmp )
-
-                tfr_mean,tfr_std = utsne.robustMean(tmp, axis=-1,ret_std=True,per_dim=1)
-                tfrres_cur_ = (tmp - tfr_mean[:,None])/ tfr_std[:,None]
-                tfrres_cur_ = tfrres_cur_.reshape(  (sh[0], sh[1], sh[2] ) )
-            csd_cur, csdord = ugf.tfr2csd(tfrres_cur_, sfreq, returnOrder=1,
-                                            ind_pairs=None,
-                                            parcel_couplings=parcel_couplings,
-                                            LFP2LFP_couplings=LFP2LFP_couplings,
-                                            LFP2parcel_couplings=LFP2parcel_couplings,
-                                            oldchns=chnames_tfr,
-                                            newchns=newchns,
-                                            res_group_id=newchn_grouping_ind,
-                                            log=log_during_csd)
-            # csdord.shape = (2, csdsize)
-            csdord_pri += [csdord]
-            csd_pri += [csd_cur]
-            gc.collect()
-
-        csdord_LFP_HFO = None
-        csd_LFP_HFO_pri = []
-        csdord_LFP_HFO_pri = []
-        for tfri,tfrres_LFP_HFO_cur in enumerate(tfrres_LFP_HFO_pri):
-            tfrres_LFP_HFO_cur_ = tfrres_LFP_HFO_cur
-            if normalize_TFR == 'across_datasets':
-                tfrres_LFP_HFO_cur_ =  (tfrres_LFP_HFO_cur - tfr_LFP_HFO_mean[:,:,None] ) / tfr_LFP_HFO_std[:,:,None]
-            elif normalize_TFR == 'separately':
-                #scaler = RobustScaler(quantile_range=(percentileOffset,100-percentileOffset) ,
-                #                      with_centering=True)
-                sh = tfrres_LFP_HFO_cur.shape
-                tmp = tfrres_LFP_HFO_cur.reshape( (sh[0] * sh[1], sh[2] ) ).T
-
-                tfr_mean,tfr_std = utsne.robustMean(tmp, axis=-1,ret_std=True,per_dim=1)
-                tfrres_LFP_HFO_cur_ = (tmp - tfr_mean[:,None])/ tfr_std[:,None]
-                tfrres_LFP_HFO_cur_ = tfrres_LFP_HFO_cur_.reshape(  (sh[0], sh[1], sh[2] ) )
-                #scaler.fit( tmp )
-                #tfrres_LFP_HFO_cur_ = scaler.transform(tmp).T.reshape(  (sh[0], sh[1], sh[2] ) )
-
-            # I don't really need HFO csd across LFP contacts
-            #csd_LFP, csdord_LFP = utils.tfr2csd(tfrres_LFP, sfreq_hires, returnOrder=1)  # csdord.shape = (2, csdsize)
-            csd_LFP_HFO_cur = tfrres_LFP_HFO_cur_ * np.conj(tfrres_LFP_HFO_cur_)
-            tmp = np.arange( tfrres_LFP_HFO_cur.shape[0] )  # n_LFP_channels
-            csdord_LFP_HFO = np.vstack([tmp,tmp] ) # same to same index, so just i->i
-
-            csdord_LFP_HFO_pri += [csdord_LFP_HFO]
-            csd_LFP_HFO_pri += [csd_LFP_HFO_cur]
-        gc.collect()
-
-
-        # remember that we have rescaled raws before so concatenating should be ok
-        #csd = np.concatenate(csd_pri,axis=-1)
-        #csd_LFP_HFO = np.concatenate(csd_LFP_HFO_pri,axis=-1)
-
-        if save_CSD:
-            #dct = {}
-            for rawi in range(len(rawnames) ):
-                fname_csd_full = fname_csd_full_pri[rawi]
-                print('Saving CSD to {}'.format(fname_csd_full) )
-                np.savez(fname_csd_full, csd=csd_pri[rawi], csdord=csdord_pri[rawi],
-                            newchns=newchns, res_couplings=res_couplings,
-                            csd_LFP_HFO = csd_LFP_HFO_pri[rawi],
-                            csdord_LFP_HFO=csdord_LFP_HFO_pri[rawi],
-                            tfrres_wbd=tfrres_wbd_pri[rawi])
-
-            #print('Saving CSD to {}'.format(fname_csd_full) )
-            #dct1 = dict(    enumerate(csd_pri)  )
-            #dct2 = dict(    enumerate(csdord_pri)  )
-            #dct3 = dict(    enumerate(csd_LFP_HFO_pri)  )
-            #dct4 = dict(    enumerate(csdord_LFP_HFO_pri)  )
-            #dct5 =dict(enumerate(tfrres_wbd_pri))
-            #np.savez(fname_csd_full, csd_pri=dct1, csdord_pri=dct2,
-            #            newchns=newchns, res_couplings=res_couplings,
-            #            csd_LFP_HFO_pri = dct3, csdord_LFP_HFO_pri=dct4,
-            #            tfrres_wbd_pri=dct5)
-
-        if do_cleanup:
-            del tfrres_pri
-
-
-    for csdi in range(len(csd_pri) ):
-        assert not ( np.any( np.isnan ( csd_pri[csdi] ) )    or np.any( np.isinf ( csd_pri[csdi] ) )    )
-        assert not ( np.any( np.isnan ( csd_LFP_HFO_pri[csdi] ) )  or np.any( np.isinf ( csd_LFP_HFO_pri[csdi] ) )    )
-
-        ntimebins_cur = csd_pri[csdi].shape[-1]
-        ntimebins_pri +=[ntimebins_cur]
-
-assert chnames_tfr[0].startswith('LFP')
-assert subfeature_order[0].startswith('LFP')
-assert tuple(chnames_tfr) == tuple(subfeature_order)  # is needed for bandFilter, because later computeCorr uses indexing based on chnames_tfr
-
-if DEBUG_shorten_couplings != 'no':
-    parcel_couplings_short = {}
-    LFP2parcel_couplings_short = {}
-    LFP2LFP_couplings_short = {}
-    if DEBUG_shorten_couplings == 'first':
-        for pc,pcl in parcel_couplings.items():
-            parcel_couplings[pc] = [pcl[0]]
-
-        for pc,pcl in LFP2parcel_couplings.items():
-            LFP2parcel_couplings_short[pc] = [pcl[0]]
-
-        for pc,pcl in LFP2LFP_couplings.items():
-            LFP2LFP_couplings_short[pc] = [pcl[0]]
-    elif DEBUG_shorten_couplings == 'random_one':
-        for pc,pcl in parcel_couplings.items():
-            a = list ( np.array( pcl ) [  np.random.choice( len(pcl), 1 ) ] )
-            parcel_couplings[pc] = a
-
-        for pc,pcl in LFP2parcel_couplings.items():
-            a = list ( np.array( pcl ) [  np.random.choice( len(pcl), 1 ) ] )
-            LFP2parcel_couplings_short[pc] = a
-
-        for pc,pcl in LFP2LFP_couplings.items():
-            a = list ( np.array( pcl ) [  np.random.choice( len(pcl), 1 ) ] )
-            LFP2LFP_couplings_short[pc] = a
-
-    parcel_couplings_backup     = parcel_couplings
-    LFP2parcel_couplings_backup = LFP2parcel_couplings
-    LFP2LFP_couplings_backup    = LFP2LFP_couplings
-
-    parcel_couplings     = parcel_couplings_short
-    LFP2parcel_couplings = LFP2parcel_couplings_short
-    LFP2LFP_couplings    = LFP2LFP_couplings_short
-
-gc.collect()
+    assert chnames_tfr[0].startswith('LFP')
+    assert subfeature_order[0].startswith('LFP')
+    # is needed for bandFilter, because later computeCorr uses indexing based on chnames_tfr
+    assert tuple(chnames_tfr) == tuple(subfeature_order), set(chnames_tfr) ^ set(subfeature_order)
+    assert tuple(csdr['newchns'] ) == tuple(newchns)
+    assert tuple(csdr['chnames_tfr'] ) == tuple(chnames_tfr)
 
 
 if exit_after == 'TFR_and_CSD':
@@ -1632,9 +1257,6 @@ if exit_after == 'TFR_and_CSD':
     if show_plots:
         pdf.close()
     sys.exit(0)
-
-
-
 
 if gv.DEBUG_MODE:
     frameinfo = getframeinfo(currentframe())
@@ -2238,7 +1860,8 @@ for rawind in range(len(dat_pri) ):
     if 'con' in feat_dict:
         ntimebins = ntimebins_pri[rawind]
         if bands_only == 'no':
-            tfres_ = tfrres.reshape( tfrres.size//ntimebins , ntimebins )
+            raise ValueError('Not implemented')
+            tfres_ = tfrres_pri[0].reshape( tfrres_pri[0].size//ntimebins , ntimebins )
             #feat_dict['tfr']['data'] = f( np.abs( tfres_) )
             #feat_dict['con']['data'] = con.reshape( con.size//ntimebins , ntimebins )
             feat_dict['con']['data'] = f( np.abs( csd_pri[rawind].reshape(
@@ -2589,8 +2212,10 @@ if save_feat:
                 windowsz=windowsz, nedgeBins=nedgeBins, n_channels=n_channels_pri[rawind],
                 rawtimes = times_pri[rawind], freqs=freqs, chnames_LFP=chnames_LFP,
                  chnames_src=chnames_src, feat_info = info,
-                 cmd=(opts,args), pars=pars,
-                 anndict_per_intcat=anndict_per_intcat_per_rawn[rawname_])
+                  pars=pars,
+                 anndict_per_intcat=anndict_per_intcat_per_rawn[rawname_],
+                 cmd=np.array([opts,args],dtype=object ),
+                 cmd_opts=opts,cmd_args=args)
         #ip = feat_inds_cur[0],feat_inds_cur[-1]
         print('{} Features shape {} saved to\n  {}'.format(rawind,X_cur.shape,fname_feat_full) )
 
