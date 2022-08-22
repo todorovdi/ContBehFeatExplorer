@@ -1008,6 +1008,7 @@ def getCondsLoadCSD(load_CSD,gs_csd ):
     return cond_load_CSD, cond2_CSD
 
 def prepCSD(cross_types,tfrres_pri,tfrres_LFP_HFO_pri,
+            tfrres_wbd_pri,
             chnames_tfr,subfeature_order,newchns,
             roi_labels,srcgrouping_names_sorted,sfreq,
             newchn_grouping_ind,

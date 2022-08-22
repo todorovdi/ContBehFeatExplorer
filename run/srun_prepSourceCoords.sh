@@ -1,7 +1,7 @@
 #!/bin/bash
 
-#SRCS_TYPE=aal
-SRCS_TYPE=HirschPt
+SRCS_TYPE=aal
+#SRCS_TYPE=HirschPt
 
 echo "SRCS_TYPE=$SRCS_TYPE"
 

@@ -9,6 +9,7 @@ import utils
 import json
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_pdf import PdfPages
+from os.path import join as pjoin
 
 import utils_preproc as upre
 import matplotlib as mpl
@@ -16,24 +17,15 @@ import globvars as gv
 from globvars import gp
 import sys
 import getopt
+from globvars import dir_fig, data_dir
 mpl.use('Agg')
 
 input_subdir = ''
 # input_subdir = '/new'
 subdir_fig = '/preproc'
 
-if os.environ.get('DATA_DUSS') is not None:
-    data_dir_input = os.path.expandvars('$DATA_DUSS') + input_subdir
-    data_dir_output = os.path.expandvars('$DATA_DUSS')
-else:
-    data_dir_input = '/home/demitau/data'   + input_subdir
-    data_dir_output = '/home/demitau/data'
-
-if os.environ.get('OUTPUT_OSCBAGDIS') is not None:
-    dir_fig = os.path.expandvars('$OUTPUT_OSCBAGDIS')  + subdir_fig
-else:
-    dir_fig = '.' + subdir_fig
-
+data_dir_input = pjoin(data_dir, input_subdir)
+data_dir_output = data_dir
 
 fine_cal_file  = os.path.join(data_dir_input, 'sss_cal.dat')
 crosstalk_file = os.path.join(data_dir_input, 'ct_sparse.fif')

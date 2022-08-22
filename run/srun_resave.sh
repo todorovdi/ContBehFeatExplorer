@@ -18,7 +18,7 @@ INTERACTIVE=""
 
    RECONSTRUCT_SOURCES=1
 SRC_REC_AFTER_highpass=1
-    SRC_REC_AFTER_tSSS=0
+    SRC_REC_AFTER_tSSS=1
      SRC_REC_AFTER_SSP=0
      SRC_REC_AFTER_ICA=0
         RUN_MATLAB_JOB=1
@@ -26,9 +26,9 @@ SRC_REC_AFTER_highpass=1
 MIN_DURATION_QUIET_ALLOWED=30
 #MIN_DURATION_QUIET_ALLOWED=5  # for shorter test datasets
 
-RECALC_SRC_COORDS=0
-#ROI_TYPES='"'parcel_aal_surf'"'
-ROI_TYPES='"'HirschPt2011,2013'"'
+RECALC_SRC_COORDS=1
+ROI_TYPES='"'parcel_aal_surf'"'
+#ROI_TYPES='"'HirschPt2011,2013'"'
 
 # for sources extraction
 GROUPINGS="all_raw"

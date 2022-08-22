@@ -300,8 +300,11 @@ function output = srcrec(subjstr,datall,data_cleaned,hdmf,roi_type,bads,S,srs,ma
       if do_srcrec
         %source_data_cur = ft_sourceanalysis(cfg_srcrec,datall_cur);  
 
+        %%%%%%%%%%%%%%%%%%%%%%%%%%%%   HERE IS WHERE STUFF HAPPENS %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
         source_time_tmp = ft_sourceanalysis(cfg_srcrec,avg);  
         %source_time_tmp = ft_sourceanalysis(cfg_srcrec,datall_cleaned_cur);  
+        %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
 
         spatial_filt = cell2mat(source_time_tmp.avg.filter);
 

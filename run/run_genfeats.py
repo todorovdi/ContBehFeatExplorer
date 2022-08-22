@@ -633,9 +633,11 @@ if (not recalc_stats_multi_band) and ( 'rbcorr' in features_to_use or 'bpcorr' i
 
 rec_info_pri = []
 for rawname_ in rawnames:
-    src_rec_info_fn = utils.genRecInfoFn(rawname_,sources_type,src_file_grouping_ind)
-    src_rec_info_fn_full = pjoin(gv.data_dir, input_subdir,
-                                        src_rec_info_fn)
+    src_rec_info_fn_full = utils.genRecInfoFn(rawname_,sources_type,
+                                         src_file_grouping_ind,
+                                         input_subdir)
+    #src_rec_info_fn_full = pjoin(gv.data_dir, input_subdir,
+    #                                    src_rec_info_fn)
     print('Load rec_info from ',src_rec_info_fn_full)
 
     if input_subdir != output_subdir:
@@ -1227,6 +1229,7 @@ if (not (use_existing_TFR and have_TFR) ) and 'con' in features_to_use:
 
     #if 'con' in features_to_use:
     csdr = prepCSD(cross_types,tfrres_pri,tfrres_LFP_HFO_pri,
+            tfrres_wbd_pri,
             chnames_tfr,subfeature_order,newchns,
             roi_labels,srcgrouping_names_sorted,sfreq,
             newchn_grouping_ind,

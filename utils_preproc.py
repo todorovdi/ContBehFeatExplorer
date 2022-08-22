@@ -2006,7 +2006,7 @@ def read_raw_fieldtrip(fname, info, data_name='data'):
         A Raw Object containing the loaded data.
     """
     #from ...externals.pymatreader.pymatreader import read_mat
-    from mne.externals.pymatreader.pymatreader import read_mat
+    from pymatreader import read_mat
     from mne.io.fieldtrip.utils import _validate_ft_struct, _create_info
 
     ft_struct = read_mat(fname,
@@ -2084,6 +2084,7 @@ def readInfo(rawname, raw, sis=[1,2], check_info_diff = 1, bandpass_info=0 ):
         info_name = rawname + '{}_info.mat'.format(si)
         fn = os.path.join(data_dir,info_name)
         if not os.path.exists(fn):
+            print(f'{fn} does not exist')
             continue
         rr  =pymatreader.read_mat(fn )
         print( rr['info']['chs'].keys() )
@@ -2104,6 +2105,8 @@ def readInfo(rawname, raw, sis=[1,2], check_info_diff = 1, bandpass_info=0 ):
 
 
     import copy
+    if raw is None:
+        return None, infos
     unmod_info = raw.info
     mod_info  = copy.deepcopy(unmod_info)
     fields = ['loc', 'coord_frame', 'unit', 'unit_mul', 'range',

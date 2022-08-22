@@ -462,25 +462,39 @@ def filterFeats(feature_names_all, chnames_LFP, LFP_related_only, parcel_types,
             #print(utils.collectFeatTypeInfo(featnames[list(remaining)] ) )
 
 
+    all_parcels= roi_labels[gp.src_grouping_names_order[src_file_grouping_ind]]
     # both and all_available mean different things but in both cases
     # we don't want to remove anything
     if brain_side_to_use not in ['all_available', 'both']:
         assert brain_side_to_use in [ 'left', 'right',
-                                     'left_exCB', 'right_exCB', ]
-        sidelet = brain_side_to_use[0].upper()
-        opsidelet = utils.getOppositeSideStr(sidelet)
+                                     'left_exCB', 'right_exCB', 'both_onlyCB',
+                                     'right_onlyCB', 'left_onlyCB']
+        if  brain_side_to_use != 'both_onlyCB':
+            sidelet = brain_side_to_use[0].upper()
+            opsidelet = utils.getOppositeSideStr(sidelet)
+        else:
+            # in this case it is not really importatn
+            sidelet = 'L'
+            opsidelet = 'R'
         # this is to prohibit for cross-side side couplings if we computed them
         if brain_side_to_use.endswith('CB'):
-            all_parcels= roi_labels[gp.src_grouping_names_order[src_file_grouping_ind]]
             CB_curside = f'Cerebellum_{sidelet}'
             CB_opside = f'Cerebellum_{opsidelet}'
             CBcsi = all_parcels.index(CB_curside)
             CBosi = all_parcels.index(CB_opside)
             #CB_opside = f'Cerebellum_{sidelet}'
-            opsrcre1 = '.*msrc'+opsidelet+'_[0-9]+_(?!' + str(CBosi) +  ').*_.*'  # not CB with opsidelet will be prohib
-            opsrcre2 = '.*msrc'+sidelet+'_[0-9]+_' + str(CBcsi) + '_.*'    # CB with sidelet will be prohib
-
-            regexes = [opsrcre1, opsrcre2]
+            if brain_side_to_use.endswith('exCB'):
+                opsrcre1 = '.*msrc'+opsidelet+'_[0-9]+_(?!' + str(CBosi) +  ').*_.*'  # not CB with opsidelet will be prohib
+                opsrcre2 = '.*msrc'+sidelet+'_[0-9]+_' + str(CBcsi) + '_.*'    # CB with sidelet will be prohib
+                regexes = [opsrcre1, opsrcre2]
+            else:
+                if brain_side_to_use == 'both_onlyCB':
+                    opsrcre1 = '.*msrc'+opsidelet+'_[0-9]+_(?!' + str(CBosi) +  ').*_.*'  # not CB with opsidelet will be prohib
+                    opsrcre2 = '.*msrc'+sidelet  +'_[0-9]+_(?!' + str(CBcsi) +  ').*_.*'  # not CB with   sidelet will be prohib
+                    regexes = [opsrcre1, opsrcre2]
+                elif brain_side_to_use in ['left_onlyCB' ,'right_onlyCB']:
+                    opsrcre1 = '.*msrc'+sidelet+'_[0-9]+_(?!' + str(CBosi) +  ').*_.*'  # not CB with   sidelet will be prohib
+                    regexes = [opsrcre1]
         else:
             opsrcre = '.*msrc'+opsidelet+'.*'
             regexes = [opsrcre]

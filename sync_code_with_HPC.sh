@@ -1,6 +1,6 @@
 #!/bin/bash
 #rsync -avz --progress -e ssh $HOME/osccode/data_proc/* jusuf:data_proc_code/
-#JUSUF="jusuf:data_proc_code"
+#JUSUF_CODE="jusuf:data_proc_code"
 if [[ $# -lt 1 ]]; then
   echo "Need at least one arg"
   exit 1
@@ -16,8 +16,11 @@ if [[ $SYNC_MODE != "get_from" && $SYNC_MODE != "send_to" && $SYNC_MODE != "both
   exit 1
 fi
 
+run="python3 _rsync_careful.py"
+#run="ipython3 -i _rsync_careful.py --"
   
  
+RUNTYPE=$1
 DRY_RUN_FLAG=""
 if [[ $1 == "dry" ]]; then
   echo " ----------  DRY RUN  ------------"
@@ -30,7 +33,7 @@ else
 fi
 
 LOCAL_DIR="/home/demitau/osccode/data_proc"
-FLAGS="-rtvh$DRY_RUN_FLAG --progress"  # removed z
+#FLAGS="-rtvh$DRY_RUN_FLAG --progress"  # removed z
 # for dry run
 #FLAGS="-rtvzn --progress"; echo "DRY RUN!!"
 
@@ -39,10 +42,11 @@ DIRECT_SSH=0
 if [ $DIRECT_SSH -ne 0 ]; then
   echo "Using rsync -e ssh"
   SSH_FLAG="-e ssh"
-  JUSUF="judac:data_proc_code"
+  JUSUF_CODE="judac:data_proc_code"
   JUSUF_BASE="judac:ju_oscbagdis"
   #SLEEP="sleep 1s"
   SLEEP=""
+  echo "not implemented; need to change _rsync_careful"; exit 1
 else
   mountpath="$HOME/ju_oscbagdis"
   numfiles=`ls $mountpath | wc -l`
@@ -59,78 +63,84 @@ else
 
   echo "Using mounted sshfs"
   SSH_FLAG=""
-  JUSUF="$HOME/ju_oscbagdis/data_proc_code"
+  JUSUF_CODE="$HOME/ju_oscbagdis/data_proc_code"
   JUSUF_BASE="$HOME/ju_oscbagdis"
   SLEEP=""
 fi
+  
+#$run --mode:$RUNTYPE --exclude="*HPC*.py"  "$LOCAL_DIR/*.py"  "$JUSUF_CODE/"
+#exit 1
 
 #FNS=`ls -L *.{py,sh}`
 #rsync $FLAGS --progress $SSH_FLAG $FNS jusuf:data_proc_code/
 subdir=run
 if [[ $SYNC_MODE != "get_from" ]]; then
   echo "  sync souce code"
-  rsync $FLAGS $SSH_FLAG --exclude="*HPC.py" --exclude="sync*HPC.sh"  $LOCAL_DIR/*.{py,sh,m}  $JUSUF/
+  $run --mode:$RUNTYPE --exclude="*HPC*.py"  "$LOCAL_DIR/*.py"  "$JUSUF_CODE/"
+  $run --mode:$RUNTYPE --exclude="sync*HPC.sh"  "$LOCAL_DIR/*.sh"  "$JUSUF_CODE/"
+  #$run --mode:$RUNTYPE "$LOCAL_DIR/*.m"  "$JUSUF_CODE/"  # we don't need *.m files on HPC
   $SLEEP
   echo "  sync run files (excluding sh, only py)"
-  #rsync $FLAGS $SSH_FLAG --exclude="*HPC.sh" --exclude="sbatch*" --exclude=srun_pipeline.sh --exclude=srun_exec_runstr.sh $LOCAL_DIR/$subdir/*.{py,sh}  $JUSUF/$subdir/
-  rsync $FLAGS $SSH_FLAG $LOCAL_DIR/$subdir/*.py --exclude=indtool.py --exclude=_utils_indtool.py  $JUSUF/$subdir/
+  #rsync $FLAGS $SSH_FLAG --exclude="*HPC.sh" --exclude="sbatch*" --exclude=srun_pipeline.sh --exclude=srun_exec_runstr.sh $LOCAL_DIR/$subdir/*.{py,sh}  $JUSUF_CODE/$subdir/
+  $run --mode:$RUNTYPE --exclude="indtool.py" --exclude="_utils_indtool.py" "$LOCAL_DIR/$subdir/*.py"   "$JUSUF_CODE/$subdir/"
   echo "  sync matlab_compiled"
-  rsync $FLAGS $SSH_FLAG $LOCAL_DIR/matlab_compiled/  $JUSUF/matlab_compiled 
+  $run --mode:$RUNTYPE "$LOCAL_DIR/matlab_compiled/" "$JUSUF_CODE/matlab_compiled" 
   $SLEEP
 fi
 # if only send we don't want to receive
 if [[ $SYNC_MODE != "send_to" ]]; then
   echo "  rev sync run files (excluding sh, only py)"
-  rsync $FLAGS $SSH_FLAG  $JUSUF/$subdir/*.sh  $LOCAL_DIR/$subdir/
-  rsync $FLAGS $SSH_FLAG  $JUSUF/$subdir/{indtool,_utils_indtool}.py  $LOCAL_DIR/$subdir/
-  rsync $FLAGS $SSH_FLAG  $JUSUF/$subdir/_subrun*HPC.py  $LOCAL_DIR/$subdir/
+  $run --mode:$RUNTYPE "$JUSUF_CODE/$subdir/*.sh" "$LOCAL_DIR/$subdir/"
+  #$run --mode:$RUNTYPE "$JUSUF_CODE/$subdir/{indtool,_utils_indtool}.py" "$LOCAL_DIR/$subdir/"
+  $run --mode:$RUNTYPE "$JUSUF_CODE/$subdir/_subrun*HPC.py" "$LOCAL_DIR/$subdir/"
   $SLEEP
   echo "  rev sync tmux"
-  rsync $FLAGS $SSH_FLAG $JUSUF/.tmux*.conf  $LOCAL_DIR
+  $run --mode:$RUNTYPE "$JUSUF_CODE/.tmux*.conf" "$LOCAL_DIR"
   echo "  rev sync souce code"
-  rsync $FLAGS $SSH_FLAG --exclude="sync*HPC.sh" $JUSUF/*HPC.py $LOCAL_DIR/
+  $run --mode:$RUNTYPE --exclude="sync*HPC.sh" "$JUSUF_CODE/*HPC.py" "$LOCAL_DIR/"
 fi
 
 
+# we don't copy HPC back
 if [[ $SYNC_MODE != "get_from" ]]; then
   $SLEEP
   echo "  sync json"
-  rsync $FLAGS $SSH_FLAG --exclude="*HPC" $LOCAL_DIR/*.json  $JUSUF/
+  $run --mode:$RUNTYPE --exclude="*HPC" "$LOCAL_DIR/*.json"  "$JUSUF_CODE/"
   $SLEEP
   echo "  sync params"  # I want to care about *HPC_fast too
-  rsync $FLAGS $SSH_FLAG --exclude="*HPC*.ini" $LOCAL_DIR/params/*.ini $JUSUF/params/
+  $run --mode:$RUNTYPE --exclude="*HPC*.ini" "$LOCAL_DIR/params/*.ini" "$JUSUF_CODE/params/"
   $SLEEP
   echo "  sync test data"
-  rsync $FLAGS $SSH_FLAG $LOCAL_DIR/test_data/*.py $JUSUF/test_data/
+  $run --mode:$RUNTYPE "$LOCAL_DIR/test_data/*.py" "$JUSUF_CODE/test_data/"
 fi
 
 if [[ $SYNC_MODE != "send_to" ]]; then
   echo "  rev sync params"
-  rsync $FLAGS $SSH_FLAG $JUSUF/params/*HPC*.ini $LOCAL_DIR/params/ 
+  $run --mode:$RUNTYPE "$JUSUF_CODE/params/*HPC*.ini" "$LOCAL_DIR/params/" 
   echo "  rev sync helper_scripts"
-  rsync $FLAGS $SSH_FLAG $JUSUF/helper_scripts/*.sh $LOCAL_DIR/helper_scripts/ 
+  $run --mode:$RUNTYPE "$JUSUF_CODE/helper_scripts/*.sh" "$LOCAL_DIR/helper_scripts/" 
   echo "  rev sync EXPORT"
   sd=joint_noskip
   mkdir $DATA_DUSS/$sd  
-  rsync $FLAGS $SSH_FLAG $JUSUF_BASE/data_duss/$sd/EXPORT*.npz $DATA_DUSS/$sd 
+  $run --mode:$RUNTYPE "$JUSUF_BASE/data_duss/$sd/EXPORT*.npz" "$DATA_DUSS/$sd" 
   sd=per_subj_per_medcond_best_LFP
   mkdir $DATA_DUSS/$sd  
-  rsync $FLAGS $SSH_FLAG $JUSUF_BASE/data_duss/$sd/EXPORT*.npz $DATA_DUSS/$sd 
-  rsync $FLAGS $SSH_FLAG $JUSUF_BASE/data_duss/$sd/beh_states_durations.npz $DATA_DUSS/$sd 
+  $run --mode:$RUNTYPE "$JUSUF_BASE/data_duss/$sd/EXPORT*.npz" "$DATA_DUSS/$sd" 
+  $run --mode:$RUNTYPE "$JUSUF_BASE/data_duss/$sd/beh_states_durations.npz" "$DATA_DUSS/$sd" 
   sd=per_subj_per_medcond_best_LFP_wholectx
   mkdir $DATA_DUSS/$sd  
-  rsync $FLAGS $SSH_FLAG $JUSUF_BASE/data_duss/$sd/EXPORT*.npz $DATA_DUSS/$sd 
-  rsync $FLAGS $SSH_FLAG $JUSUF_BASE/data_duss/$sd/perftable*.npz $DATA_DUSS/$sd 
-  rsync $FLAGS $SSH_FLAG $JUSUF_BASE/data_duss/$sd/beh_states_durations.npz $DATA_DUSS/$sd 
+  $run --mode:$RUNTYPE "$JUSUF_BASE/data_duss/$sd/EXPORT*.npz" "$DATA_DUSS/$sd" 
+  $run --mode:$RUNTYPE "$JUSUF_BASE/data_duss/$sd/perftable*.npz" "$DATA_DUSS/$sd" 
+  $run --mode:$RUNTYPE "$JUSUF_BASE/data_duss/$sd/beh_states_durations.npz" "$DATA_DUSS/$sd" 
   echo "  rev sync bestLFP"
   sd=searchLFP_both_sides
   mkdir $DATA_DUSS/$sd  
-  rsync $FLAGS $SSH_FLAG $JUSUF_BASE/data_duss/$sd/best_LFP_info_both_sides.json $DATA_DUSS/$sd 
-  rsync $FLAGS $SSH_FLAG $JUSUF_BASE/data_duss/$sd/best_LFP_info_both_sides_ext.json $DATA_DUSS/$sd 
-  rsync $FLAGS $SSH_FLAG $JUSUF_BASE/data_duss/$sd/best_LFP_info_both_sides.json $LOCAL_DIR
-  rsync $FLAGS $SSH_FLAG $JUSUF_BASE/data_duss/$sd/best_LFP_info_both_sides_ext.json $LOCAL_DIR
+  $run --mode:$RUNTYPE "$JUSUF_BASE/data_duss/$sd/best_LFP_info_both_sides.json" "$DATA_DUSS/$sd" 
+  $run --mode:$RUNTYPE "$JUSUF_BASE/data_duss/$sd/best_LFP_info_both_sides_ext.json" "$DATA_DUSS/$sd" 
+  $run --mode:$RUNTYPE "$JUSUF_BASE/data_duss/$sd/best_LFP_info_both_sides.json" "$LOCAL_DIR"
+  $run --mode:$RUNTYPE "$JUSUF_BASE/data_duss/$sd/best_LFP_info_both_sides_ext.json" "$LOCAL_DIR"
   sd=searchLFP_both_sides_oversample
-  rsync $FLAGS $SSH_FLAG $JUSUF_BASE/data_duss/$sd/best_LFP_info_both_sides_ext.json $LOCAL_DIR/best_LFP_info_both_sides_oversample.json
+  $run --mode:$RUNTYPE "$JUSUF_BASE/data_duss/$sd/best_LFP_info_both_sides_ext.json" "$LOCAL_DIR/best_LFP_info_both_sides_oversample.json"
 fi
 
 
@@ -139,7 +149,7 @@ if [[ $SYNC_MODE != "get_from" ]]; then
   git tag | tail -1 > last_code_ver_synced_with_HPC.txt
 
   echo "  sync req"
-  rsync $FLAGS $SSH_FLAG "$LOCAL_DIR/requirements.txt" $JUSUF/
-  rsync $FLAGS $SSH_FLAG "$LOCAL_DIR/last_code_ver_synced_with_HPC.txt" $JUSUF/
+  $run --mode:$RUNTYPE ""$LOCAL_DIR/requirements.txt"" "$JUSUF_CODE/"
+  $run --mode:$RUNTYPE ""$LOCAL_DIR/last_code_ver_synced_with_HPC.txt"" "$JUSUF_CODE/"
   $SLEEP
 fi

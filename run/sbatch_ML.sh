@@ -8,19 +8,7 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=128
-#SBATCH --partition=batch
-
-##SBATCH --time=10:00:00
-##SBATCH --mem=128G
-
-#SBATCH --time=09:30:00
-#SBATCH --mem=50G
-#SBATCH --array=0-88
-
-##SBATCH --mem=80G
-##SBATCH --partition=batch
-##SBATCH --time=4:00:00
-##SBATCH --mem=80G
+#SBATCH --mem=80G
 
 ## max array size = 256  (as shown by scontrol show config)
 ## 22 decent dataset 
@@ -28,8 +16,8 @@
 ## sacctmgr list associations
 ## sacctmgr show qos
 
-#SBATCH --output ../slurmout/ML_%A_%a.out
-#SBATCH --error ../slurmout/ML_%A_%a.out
+#SBATCH --output /p/project/icei-hbp-2020-0012/slurmout/ML_%A_%a.out
+#SBATCH --error /p/project/icei-hbp-2020-0012/slurmout/ML_%A_%a.out
 # if keyword omitted: Default is slurm-%j.out in
 # the submission directory (%j is replaced by
 # the job ID).
@@ -133,15 +121,15 @@ while [ $NUMRS -gt $SHIFT_ID ]; do
   fi
   SHIFT_ID=$((SHIFT_ID + MAXJOBS))
 
-  echo "----------------"
-  echo "----------------"
-  echo "----------------"
-  echo "----------------"
   echo "FINISHED job array number: ${ID} (effctive_id = $EFF_ID) on $HOSTNAME,  $SLURM_JOB_ID, $SLURM_ARRAY_JOB_ID"
   NRUNS=$((NRUNS + 1))
   ##########################  ONLY FOR RUNNING OF INDIVID JOBS
   #break
   ##########################
+  echo "----------------"
+  echo "----------------"
+  echo "----------------"
+  echo "----------------"
 done
 
 

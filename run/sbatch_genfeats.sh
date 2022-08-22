@@ -10,7 +10,8 @@
 #SBATCH --cpus-per-task=128
 
 ###SBATCH --time=23:00:00
-#SBATCH --time=02:30:00
+## usually finished in around 30 min
+#SBATCH --time=01:00:00
 ##SBATCH --partition=gpus
 #SBATCH --partition=batch
 #SBATCH --mem=128G
@@ -24,8 +25,8 @@
 ## sacctmgr list associations
 ## sacctmgr show qos
 
-#SBATCH --output ../slurmout/ML_%A_%a.out
-#SBATCH --error ../slurmout/ML_%A_%a.out
+#SBATCH --output /p/project/icei-hbp-2020-0012/slurmout/ML_%A_%a.out
+#SBATCH --error /p/project/icei-hbp-2020-0012/slurmout/ML_%A_%a.out
 # if keyword omitted: Default is slurm-%j.out in
 # the submission directory (%j is replaced by
 # the job ID).

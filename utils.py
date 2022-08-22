@@ -4361,9 +4361,14 @@ def parseMEGsrcChnamesShortList(chnames):
         compis += [compi]
     return sides,groupis,parcelis,compis
 
-def genRecInfoFn(rawname_,sources_type,src_file_grouping_ind):
+def genRecInfoFn(rawname_,sources_type='parcel_aal',src_file_grouping_ind=10,input_subdir='feats_wholectx'):
     #if fntype == 'rec_info':
-    r = '{}_{}_grp{}_src_rec_info.npz'.format(rawname_,sources_type,src_file_grouping_ind)
+    fn = '{}_{}_grp{}_src_rec_info.npz'.format(rawname_,sources_type,src_file_grouping_ind)
+    if len(input_subdir):
+        r = pjoin(input_subdir, fn)
+    else:
+        r = fn
+    r = os.path.join(gv.data_dir, r)
     return r
 
 def genPrepDatFn(rawn, new_main_body_side, data_modalities, use_main_LFP_chan, src_file_grouping_ind,
@@ -4714,30 +4719,28 @@ def pcaica2featCoef(pca,ica):
     mix_appl = pca.components_.T @ mix_large  #np.dot(mix_large,   ica.pca_components_ ) [ sel]
     return mix_appl
 
-def loadLabelsDict(rncur = 'S01_off_hold'):
+def loadLabelsDict(rncur = 'S01_off_hold', verbose = 0):
     ## load labels (not important where from exactly)
 
-    sind_str,mc,tk  = getParamsFromRawname(rncur)
-    sources_type='parcel_aal'
-    src_file_grouping_ind = 10
-    src_rec_info_fn = '{}_{}_grp{}_src_rec_info'.format(rncur,
-                                                        sources_type,src_file_grouping_ind)
-    src_rec_info_fn_full = os.path.join(gv.data_dir, src_rec_info_fn + '.npz')
+    #sind_str,mc,tk  = getParamsFromRawname(rncur)
+    #sources_type='parcel_aal'
+    #src_file_grouping_ind = 10
+    src_rec_info_fn_full = genRecInfoFn(rncur)
+    #src_rec_info_fn = '{}_{}_grp{}_src_rec_info'.format(rncur,
+    #                                                    sources_type,src_file_grouping_ind)
+    #src_rec_info_fn_full = os.path.join(gv.data_dir, src_rec_info_fn + '.npz')
+    #src_rec_info_fn_full = os.path.join(gv.data_dir, src_rec_info_fn)
     rec_info = np.load(src_rec_info_fn_full, allow_pickle=True)
-    print('rec_info.keys() = ', list(rec_info.keys()) )
+    if verbose:
+        print('rec_info.keys() = ', list(rec_info.keys()) )
 
     labels_dict = rec_info['label_groups_dict'][()]
     del rec_info
     return labels_dict
 
 def loadROILabels(rncur = 'S01_off_hold'):
-    #sources_type=multi_clf_output['info']['sources_type']
-    #rc_file_grouping_ind = multi_clf_output['info']['src_grouping_fn']
-    sources_type = 'parcel_aal'
-    src_file_grouping_ind = '10'
-    src_rec_info_fn = '{}_{}_grp{}_src_rec_info'.format(rncur,
-                                                        sources_type,src_file_grouping_ind)
-    src_rec_info_fn_full = os.path.join(gv.data_dir, src_rec_info_fn + '.npz')
+    #src_rec_info_fn_full = os.path.join(gv.data_dir, src_rec_info_fn)
+    src_rec_info_fn_full = genRecInfoFn(rncur)
     rec_info = np.load(src_rec_info_fn_full, allow_pickle=True)
 
     #print( list(rec_info.keys()) )

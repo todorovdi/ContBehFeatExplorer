@@ -1011,12 +1011,14 @@ def groupOutputs(output_per_raw, prefixes = None, label_groupings=None,
     return outputs_grouped
 
 
-def getBestLFP_clToMove(best_LFP_dict,subj,metric='balanced_accuracy',
+#def getBestLFP_clToMove(best_LFP_dict,subj,metric='balanced_accuracy',
+def getBestLFPfromDict(best_LFP_dict,subj,metric='balanced_accuracy',
                         grp = 'merge_nothing', it = 'basic',
                         prefix_type='modLFP_onlyH_act',
                         brain_side='contralat_to_move',
                         disjoint=True, exCB=False, drop_type='only'):
     # disjoint either positive (bool) or negative (=subskip value)
+    # return LFP channel name as a string
     import globvars as gb
     mainmoveside = gv.gen_subj_info[subj].get('move_side',None)
     maintremside = gv.gen_subj_info[subj].get('tremor_side',None)
@@ -1025,12 +1027,14 @@ def getBestLFP_clToMove(best_LFP_dict,subj,metric='balanced_accuracy',
         side = utils.getOppositeSideStr( mainmoveside )
     elif brain_side in ['left','right','both']:
         side = brain_side
-    elif brain_side in ['left_exCB', 'right_exCB']:
+    elif brain_side in ['left_exCB', 'right_exCB', 'left_onlyCB', 'right_onlyCB']:
         side = brain_side.split('_')[0]  # becasue STN is not in Cerebellum
+    elif brain_side.startswith('both'):
+        side = 'both'
     else:
         raise ValueError(f'wrong side {brain_side}')
 
-    if brain_side == 'both':
+    if brain_side.startswith('both'):
         assert not exCB   # just because of runstrings I used to produce best LFP json
     side_det_str = f'brain{side}'
     #movesidelet = mainmoveside_cur[0].upper()

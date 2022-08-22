@@ -111,7 +111,7 @@ prefix = ''
 
 #do_impute_artifacts = 1
 #artif_handling_before_fit = 'impute' #or 'reject' or 'do_nothing'
-artif_handling_before_fit = 'reject'
+artif_handling_before_fit  = 'reject'
 feat_stats_artif_handling  = 'reject'
 do_outliers_discard = 1
 do_cleanup = 1
@@ -505,10 +505,13 @@ for opt,arg in pars.items():
         feat_body_side = arg
     elif opt == 'brain_side_to_use':
         brain_side_to_use = arg
-        assert brain_side_to_use in ['both', 'left', 'right',
+        brain_side_values_allowed = ['both', 'left', 'right',
                                      'left_exCB', 'right_exCB',
+                                     'left_onlyCB', 'right_onlyCB',
                     'contralat_to_move', 'ipsilat_to_move',
-                    'contralat_to_move_exCB', 'ipsilat_to_move_exCB']
+                    'contralat_to_move_exCB', 'ipsilat_to_move_exCB',
+                                     'both_onlyCB']
+        assert brain_side_to_use in brain_side_values_allowed, brain_side_to_use
     elif opt == 'LFP_side_to_use':
         LFP_side_to_use = arg
     elif opt == 'use_featfname_old_regex':
@@ -835,13 +838,14 @@ for rawn in rawnames:
     mainLFPchan = None
     if use_main_LFP_chan:
         best_LFP_info_fname_full = pjoin(gv.data_dir, best_LFP_info_file)
+        print(f'Best LFP fname = {best_LFP_info_fname_full}')
         with open(best_LFP_info_fname_full, 'r') as f:
             best_LFP_info = json.load(f)
 
         #def getBestLFP_clToMove(best_LFP_dict,subj,metric='balanced_accuracy',
         #                grp = 'merge_nothing', it = 'basic', prefix_type='modLFP_onlyH_act',
         #                disjoint=True, exCB=True, drop_type='only'):
-        from utils_postprocess import getBestLFP_clToMove
+        from utils_postprocess import getBestLFPfromDict
         if bestLFP_disjoint == 'auto':
             disjoint = -subskip_fit
         else:
@@ -860,7 +864,7 @@ for rawn in rawnames:
         else:
             raise ValueError('wrong bestLFP_prefix_type = {bestLFP_prefix_type}')
         if best_LFP_exCB is None:
-            if brain_side_to_use == 'both':
+            if brain_side_to_use.startswith('both'):
                 exCB = False
             elif tuple(data_modalities) == tuple(['LFP']) or \
                 tuple(best_LFP_data_mods) == tuple(['LFP']):
@@ -869,7 +873,7 @@ for rawn in rawnames:
                 exCB = True
         else:
             exCB = best_LFP_exCB
-        mainLFPchan = getBestLFP_clToMove(best_LFP_info,subj,
+        mainLFPchan = getBestLFPfromDict(best_LFP_info,subj,
                 disjoint=disjoint,
                 brain_side = brain_side_to_use,
                 exCB = exCB,
@@ -904,9 +908,14 @@ for rawn in rawnames:
 
     ##################
 
-    src_rec_info_fn = '{}_{}_grp{}_src_rec_info'.\
-        format(rawn,sources_type, src_file_grouping_ind)
-    src_rec_info_fn_full = pjoin(gv.data_dir, input_subdir, src_rec_info_fn + '.npz')
+    #src_rec_info_fn = '{}_{}_grp{}_src_rec_info'.\
+    #    format(rawn,sources_type, src_file_grouping_ind)
+    #src_rec_info_fn_full = pjoin(gv.data_dir, input_subdir, src_rec_info_fn + '.npz')
+
+    src_rec_info_fn_full = utils.genRecInfoFn(rawn,sources_type,
+                                         src_file_grouping_ind,
+                                         input_subdir)
+
     rec_info = np.load(src_rec_info_fn_full, allow_pickle=True)
     src_rec_info_pri += [rec_info]
     roi_labels = rec_info['label_groups_dict'][()]
@@ -914,6 +923,8 @@ for rawn in rawnames:
 
     ###########
 
+    # TODO: I can just replace
+    # brain_sie_to_use_cur = brain_side_to_use.replace('contralat_to_move',utils.getOppositeSideStr(mainmoveside_cur) )
     if brain_side_to_use == 'contralat_to_move':
         assert mainmoveside_cur is not None
         brain_side_to_use_cur = utils.getOppositeSideStr(mainmoveside_cur)
@@ -979,6 +990,7 @@ for rawn in rawnames:
 
     if len(good_feats) == 0:
         print('!!!!!!!!!!!!--------  We got zero features! Exiting')
+        raise ValueError('We got zero features! Further analysis is useless. Check your parameters and arguments')
         sys.exit(5)
     X = X_allfeats[:, selected_feat_inds]
 
@@ -2097,7 +2109,7 @@ if do_Classif:
                 X_cur = X_for_heavy
                 y_cur = class_labels_good_for_classif
 
-                X_orig,y_orig = X_cur,y_cur
+                X_orig,y_orig = X_cur,y_cur  # orig meaning not oversampled
                 if XGB_balancing == 'oversample':
                     oversample = RandomOverSampler(sampling_strategy='minority',
                             random_state=0)
