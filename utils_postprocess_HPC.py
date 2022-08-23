@@ -1887,7 +1887,7 @@ def prepTableInfo3(output_per_raw, prefixes=None, perf_to_use_list = [('perfs_XG
                   to_show = [('allsep','merge_nothing','basic')],
                   show_F1=False, use_CV_perf=True, rname_crop = slice(0,3), save_csv = True,
                   sources_type='parcel_aal', subdir='',
-                   scores = ['sens','spec','F1'], return_df = False ):
+                   scores = ['sens','spec','F1'], return_df = False, df_inc_full_dat=False ):
 
     #perf_to_use is either 'perfs_XGB', 'perfs_XGB_red' or one of lda versions
     # Todo: pert_to_use_list -- is list of couples -- one and list ot feat
@@ -5693,6 +5693,83 @@ def plotImportantFeatLocations(sind_str, multi_clf_output,
                             sizes=sizes_list, msz_mult=0.3, seed=seed)
 
     plt.tight_layout()
+
+def getConfmat(mult_clf_output,grouping,it,best_LFP=False, reaver_confmats=False, 
+        normalize_mode = 'true', keep_beh_state_sides = False, ret_pct = True, shuffled=False):
+    # returns confmat (averaged over CV folds)  in percents
+    if not best_LFP:
+        pcm = mult_clf_output['XGB_analysis_versions']['all_present_features']['perf_dict']
+    else:
+        chn_LFP = mult_clf_output['best_LFP']['XGB']['winning_chan']
+        pcm = mult_clf_output['XGB_analysis_versions'][f'all_present_features_only_{chn_LFP}']['perf_dict']
+
+    if shuffled:
+        perf_shuffled = pcm['fold_type_shuffled'][-1]
+        pcm = perf_shuffled
+
+    if reaver_confmats:
+        ps = pcm.get('perfs_CV', None)
+        if isinstance(ps[0],list):
+            confmats_cur = [p[-1] for p in ps]
+        else:
+            confmats_cur = [p['confmat'] for p in ps]
+        confmats_cur_normalized = [utsne.confmatNormalize(cm,normalize_mode) for cm in confmats_cur]
+        confmat_normalized =  np.array(confmats_cur_normalized).mean(axis=0)
+    else:
+        confmat = pcm.get('confmat', None)
+        if confmat is None:
+            confmat = pcm.get('confmat_aver', None)
+        assert confmat is not None
+        confmat_normalized = utsne.confmatNormalize(confmat,normalize_mode) 
+
+    if ret_pct:
+        confmat_normalized *= 100
+    #confmats_normalized += [confmat_normalized]
+
+    class_label_names              = mult_clf_output.get('class_label_names_ordered',None)
+    if keep_beh_state_sides:
+        class_label_names_ticks = class_label_names
+    else :
+        class_label_names_ticks = [cln.replace('_L','').replace('_R','') for cln in class_label_names]
+
+    from globvars import gp
+
+    if keep_beh_state_sides:
+        canon_order = gp.int_types_basic_sided
+    else:
+        #canon_order = gp.int_types_basic
+
+        int_types_basic = ['trem', 'notrem', 'hold', 'move']
+        # needed for canonical ordering
+        int_types_merge_mvt = ['trem', 'notrem', 'hold&move']
+        int_types_merge_notrem = ['trem', 'notrem&hold&move']
+        int_types_trem_vs_quiet = ['trem', 'notrem']
+
+        interval_order_per_merge_it = {('merge_nothing','basic'):int_types_basic,
+         ('merge_movements','basic'): int_types_merge_mvt,
+         ('merge_all_not_trem','basic'): int_types_merge_notrem,
+            ('merge_nothing','trem_vs_quiet'): int_types_trem_vs_quiet        ,
+            ('merge_all_not_trem','trem_vs_quiet'): int_types_trem_vs_quiet        }
+
+        if 'interval_order_per_merge_it' in vars(gp):
+            canon_order = gp.interval_order_per_merge_it[(grouping,it)]
+        else: 
+            canon_order = interval_order_per_merge_it[(grouping,it)]
+        
+
+    perm = [ class_label_names_ticks.index(intname) for intname in canon_order]
+    assert tuple(np.array(class_label_names_ticks)[perm]) == tuple( canon_order) 
+    class_label_names_ticks  = canon_order
+
+    confmat_normalized_reord = confmat_normalized[perm,:][:,perm]
+
+    return confmat_normalized_reord, class_label_names_ticks
+
+def getTremorDetPerf(mult_clf_output,grouping,it, ret_pct=False):
+    # returns in percents
+    cm,clnames = getConfmat(mult_clf_output,grouping,it,ret_pct=ret_pct)
+    ti = clnames.index('trem')
+    return cm[ti,ti]
 
 #def plotConfmats(outputs_grouped, normalize_mode = 'true', best_LFP=False, common_norm = True,
 #                 ww=3,hh=3):
