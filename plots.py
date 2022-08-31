@@ -2,6 +2,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from os.path import join as pjoin
 import os
+import traceback
 
 def plotStepsWbd(dat_stepped, wbd, sfreq, ax=None):
     # to compare windowing with actual data
@@ -1389,7 +1390,8 @@ def plotBrainPerSubj(sind_strs, vis_info_per_subj, source_coords, subdir, clim,
     radius_project = 1.3,
     fit_to_brain = 0,
     verbose=0,
-    save = True):
+    save = True,
+                    crop_out=None ):
 
 
     import globvars as gv
@@ -1477,7 +1479,7 @@ def plotBrainPerSubj(sind_strs, vis_info_per_subj, source_coords, subdir, clim,
             #         #vals_per_source[bads ] = np.min( vals_per_source[ ~bads ]  )
             #         vals_per_source[ bads ] = 0
                     print('vals_per_source  min=', np.min( vals_per_source[~np.isnan(vals_per_source) ]),
-                          np.max( vals_per_source[~np.isnan(vals_per_source) ])
+                          np.max( vals_per_source[~np.isnan(vals_per_source) ]) )
 
                     if fix_vis_info:
                         vi = vis_info_per_subj[sind_strs[0]  ]
@@ -1566,9 +1568,9 @@ def plotBrainPerSubj(sind_strs, vis_info_per_subj, source_coords, subdir, clim,
                     crop_out = crop_out_def
 
                 if save:
-                    render_result = plots.saveRenderVisBrainScene(sc,figfname_full, render_only = not plot_intremed,
+                    render_result = saveRenderVisBrainScene(sc,figfname_full, render_only = not plot_intremed,
                                             crop_out = None)
-                    render_result = plots.saveRenderVisBrainScene(sc,figfname_crp_full, render_only = not plot_intremed,
+                    render_result = saveRenderVisBrainScene(sc,figfname_crp_full, render_only = not plot_intremed,
                                             crop_out = crop_out)
                 else:
                     render_result = None

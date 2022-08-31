@@ -1,13 +1,14 @@
-import numpy as np
+import os
 import re
+from os.path import join as pjoin
+
+import matplotlib.pyplot as plt
+import mne
+import numpy as np
+import scipy.signal as sig
 
 import globvars as gv
-import scipy.signal as sig
-import matplotlib.pyplot as plt
-import globvars as gv
-import os
-import mne
-from os.path import join as pjoin
+
 
 def getIntervalIntersection(a1,b1, a2, b2):
     assert b1 >= a1
@@ -134,7 +135,7 @@ def unpackTimeIntervals(trem_times_byhand, mainSide = True, gen_subj_info=None,
                 #print(subjstr,medcond,task,kt,len(s4p), s4p)
     return tremIntervalJan, artif
 
-def removeBadIntervals(intervals ):
+def removeBadIntervals(intervals):
     '''
     remove pre and post that intersect tremor
     '''

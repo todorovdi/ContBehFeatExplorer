@@ -1,47 +1,37 @@
-import os
-import sys
-import mne
-import json
-import matplotlib.pyplot as plt
-import numpy as np
-import multiprocessing as mpr
-import matplotlib as mpl
-import time
+import builtins; _print = builtins.print
+import copy
+import datetime
 import gc;
-import scipy.signal as sig
+import getopt
+import json
+import multiprocessing as mpr
+import os
+import re
+import sys
+from os.path import join as pjoin
 
+import globvars as gv
+import matplotlib as mpl
+import matplotlib.pyplot as plt
+import mne
 import numpy as np
+import psutil
+import utils
+import utils_postprocess as pp
+import utils_preproc as upre
+import utils_tSNE as utsne
+import xgboost as xgb
+from dateutil import parser
+from featlist import collectFeatTypeInfo, filterFeats, getFeatIndsRelToOnlyOneLFPchan
+from globvars import gp
+from imblearn.over_sampling import RandomOverSampler
+from sklearn import preprocessing
 from sklearn.decomposition import PCA
 from sklearn.discriminant_analysis import LinearDiscriminantAnalysis
 from sklearn.impute import SimpleImputer
-from sklearn.feature_selection import mutual_info_classif
-from sklearn import preprocessing
-
-import globvars as gv
-import utils
-import utils_tSNE as utsne
-import utils_preproc as upre
-
-import re
-import sys, getopt
-import copy
-from globvars import gp
-import datetime
-
 from xgboost import XGBClassifier
-import xgboost as xgb
 
-from os.path import join as pjoin
 
-from resource import getrusage
-import psutil,resource
-import utils_postprocess as pp
-
-from featlist import collectFeatTypeInfo
-from featlist import filterFeats
-from featlist import getFeatIndsRelToOnlyOneLFPchan
-
-import builtins; _print = builtins.print
 def print(*args, **kw):
     if 'flush' not in kw:
         _print(*args, **kw, flush=True)
@@ -201,9 +191,6 @@ XGB_params_search_grid['subsample'] = np.array([0.6,0.75,0.83, 0.9,1.])
 XGB_params_search_grid['eta'] = np.array([.3, .2, .1, .05])
 XGB_grid_test_only = 0
 XGB_balancing = 'oversample'
-
-from imblearn.over_sampling import RandomOverSampler
-from dateutil import parser
 # starting which date we consider loading, all older are considered too old
 load_XGB_params_date_thr = parser.parse("22 April 2022 16:00:15")
 
@@ -3505,10 +3492,6 @@ if show_plots and ( ('pcapoints' in plot_types) or ( 'ldapoints' in plot_types  
     pdf.close()
 
 gc.collect()
-
-
-
-import datetime
 dt = datetime.datetime.now()
 # it will be convenient
 print("NOW is ", dt.strftime(gp.time_format_str ) )
