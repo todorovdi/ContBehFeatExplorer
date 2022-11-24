@@ -1833,8 +1833,8 @@ def loadRaws(rawnames,mods_to_load, sources_type = None, src_type_to_use=None,
 
 
 def saveLFP(rawname_naked, f_highpass = 2, skip_if_exist = 1,
-                         n_free_cores = 2, ret_if_exist = 0, notch=1, highpass=1,
-            raw_FT=None, sfreq=1024, raw_resampled = None,
+                         n_free_cores = 2, ret_if_exist = 0, notch=1,
+            highpass=1, raw_FT=None, sfreq=1024, raw_resampled = None,
             filter_artif_care=1, save_with_anns = 0, n_jobs = 1):
     import globvars as gv
     import multiprocessing as mpr
@@ -1912,7 +1912,8 @@ def saveLFP(rawname_naked, f_highpass = 2, skip_if_exist = 1,
 
     if highpass:
         print('saveLFP: highpass')
-        subraw.filter(l_freq=lowest_freq_to_preserve, h_freq=None,skip_by_annotation='BAD_LFP', n_jobs= nj,
+        subraw.filter(l_freq=lowest_freq_to_preserve, h_freq=None,
+                      skip_by_annotation='BAD_LFP', n_jobs= nj,
                       pad='symmetric')
 
     if not save_with_anns:
@@ -2234,49 +2235,69 @@ def extractEMGData(raw, rawname_=None, skip_if_exist = 1, tremfreq = 9, save_dir
 
     return rectconvraw
 
-def getECGindsICAcomp(icacomp, mult = 1.25, ncomp_test_for_ecg = 6):
+def getECGindsICAcomp(icacomp, pct_thr = 2.2, ncomp_test_for_ecg = 6, ecg_ratio_thr = 6):
     '''
-    smaller mult gives stricter rule
+    icacomp -- output of MNEs ICA
+    pct_thr -- determines how strict we are considering something heartbeat-like. Smaller pct_thr gives stricter rule
+
+    returns:
+        ecg_compinds, ratios, ecg_evts_all
+
+        ecg_compinds: list of ints -- indices in icacomp
+        ratios: list of floats of len=len(icacomp)
+        ecg_evts_all: list of lists of tuples of ints (indices of timebins)
     '''
-    import utils
+    from utils import getIntervals
     sfreq = int(icacomp.info['sfreq'])
-    normal_hr  = [55,105]  # heart rate bounds, Mayo clinic says 60 to 100
+    normal_hr  = [55,105]  # heart rate bounds in beats per min, Mayo clinic says 60 to 100
     ecg_compinds = []
-    ecg_ratio_thr = 6
+
+
+    # Recall that sampling rate is high and hearbeats are realitvely slow
+    # events and they are very sharp (i.e. short), so they won't contribute
+    # too much to the distrubtion, they will be in the righmost part of the
+    # tail
+
     rmax = 0
     ratios = []
+    # cycle over ICA components and for each of them compute how much is
+    # component (robust) maximum different from the median
+    # this will be used to sort components later
     for i in range(len(icacomp.ch_names)):
         comp_ecg_test,times = icacomp[i]
-        #r_ecg_ica_test = mne.preprocessing.ica_find_ecg_events(filt_raw,comp_ecg_test)
-        da = np.abs(comp_ecg_test[0])
-        thr = (normal_hr[1]/60) * mult
-        qq = np.percentile(da, [ thr, 100-thr, 50 ] )
-        mask = da > qq[1]
-        bis = np.where(mask)[0]
-        pl = False
-        r = (qq[1] - qq[2]) / qq[2]
+        da = np.abs(comp_ecg_test[0]) # take absolute part of current component
+        qq = np.percentile(da, [ pct_thr, 100-pct_thr, 50 ] ) # take bottom, top and median of the distribution
+        r = (qq[1] - qq[2]) / qq[2]  # how much are top values different from the median compared to median itself
         ratios += [r]
         rmax = max(rmax, r)
-        if r < ecg_ratio_thr:
-            continue
+    #    if r < ecg_ratio_thr:
+    #        continue
 
     strog_ratio_inds = np.where( ratios > ( np.max(ratios) + np.min(ratios) )  /2  )[0]
     nstrong_ratios = len(strog_ratio_inds)
     print('nstrong_ratios = ', nstrong_ratios)
 
     ecg_evts_all = []
+    # for the first every components, sorted by ratios, found above, find
+    # number of reaches to the top of the distributio per second and compare it
+    # with the normal heart rate range. If it is similar, we judge component to
+    # be heartbeat-related and mark it for removal
     for i in np.argsort(ratios)[::-1][:ncomp_test_for_ecg]:
         comp_ecg_test,times = icacomp[i]
-        #r_ecg_ica_test = mne.preprocessing.ica_find_ecg_events(filt_raw,comp_ecg_test)
         da = np.abs(comp_ecg_test[0])
-        thr = (normal_hr[1]/60) * mult
-        qq = np.percentile(da, [ thr, 100-thr, 50 ] )
+        qq = np.percentile(da, [ pct_thr, 100-pct_thr, 50 ] )
+        # get indices of times where we are above the distribution robust top.
         mask = da > qq[1]
         bis = np.where(mask)[0]
 
-        if i > 8:
+        if i > 8:  # we might want to look more carefully at what happens for components with lower ratios
             pl = 0
-        cvl, ecg_evts  = utils.getIntervals(bis, width=5, thr=1e-5, percentthr=0.95,
+        # here we call a relatively slow function that converts a list of indices to a
+        # list of continuous intervals, allowing some short holes to be present in
+        # the list. Probably there exists faster versions of it
+        # here we don't really care about the intervals themselves, only their number
+        # in a sense it is my version of mne.preprocessing.ica_find_ecg_events(filt_raw,comp_ecg_test)
+        _, ecg_evts  = getIntervals(bis, width=5, thr=1e-5, percentthr=0.95,
                                       inc=5, minlen=2,
                            extFactorL=1e-2, extFactorR=1e-2, endbin = len(mask),
                            include_short_spikes=1, min_dist_between=50, printLog=pl,

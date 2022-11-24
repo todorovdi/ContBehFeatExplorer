@@ -15,7 +15,18 @@ def set_prefs(prefs):
     # 'build/*.o': matches 'build/lib.o' but not 'build/sub/lib.o'
     # 'build//*.o': matches 'build/lib.o' and 'build/sub/lib.o'
     prefs['ignored_resources'] = ['*.pyc', '*~', '.ropeproject',
-                                  '.hg', '.svn', '_svn', '.git', '.tox']
+                                  '.hg', '.svn', '_svn', '.git', '.tox',
+                                    '*.pdf' '*.fig', '*.png', '*.json',
+                                   '*.sh', '*.mat', '*.odg', '*.m',
+                                   '*jupyter*', 'ju_old*', '*.txt',
+                                   '*[old]*', "*.csv", "*.zip",
+                                   ".vimrc", "zOld", "Ann_old",
+                                   "annotations_and_ICA", "coords",
+                                   "from_Hilbert*", "*.ipynb", "log",
+                                   "matlab*", "ica_comp_plots", "output",
+                                   "_from_Jan", ".ipynb_checkpoints",
+                                   "Jan_scripts", "mri_preproc",
+                                   "__pycache__", "patients_info_xls"]
 
     # Specifies which files should be considered python files.  It is
     # useful when you have scripts inside your project.  Only files

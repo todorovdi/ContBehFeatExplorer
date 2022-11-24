@@ -32,6 +32,8 @@ def collectDataFromMultiRaws(rawnames, raws_permod_both_sides, sources_type,
 
     usually mainLFPchan_newname wil not be used because I will better rename in run_PCA
 
+    it does not modify data based on artifacts, only loads it. And returns artifacts separately as well
+
     TODO: not sure whether we want to reverse when using both sides
     '''
     import copy
@@ -911,9 +913,9 @@ def prepTFR(rawnames,anndict_per_intcat_per_rawn,
                 dat_for_tfr2 = dat_lfp_hires_pri[rawind]
                 dat_for_tfr2 = utils.imputeInterpArtif(dat_for_tfr2.T,  artif_cur['LFP'], \
                                         subfeature_order_lfp_hires, sfreq=sfreq_hires, in_place=False).T
+                assert not ( np.any( np.isnan ( dat_for_tfr2 ) ) or np.any( np.isinf ( dat_for_tfr2 ) ) )
 
             assert not ( np.any( np.isnan ( dat_for_tfr ) ) or np.any( np.isinf ( dat_for_tfr ) ) )
-            assert not ( np.any( np.isnan ( dat_for_tfr2 ) ) or np.any( np.isinf ( dat_for_tfr2 ) ) )
 
 
             tfrres_,wbd = utils.tfr(dat_for_tfr, sfreq, freqs, n_cycles,

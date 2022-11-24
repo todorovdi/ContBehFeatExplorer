@@ -1373,7 +1373,7 @@ def plot3DValPerParcel(vals_per_source, val_LFP, vis_info, title,
 
 
 def plotBrainPerSubj(sind_strs, vis_info_per_subj, source_coords, subdir, clim,
-                    countinfo,
+                    countinfo=None,
                      fix_vis_info = True,
     plot_intremed = True,
     figtitle_inc_durations = False,
@@ -1383,15 +1383,19 @@ def plotBrainPerSubj(sind_strs, vis_info_per_subj, source_coords, subdir, clim,
     fit_to_brain_def = 0,
     use_common_colorbar = 1,
     colorbar_individ_show = 0,
+    df_per_mode = None,
     base_key_name = 'base_low',
     hhdef = 900,
     wwdef = 300*4 + 200,
     crop_out_def = (0,230,0,480),  #x,-y_top,-x_right,-y_bottom  # y counted top to bottom
     radius_project = 1.3,
     fit_to_brain = 0,
+    plotinfos_pre = None,
     verbose=0,
     save = True,
-                    crop_out=None ):
+    crop_out=None,
+    pctize_LFP = False,
+    modes = ['LFPand_only']  ):
 
 
     import globvars as gv
@@ -1417,8 +1421,12 @@ def plotBrainPerSubj(sind_strs, vis_info_per_subj, source_coords, subdir, clim,
     all_renders = np.zeros( (len(sind_strs) * hhdef, 2* wwdef, 4) )
     fig_fnames_full = []
     figtitles = []
-    plotinfos = {}
-    modes = ['LFPand_only']
+
+    if plotinfos_pre is None:
+        plotinfos = {}
+    else:
+        plotinfos = plotinfos_pre
+
 
     for rowi,sind_str in enumerate(sind_strs):
     #for sind_str in ['S03']:
@@ -1433,8 +1441,11 @@ def plotBrainPerSubj(sind_strs, vis_info_per_subj, source_coords, subdir, clim,
 
         for mode in  modes:  # exclude
             for mmci,medcond in enumerate( ['off', 'on'] ):
-                plotinfo_cur = {}
-                plotinfos[(sind_str,medcond,mode)] = plotinfo_cur
+                if plotinfos_pre is None:
+                    plotinfo_cur = {}
+                    plotinfos[(sind_str,medcond,mode)] = plotinfo_cur
+                plotinfo_cur = plotinfos[(sind_str,medcond,mode)]
+
                 if medcond == 'on' and sind_str == 'S03':
                     ww2,hh2 = wwdef,hhdef
                     x2,y2=0,0
@@ -1448,24 +1459,28 @@ def plotBrainPerSubj(sind_strs, vis_info_per_subj, source_coords, subdir, clim,
                     continue
                 ttl = f'brain_map_area_strength_{sind_str}_{medcond}'
                 print('Starting producing figure ',ttl)
-                fname_full = pjoin(gv.data_dir,subdir,f'EXPORT_{ttl}_medcond={medcond}_mode={mode}.npz')
-                f = np.load(fname_full,allow_pickle=1)
-                info_rel_LFP = f['info'][()]
+                #fname_full = pjoin(gv.data_dir,subdir,f'EXPORT_{ttl}_medcond={medcond}_mode={mode}.npz')
+                #f = np.load(fname_full,allow_pickle=1)
+                #info_rel_LFP = f['info'][()]
 
-                fname_full2 = pjoin(gv.data_dir,subdir,\
-                    f'EXPORT_{ttl}_medcond={medcond}_mode=only.npz')
-                f2 = np.load(fname_full2,allow_pickle=1)
-                info_abs = f2['info'][()]
+                #fname_full2 = pjoin(gv.data_dir,subdir,\
+                #    f'EXPORT_{ttl}_medcond={medcond}_mode=only.npz')
+                #f2 = np.load(fname_full2,allow_pickle=1)
+                #info_abs = f2['info'][()]
+
+
+                #plotinfo_cur['fname_full'] = fname_full
+                #plotinfo_cur['fname_full2'] = fname_full2
+                #plotinfo_cur['info_pgn_rel_LFP'] = info_rel_LFP
+                #plotinfo_cur['info_pgn_abs'] = info_abs
+
+                #infos[sind_str][medcond]['info2'] = info2
+
+                info_rel_LFP  = plotinfo_cur['info_pgn_rel_LFP']
+                info_abs      = plotinfo_cur['info_pgn_abs']
 
                 if sind_str == 'S01':
                     info0 = info_rel_LFP
-
-                plotinfo_cur['fname_full'] = fname_full
-                plotinfo_cur['fname_full2'] = fname_full2
-                plotinfo_cur['info_pgn_rel_LFP'] = info_rel_LFP
-                plotinfo_cur['info_pgn_abs'] = info_abs
-
-                #infos[sind_str][medcond]['info2'] = info2
 
                 d = dict( zip(info_rel_LFP['brain_area_labels'], info_rel_LFP['intensities']) )
                 #intensitites = np.array(info['intensities'][1:] ) #/100
@@ -1492,34 +1507,43 @@ def plotBrainPerSubj(sind_strs, vis_info_per_subj, source_coords, subdir, clim,
                         vi['headsurfgrid_verts'] = info_rel_LFP['coords']
 
                     title = f'{sind_str}_medcond={medcond.upper()}_mode={mode}_fit{fit_to_brain}'
-                    LFP_val = info_rel_LFP['impr_per_medcond_per_pgn'][medcond].get(base_key_name, None)
-                    #continue
-                    if LFP_val is None:
-                        LFP_val = info_abs['impr_per_medcond_per_pgn'][medcond][base_key_name]
-
+                    LFP_val = info_rel_LFP.get(base_key_name, None)
                     CB_vals = d.get("Cerebellum",None)
+
+                    if pctize_LFP:
+                        LFP_val = LFP_val * 100
+                    plotinfo_cur['LFP_val_mode=only'] = LFP_val
+                    if countinfo is not None:
+                        plotinfo_cur['countinfo'] = countinfo[f'{sind_str}_{medcond}']
+
+
                     if CB_vals is None:
                         CB_vals = d["Cerebellum_L"],d["Cerebellum_R"]
+                    #LFP_val = info_rel_LFP['impr_per_medcond_per_pgn'][medcond].get(base_key_name, None)
+                    #LFP_val = info_rel_LFP['impr_per_medcond_per_pgn'].get(base_key_name, None)
+                    #continue
+                    #if LFP_val is None:
+                    #    #LFP_val = info_abs['impr_per_medcond_per_pgn'][medcond][base_key_name]
+                    #    LFP_val = info_abs['impr_per_medcond_per_pgn'][base_key_name]
+
 
                     print(f'title={title}, CB intensity={CB_vals}, LFP={LFP_val}%, clim={clim}' )
 
-                    LFP_val = LFP_val * 100
-                    plotinfo_cur['LFP_val_mode=only'] = LFP_val
-                    plotinfo_cur['countinfo'] = countinfo[f'{sind_str}_{medcond}']
 
-                    impr_absolute = info_abs['impr_per_medcond_per_pgn'][medcond]
-                    best_area = max(impr_absolute, key=impr_absolute.get)
-                    #best = info2[best_area] #NO, it is single area W/O LFP!
-                    best = np.max(intensitites[~np.isnan(intensitites)]) + LFP_val
                     #assert np.abs(best - best_) < 1e-2
     #                 figtitle = f'{sind_str} {medcond.upper()}' +\
     #                 f',   LFP perf={LFP_val:.1f}%,  LFP+{best_area}={best:.1f}%'
                     figtitle = f'{sind_str} {medcond.upper()}' +\
                     f',   LFP perf={LFP_val:.0f}%\n'
                     if figtitle_inc_LFP_plus_best:
+                        impr_absolute = info_abs['impr_per_medcond_per_pgn']
+                        best_area = max(impr_absolute, key=impr_absolute.get)
+                        #best = info2[best_area] #NO, it is single area W/O LFP!
+                        best = np.max(intensitites[~np.isnan(intensitites)]) + LFP_val
                         figtitle += f'LFP+{best_area}={best:.0f}%'
                     #figtitle += '\n' + countinfo2[f'{sind_str}_{medcond}']
                     if figtitle_inc_durations:
+                        assert countinfo is not None
                         figtitle += '\n' + plotinfo_cur['countinfo']
 
 
@@ -1556,9 +1580,9 @@ def plotBrainPerSubj(sind_strs, vis_info_per_subj, source_coords, subdir, clim,
                     continue
 
 
-                figfname_full= pjoin(gv.code_dir, subdir_fig,
+                figfname_full= pjoin(subdir_fig,
                         f'{title}_visbrain_rad{radius_project}.png')
-                figfname_crp_full= pjoin(gv.code_dir, subdir_fig,
+                figfname_crp_full= pjoin(subdir_fig,
                         f'{title}_visbrain_rad{radius_project}_crp.png')
                 fig_fnames_full += [figfname_full]
                 figtitles += [figtitle]
@@ -1583,5 +1607,6 @@ def plotBrainPerSubj(sind_strs, vis_info_per_subj, source_coords, subdir, clim,
                 renders += [render_result]
                 plotinfo_cur['render_result'] = render_result
                 plotinfo_cur['figfname_full'] = figfname_full
+                plotinfo_cur['figfname_crp_full'] = figfname_crp_full
 
-    return plotinfos
+    return all_renders, renders, plotinfos

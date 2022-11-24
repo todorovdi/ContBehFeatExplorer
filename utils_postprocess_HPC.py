@@ -11,8 +11,10 @@ import matplotlib.pyplot as plt
 from utils_postprocess import multiLevelDict2TupleList
 from pathlib import Path
 
+STS2ststr = {'%':'contra', '^':'ipsi', 'B':'bilat'}
+
 # compared to 2 it adds warid to tuple keys
-def collectPerformanceInfo3(rawnames, prefixes, ndays_before = None,
+def collectPerformanceInfo3(rawnames, prefixes, interval_groupings= None, interval_sets = None, ndays_before = None,
                            n_feats_PCA=None,dim_PCA=None, nraws_used=None,
                            sources_type = None, printFilenames = False,
                            group_fn = 10, group_ind=0, subdir = '', old_file_format=False,
@@ -27,6 +29,7 @@ def collectPerformanceInfo3(rawnames, prefixes, ndays_before = None,
     red means smallest possible feat set as found by XGB
 
     label tuples is a list of tuples ( <newname>,<grouping name>,<int group name> )
+    rawname_regex_full means very general regex for rawnames (meaningful when one combines many rawnames (or its parts) into one
     '''
 
     set_explicit_nraws_used_PCA = nraws_used is not None and isinstance(nraws_used,(int,str))
@@ -193,9 +196,17 @@ def collectPerformanceInfo3(rawnames, prefixes, ndays_before = None,
             if printFilenames:
                 print('skipping {} due to bad prefix'.format(fnf) )
             continue
-
         if rawnames is not None and rawstrid not in rawnames:
-            print('skipping {} due to bad rawname'.format(fnf) )
+            if printFilenames:
+                print('skipping {} due to bad rawname'.format(fnf) )
+            continue
+        if interval_groupings is not None and int_grouping not in interval_groupings:
+            if printFilenames:
+                print(f'Skipping {s} due to bad grouping')
+            continue
+        if interval_sets is not None and intset not in interval_sets:
+            if printFilenames:
+                print(f'Skipping {s} due to bad intset')
             continue
 
         # here we only take the latest
@@ -228,6 +239,7 @@ def collectPerformanceInfo3(rawnames, prefixes, ndays_before = None,
             #print(f'   {s}: {len( tuples ) } tuples')
             for tpli,tpl in enumerate(tuples ):
                 rawstrid,prefix,int_grouping,intset = s
+
                 prefix_eff = prefix[:]
 
                 if allow_multi_fn_same_prefix:
@@ -416,6 +428,246 @@ def getOutputSetInfo( output_per_raw ):
     return rawnames_found, groupings_found, its_found, prefixes_found
 
     # can be not loaded
+
+def fillStatinfo(df_orig, grp, operation, operation_col):
+    if operation == 'max':
+        statinfo = grp.max()
+        res = grp.idxmax()
+    elif operation == 'min':
+        statinfo = grp.min()
+        res = grp.idxmin()
+
+    #statinfo.reset_index(inplace=True)
+    #statinfo.insert(0,'operation',operation)
+    #idmax
+    statinfo['operation'] = operation
+    statinfo['operation_col'] = operation_col
+    # statinfo[f'{bestname}_prefix'] = idmax.apply(lambda x: subdf3.iloc[x['bacc']]['prefix'] , 1)
+    # statinfo[f'{bestname}_prefix_nice'] = idmax.apply(lambda x: subdf3.iloc[x['bacc']]['parcel_group_name_nice'] , 1)
+    # statinfo[f'{bestname}_parcel_group_name'] = idmax.apply(lambda x: subdf3.iloc[x['bacc']]['parcel_group_name'] , 1)
+    # statinfo[f'{bestname}_bacc'] = statinfo['bacc']
+    col2col = {'name':'prefix','name_nice':'parcel_group_name_nice_RC',
+               'parcel_group_names':'parcel_group_names'}
+
+    def tmpf(x):
+        if not np.isnan(x[operation_col]):
+         r = df_orig.loc[ int(x[operation_col] ),col2]
+        else:
+            #display(statinfo)
+            display(operation_col, operation,  x)
+            raise ValueError('bad')
+            r = None
+
+        return r
+    #display(res)
+    #return None
+    for col,col2 in col2col.items():
+        statinfo[col] = res.apply(tmpf  , 1)
+    return statinfo
+
+# returns row with modLFP corresponding to current row (if possible)
+def getCorrespModLFP(row, df, bad_pref_parts = ['_modLFP_'],
+                     base_pref_start = 'onlyH_act_modLFP_subskip8',
+                     base_pref_start_dict = None):
+    #prefix = row['prefix'][0]
+    assert (base_pref_start_dict is None) or (base_pref_start is None)
+    prefix_templ = row['prefix_templ']
+    prefix = row['prefix']
+    if row['prefix'].find('_only') >= 0:
+        mode_only = 1
+    else:
+        mode_only = 0
+
+    if prefix_templ is None and not mode_only:
+        return None
+
+    prefix_LFP,prefix_templ_LFP = None,None
+    if prefix_templ is not None:
+        for bps in bad_pref_parts:
+            if prefix_templ.find(bps) >= 0:
+                return None
+
+        allowed = ['BB','%%','^^']
+        side_code = None
+        for ae in allowed:
+            if prefix_templ.endswith(ae):
+                side_code = ae
+        if side_code is None:
+            return None
+
+        prefix_templ_LFP = None
+        if base_pref_start is not None:
+            prefix_templ_LFP = base_pref_start + side_code
+        else:
+            found = False
+            for bps,bpsv in base_pref_start_dict.items():
+                if prefix_templ.find(bps) >= 0:
+                    prefix_templ_upd = prefix_templ.replace(bps,bpsv)
+                    prefix_templ_LFP = prefix_templ_upd# + side_code
+                    found = True
+                    #import pdb; pdb.set_trace()
+                    break
+            if not found:  # if the prefix is really different, difficult to decide wrt what compute improvemenet
+                return None
+        cond = df[ 'prefix_templ' ] == prefix_templ_LFP
+    else:
+        sidelet = row['LFP_side_to_use'][0].upper()
+        side_code = sidelet + sidelet
+
+        if base_pref_start is not None:
+            prefix_LFP = base_pref_start + side_code
+        found = False
+        for bps,bpsv in base_pref_start_dict.items():
+            ind = prefix.find(bps)
+            if ind >= 0:
+                prefix_upd = prefix[:ind] + bpsv
+                prefix_LFP = prefix_upd + side_code
+                found = True
+                break
+        if not found:  # if the prefix is really different, difficult to decide wrt what compute improvemenet
+            return None
+        cond = df[ 'prefix' ] == prefix_LFP
+        #todo get side
+
+    cols = ['rawname', 'grouping', 'interval_set']
+
+    for col in cols:
+        cond &= df[ col ] == row[col]
+    subdf = df[cond]
+    assert len(subdf) == 1, (prefix,prefix_templ,prefix_LFP,prefix_templ_LFP,len(subdf))
+
+    #print(prefix_templ,side_code,prefix_templ_LFP, subdf.iloc[0]['prefix_templ'])
+
+    return subdf.iloc[0]
+    #assert len(subdf) == 1
+    #row = subdf.head(1)
+    #df[ df[]]
+    #subdf = df[df['barname_pre'] == barname_pre]
+
+# for joint I make some columns have list values, it is not very convenient
+def makeSubjParamsStr(df, inplace=True):
+    if not inplace:
+        df = df.copy()
+    for coln in ['rawname','subject','medcond',
+                 'move_hand_side_letter','move_hand_opside_letter']:
+        lbd = lambda x: ','.join(x)
+        df[coln] = df[coln].apply(lbd,1)
+    return df
+
+## add some more columns
+def addParsColumns(df_all, output_per_raw):
+    extract_pars = ['SLURM_job_id','runstring_ind','parcel_group_names', 'brain_side_to_use','LFP_side_to_use']
+    #%debug
+
+    def tmpf(row):
+        moc = getMocFromRow(row,output_per_raw)
+        if moc is None:
+            return None
+        if 'pars' not in moc:
+            return None
+        return moc['pars'].get(p,None)
+
+    for p in extract_pars:
+        #lbd = lambda row:
+        df_all[p] = df_all.apply(tmpf,1)
+
+def addRunCorrespCols(df, output_per_raw, inplace = True):
+    if not inplace:
+        df = df.copy()
+
+    def lbd(row):
+        moc = getMocFromRow(row,output_per_raw)
+        if moc is None:
+            print('did not find moc for row',row)
+            return None
+        corresp,all_info = loadRunCorresp(moc)
+        prefix = row['prefix']
+        ind,pgn,nice_name = corresp.get(prefix, (None,None,None) )
+        return pgn, nice_name
+    #df['parcel_group_name'] = df.apply(lbd,1)
+
+#     def lbd(row):
+#         moc = getMocFromRow(row,output_per_raw)
+#         if moc is None:
+#             return None
+#         corresp,all_info = loadRunCorresp(moc)
+#         prefix = row['prefix']
+#         ind,pgn,nice_name = corresp.get(prefix, (None,None,None) )
+#         return nice_name
+    df[['parcel_group_name_RC','parcel_group_name_nice_RC']] = df.apply(lbd,1,result_type='expand')
+    return df
+
+# adds improvement and improv shuffled cols to the df produced by plotTableInfo
+def addImprovColDfAll(df, inplace=True, score='bacc', score_shuffled = 'bacc_shuffled', base_pref_start_dict = None):
+    cnvd = {'clmove':'%%', 'ilmove':'^^'}
+    if not inplace:
+        df = df.copy()
+    df['improv']                   = len(df) * [np.nan]
+    df['improv_shuffled']          = len(df) * [np.nan]
+    df['corresp_LFP_prefix_templ'] = len(df) * ['']
+    df['corresp_LFP_prefix']       = len(df) * ['']
+    for index,row in df.iterrows():
+        row_modLFP = getCorrespModLFP(row,df,base_pref_start_dict=base_pref_start_dict, base_pref_start=None)
+        if row_modLFP is None:
+            continue
+
+        df.at[index,'corresp_LFP_prefix_templ'] = row_modLFP['prefix_templ']
+        df.at[index,'corresp_LFP_prefix']       = row_modLFP['prefix']
+
+        area_and_LFP = float( row[score] )
+        LFP = float( row_modLFP[score] )
+        df.at[index,'improv'] = area_and_LFP - LFP
+        #row['improv'] = area_and_LFP - LFP
+
+        area_and_LFP = float( row[score_shuffled] )
+        LFP = float( row_modLFP[score_shuffled] )
+        df.at[index,'improv_shuffled'] = area_and_LFP - LFP
+        #row['improv_shuffled'] = area_and_LFP - LFP
+    return df
+
+def addImprovCol(df, barnames_pre, inplace=True, bad_pref_starts = ['onlyH_act_modLFP_subskip8']):
+    # this adds improv col to onlyBar output
+    cnvd = {'clmove':'%%', 'ilmove':'^^'}
+    if not inplace:
+        df = df.copy()
+    df['improv'] = len(df) * [np.nan]
+    df['improv_shuffled'] = len(df) * [np.nan]
+    for barname_pre in barnames_pre:
+        exit  = 0
+        for bps in bad_pref_starts:
+            if barname_pre.startswith(bps):
+                exit = 1
+        if exit:
+            continue
+
+        subdf = df[df['barname_pre'] == barname_pre]
+        side = barname_pre.split('_')[-1]
+        #print(barname_pre, side)
+        sidetempl = cnvd.get(side,None)
+
+        for index, row in subdf.iterrows():
+            #print(row['barname'])
+            if sidetempl is None:
+                if barname_pre.endswith('among_single-sided'):
+                    area_name_sided = row['barname'].split(' ')[-2]
+                    sidelet = area_name_sided[-1]
+                    #print(area_name_sided,sidelet)
+                    sidetempl_cur = sidelet2sideTempl(sidelet, row['subject']) # 1 symbol
+                    sidetempl_cur += sidetempl_cur
+                elif barname_pre.startswith('onlyH_act_subskip8'):
+                    sidetempl_cur = barname_pre[-2:]
+            else:
+                sidetempl_cur = sidetempl
+
+            cur = df [(df['rawname'] == row['rawname'] ) & (df['barname_pre'] == f'onlyH_act_modLFP_subskip8{sidetempl_cur}' )]
+            area_and_LFP = float( row['p'] )
+            LFP = float( cur['p'] )
+            df['improv'][index] = area_and_LFP - LFP
+
+            area_and_LFP = float( row['p_red'] )
+            LFP = float( cur['p_red'] )
+            df['improv_shuffled'][index] = area_and_LFP - LFP
+    return df
 
 def tupleList2multiLevelDict(tpll): #,min_depth=0,max_depth=99999, cur_depth = 0, prefix_sort = None):
     rawnames_found, groupings_found, its_found, prefixes_found = getOutputSetInfo( tpll )
@@ -658,6 +910,7 @@ def loadCalcOutput(subdir, output_per_raw=None, save_collected=True, ignore_miss
     return output_per_raw
 
 
+
 def plotCalcOutput(subdir, output_per_raw, to_show = [('trem_vs_all','merge_nothing','basic') ] ,
                    ignore_missing = False, rawnames=None, prefixes=None, pref_quick = 'onlyH_actBB' ):
     import globvars as gv
@@ -841,6 +1094,167 @@ def plotCalcOutput(subdir, output_per_raw, to_show = [('trem_vs_all','merge_noth
     print('Plotting finised successfully!')
 
 
+def genBestPGTempls():
+
+    # templ_regex ,bestname, side_to_collect, side_used_in_fit, templ_grp) in enumerate(templs) :
+    templs = []
+    tmplg = 0
+    templs += [ ('onlyH_act_only[0-9]+.*',       'onlyH_act_only_best_among_single-sided','both','single',tmplg)  ]
+    templs += [ ('onlyH_act_LFPand_only[0-9]+.*','onlyH_act_LFPand_best_among_single-sided','both','single',tmplg) ]
+    tmplg += 1
+    templs += [ ('onlyH_act_only[0-9]+.*',       'onlyH_act_only_best_among_two-sided','both','both',tmplg)  ]
+    templs += [ ('onlyH_act_LFPand_only[0-9]+.*','onlyH_act_LFPand_best_among_two-sided','both','both',tmplg) ]
+    tmplg += 1
+    templs += [ ('onlyH_act_only[0-9]+.*',       'onlyH_act_only_best_among_clmove','contralat_to_move','single',tmplg)  ]
+    templs += [ ('onlyH_act_LFPand_only[0-9]+.*','onlyH_act_LFPand_best_among_clmove','contralat_to_move','single',tmplg) ]
+    tmplg += 1
+    templs += [ ('onlyH_act_only[0-9]+.*',       'onlyH_act_only_best_among_ilmove','ipsilat_to_move','single',tmplg)  ]
+    templs += [ ('onlyH_act_LFPand_only[0-9]+.*','onlyH_act_LFPand_best_among_ilmove','ipsilat_to_move','single',tmplg) ]
+    ######################
+    tmplg += 1
+    templs += [ ('onlyH_act_only[0-9]+.*',       'onlyH_act_only_worst_among_clmove','contralat_to_move','single',tmplg)  ]
+    templs += [ ('onlyH_act_LFPand_only[0-9]+.*','onlyH_act_LFPand_worst_among_clmove','contralat_to_move','single',tmplg) ]
+    tmplg += 1
+    templs += [ ('onlyH_act_only[0-9]+.*',       'onlyH_act_only_worst_among_two-sided','both','both',tmplg)  ]
+    templs += [ ('onlyH_act_LFPand_only[0-9]+.*','onlyH_act_LFPand_worst_among_two-sided','both','both',tmplg) ]
+
+    return templs
+
+def findBestParcelGroups(df, exCB = False, remove_bad = 1, verbose=0):
+    from collections import Counter
+    t2p = {}
+    templs = genBestPGTempls()
+    stats = []
+    grps = []
+    for templ_tpl in templs:
+        templ,bestname,side_to_collect,side_used_in_fit,templ_grp = templ_tpl
+        print(templ,bestname,side_to_collect,side_used_in_fit,templ_grp)
+        subdf = df[df['prefix'].str.match(templ)]
+
+        cond = subdf['parcel_group_names'].str.endswith('_L') | \
+            subdf['parcel_group_names'].str.endswith('_R')
+        if side_used_in_fit == 'single':
+            subdf2 = subdf[cond]
+        elif side_used_in_fit == 'both':
+            subdf2 = subdf[~cond]
+
+        cond_exCB = (subdf2['brain_side_to_use'] == 'both') | \
+            subdf2['brain_side_to_use'].str.endswith('exCB')
+        cond2 = np.ones( len(subdf2) , dtype=bool)
+
+        def getSideEff(side_to_collect, pgn, movesidelet, moveopsidelet):
+            side_eff = None
+            if side_to_collect == 'contralat_to_move':
+                if pgn.startswith('Cerebellum'):
+                    side_eff = movesidelet
+                else:
+                    side_eff = moveopsidelet
+            elif side_to_collect == 'ipsilat_to_move':
+                if pgn.startswith('Cerebellum'):
+                    side_eff = moveopsidelet
+                else:
+                    side_eff = movesidelet
+            return side_eff
+
+        def CBsideOk(row):
+            pgn = row['parcel_group_names']
+            # if we have CB that starts is done on the same side with exCB, we should exclude it
+            # because it was actully removed from the features so it is basically just LFP alone
+            b = row['brain_side_to_use'].endswith('exCB')
+            b = b and pgn.startswith('Cerebellum')
+            b = b and pgn[-1] == row['brain_side_to_use'][0].upper()
+            b = not b  # negate
+            return b
+
+        if side_to_collect == 'both':  # TODO: make it better here
+            #subdf3 = subdf2
+            if verbose:
+                print('case1')
+            cond2 = subdf2.apply(CBsideOk,1)
+        else:
+            if side_to_collect in ['left','right']:
+                side_eff = side_to_collect
+                sidelet = side_eff[0].upper()
+                cond2 = subdf2['parcel_group_names'].str.endswith(f'_{sidelet}')
+                if verbose:
+                    print('case2, needs better implementation')
+                    raise ValueError('not sure is fully implemented')
+            else:
+                if verbose:
+                    print('case3')
+
+                def lbd(row):
+                    pgn = row['parcel_group_names']
+                    movesidelet   = row['move_hand_side_letter']
+                    moveopsidelet = row['move_hand_opside_letter']
+                    side_eff = getSideEff(side_to_collect, pgn, movesidelet, moveopsidelet)
+                    sidelet = side_eff[0].upper()
+                    #b = True
+                    # if we have CB that starts is done on the same side with exCB, we should exclude it
+                    # because it was actully removed from the features so it is basically just LFP alone
+                    b = CBsideOk(row)
+                    return b and (sidelet == pgn[-1])
+
+                cond2 = subdf2.apply(lbd,1)
+
+        if exCB:
+            cond2 &= cond_exCB
+        subdf3 = subdf2[cond2]
+
+        lenCB = sum( subdf3[subdf3['rawname'] == 'S01_off']['parcel_group_names'].str.startswith('Cerebellum')  )
+        # dirty hack needed because I have computed a bit too much stuff
+        if lenCB == 3 and remove_bad:
+            bad_prefixes = ['onlyH_act_only46', 'onlyH_act_only48'] + \
+                ['onlyH_act_LFPand_only46', 'onlyH_act_LFPand_only48']
+            subdf3 = subdf3[~subdf3['prefix'].isin(bad_prefixes)]
+
+        subdf3= subdf3.reset_index()
+        grpcols = ['grouping','interval_set','rawname']
+        deb_cols = []
+        deb_cols = ['prefix', 'parcel_group_names', 'brain_side_to_use','LFP_side_to_use']
+        grp = subdf3[grpcols + ['bacc','bacc_shuffled','improv','improv_shuffled','num'] + deb_cols].groupby(grpcols)
+
+        grps += [grp]
+
+        cts = list( set( grp.size() ) )
+        assert len(cts) == 1, cts
+        assert cts[0] in [15,30],  cts[0]
+        #assert cts[0] == len( set(subdf3['prefix']) ), (cts, len( set(subdf3['prefix']) ))
+
+        g = grp.get_group(('merge_nothing', 'basic', 'S01_off'))
+
+        prefixes_grp = g['prefix']
+        pgn_grp      = g['parcel_group_names']
+        t2p[templ_tpl] = prefixes_grp,pgn_grp
+
+        bstu = g['brain_side_to_use']
+        sbstu = set(bstu)
+        n = bstu.nunique()
+        #assert n == 1, sbstu
+        lenCB = sum( pgn_grp.str.startswith('Cerebellum') )
+
+        if verbose:
+            print(cts, len(prefixes_grp), lenCB, Counter(bstu))
+    #     if cts[0] > 31:
+    #         break
+        if 'best' in bestname:
+            operation = 'max'
+        elif 'worst' in bestname:
+            operation = 'min'
+
+        for operation_col in ['bacc', 'improv']:
+            r = fillStatinfo(subdf3, grp, operation, operation_col).reset_index()
+            r['bestname'] = bestname
+            r['side_to_collect'] = side_to_collect
+            r['side_used_in_fit'] = side_used_in_fit
+            r['best_templ'] = templ
+
+            stats += [r]
+
+        print('')
+    stats = pd.concat(stats).reset_index().drop('index',1)
+    return stats
+
 def addBestParcelGroups(output_per_raw, table_info_per_perf_type,
                         perf_tuple, score='special:min(sens,spec)',do_add=True,
                        remove_redundant_quasibest = True ):
@@ -854,22 +1268,8 @@ def addBestParcelGroups(output_per_raw, table_info_per_perf_type,
 
     from utils_postprocess_HPC import _extractPerfNumber
 
-    templs = []
-    tmplg = 0
-    templs += [ ('onlyH_act_only[0-9]+.*',       'onlyH_act_only_best_among_single-sided','both','single',0)  ]
-    templs += [ ('onlyH_act_LFPand_only[0-9]+.*','onlyH_act_LFPand_best_among_single-sided','both','single',0) ]
-    tmplg += 1
-    templs += [ ('onlyH_act_only[0-9]+.*',       'onlyH_act_only_best_among_two-sided','both','both',1)  ]
-    templs += [ ('onlyH_act_LFPand_only[0-9]+.*','onlyH_act_LFPand_best_among_two-sided','both','both',1) ]
-    tmplg += 1
-    templs += [ ('onlyH_act_only[0-9]+.*',       'onlyH_act_only_best_among_clmove','contralat_to_move','single',2)  ]
-    templs += [ ('onlyH_act_LFPand_only[0-9]+.*','onlyH_act_LFPand_best_among_clmove','contralat_to_move','single',2) ]
-    tmplg += 1
-    templs += [ ('onlyH_act_only[0-9]+.*',       'onlyH_act_only_best_among_ilmove','ipsilat_to_move','single',3)  ]
-    templs += [ ('onlyH_act_LFPand_only[0-9]+.*','onlyH_act_LFPand_best_among_ilmove','ipsilat_to_move','single',3) ]
-    tmplg += 1
-    templs += [ ('onlyH_act_only[0-9]+.*',       'onlyH_act_only_worst_among_two-sided','both','both',tmplg)  ]
-    templs += [ ('onlyH_act_LFPand_only[0-9]+.*','onlyH_act_LFPand_worst_among_two-sided','both','both',tmplg) ]
+    templs = genBestPGTempls()
+
 
     templ_ind_sets = {}
     for ti,(templ,bestname,side_to_collect,side_used_in_fit,templ_grp) in enumerate(templs) :
@@ -907,7 +1307,6 @@ def addBestParcelGroups(output_per_raw, table_info_per_perf_type,
                     ind,pgn,nice_name = corresp.get(prefix, (None,None,None) )
                     if pgn is None or pgn == 'LFP':
                         continue
-
                     pgn_has_one_side = pgn.endswith('_L') or pgn.endswith('_R')
                     c1 = (side_used_in_fit == 'single' and pgn_has_one_side )
                     c2 = (side_used_in_fit == 'both' and (not pgn_has_one_side ) )
@@ -979,23 +1378,26 @@ def addBestParcelGroups(output_per_raw, table_info_per_perf_type,
                         mpgn = pgn
                         #print(nice_name)
                     i += 1
+
                 #print(i)
                 if bestname.find('worst') >= 0:
                     d[bestname] = d[mkey_min].copy()
                     d[bestname]['name_best'] = mkey_min
                     d[bestname]['name_nice_best'] = mkey_min_nice
                     d[bestname]['parcel_group_name'] = mpgn_min
-                else:
+                elif bestname.find('best') >= 0:
                     d[bestname] = d[mkey].copy()
                     d[bestname]['name_best'] = mkey
                     d[bestname]['name_nice_best'] = mkey_nice
                     d[bestname]['parcel_group_name'] = mpgn
+                else:
+                    raise ValueError(f'Found nothing in {bestname}')
 
                 print(k,bestname,mkey,'pgn=',mpgn,'nice=',mkey_nice, m)#,d[mkey][perfkey])
         #print(k,list(d['modLFP'].keys()))
     #print(list(table_info_per_perf_type[perf_tuple][('S07_off', 'merge_nothing', 'basic')].keys() ) )
     #%debug
-    
+
 
     similarity_thr = 5e-2
     #  Handle case when LFP + best of single areas is NOT the same as best (LFP + single)
@@ -1018,7 +1420,7 @@ def addBestParcelGroups(output_per_raw, table_info_per_perf_type,
                         assert prefix_alt in prefs_cur, (prefix_alt, prefs_cur)
                 elif bestname.startswith('onlyH_act_LFPand_best'):
                     prefix_LFP_best = bestname
-                else: 
+                else:
                     print(f'not found best-like start in  {templ_tpl}')
 
             if not len(prefix_alt):
@@ -1062,45 +1464,6 @@ def addBestParcelGroups(output_per_raw, table_info_per_perf_type,
                 if prefix_quasibest in d and remove_redundant_quasibest:
                     del d[prefix_quasibest]
 
-
-
-        #name_nice1 = d['onlyH_act_only_best']['name_nice_best']
-        #name_nice2 = d['onlyH_act_LFPand_best']['name_nice_best']
-        ##name_nice1 = name_nice1.split()[-1]
-        ##name_nice2 = name_nice2.split()[-1]
-        #print(k)
-
-        ##key = d['onlyH_act_only_best']['name_best']
-        ## that would have been
-        #kk = d['onlyH_act_only_best']['name_best'].replace('_only','_LFPand_only')
-        #corresp,all_info = loadRunCorresp(output_per_raw[k[0]][kk][k[1]][k[2]])
-        #ind,pgn,nice_name = corresp[kk]
-
-        #c1 = name_nice2.find(name_nice1) < 0
-        #p1 = _extractPerfNumber(d['onlyH_act_LFPand_best'], perfkey)
-        #p2 = _extractPerfNumber( d[kk], perfkey)
-        #pdiff = np.abs(p1  - p2)
-        #c2 = pdiff > similarity_thr
-        #if c1 and c2:
-        #    print(pdiff)
-        #    #assert nice_name.split()[-1].find( name_nice1.split()[-1] ) >= 0,  (nice_name,  name_nice1)
-        #    assert nice_name.find(name_nice1) >= 0, (nice_name,  name_nice1)
-
-        #    d['onlyH_act_LFPand_quasibest'] = d[kk].copy()
-        #    d['onlyH_act_LFPand_quasibest']['name_best'] = kk
-        #    d['onlyH_act_LFPand_quasibest']['name_nice_best'] = nice_name
-        #    d['onlyH_act_LFPand_quasibest']['parcel_group_name'] = pgn
-        #else:
-        #    if c1 and not c2:  # if areas are different but perf is similar
-        #        #d['onlyH_act_LFPand_best'] = kk
-        #        d['onlyH_act_LFPand_best'] = d[kk].copy()
-        #        d['onlyH_act_LFPand_best']['name_best'] = kk
-        #        d['onlyH_act_LFPand_best']['name_nice_best'] = nice_name
-        #        d['onlyH_act_LFPand_best']['parcel_group_name'] = pgn
-
-        #    if 'onlyH_act_LFPand_quasibest' in d:
-        #        del d['onlyH_act_LFPand_quasibest']
-
 def plotOnePrefQuick(rawnames,table_info_per_perf_type, perf_to_use, pref = 'onlyH_actBB',
                      scores=['bacc','sens','spec'], title_type = 'subj'):
     subjs = list(sorted(set( [rn.split('_')[0] for rn in rawnames] ) ))
@@ -1122,15 +1485,16 @@ def plotOnePrefQuick(rawnames,table_info_per_perf_type, perf_to_use, pref = 'onl
         medcond = medcond.upper()
         axi = subjs.index(subj)
 
-        mainmoveside = gv.gen_subj_info[subj].get('move_side',None)
-        assert mainmoveside is not None
-        movesidelet = mainmoveside[0].upper()
-        moveopsidelet = utils.getOppositeSideStr( movesidelet )
+        #mainmoveside = gv.gen_subj_info[subj].get('move_side',None)
+        #assert mainmoveside is not None
+        #movesidelet = mainmoveside[0].upper()
+        #moveopsidelet = utils.getOppositeSideStr( movesidelet )
 
-        #rpint(aa[tpl].keys() )
-        #print( aa[tpl]['onlyH_act'].keys() )
-        pref_eff = pref.replace('%', moveopsidelet)
-        pref_eff = pref_eff.replace('^', movesidelet)
+        ##rpint(aa[tpl].keys() )
+        ##print( aa[tpl]['onlyH_act'].keys() )
+        #pref_eff = pref.replace('%', moveopsidelet)
+        #pref_eff = pref_eff.replace('^', movesidelet)
+        pref_eff = prefTempl2pref(pref, subj)
 
         for coli,score in enumerate(scores):
             val = aa[tpl][pref_eff][score]
@@ -1147,8 +1511,6 @@ def plotOnePrefQuick(rawnames,table_info_per_perf_type, perf_to_use, pref = 'onl
 
     # 'balanced acc'
             axs[-1,coli].set_xlabel(score)
-        #break
-    #.keys()
 
 def _old_collectPerformanceInfo2_(rawnames, prefixes, ndays_before = None,
                            n_feats_PCA=None,dim_PCA=None, nraws_used=None,
@@ -1465,13 +1827,14 @@ def getFileAge(fname_full, ret_hours=True):
     return r
 
 def listRecent(days = 5, hours = None, lookup_dir = None,
-               start_time=None,end_time=None):
+               start_time=None,end_time=None, verbose=1):
     if lookup_dir is None:
         lookup_dir = gv.data_dir
     lf = os.listdir(lookup_dir)
     final_list = []
+    if verbose:
+        print('INFO listRecent: Found {len(final_list)} in {lookup_dir}')
     for f in lf:
-
         date_ok = True
         modified = os.stat( pjoin(lookup_dir,f) ).st_mtime
         dt = datetime.fromtimestamp(modified)
@@ -1503,10 +1866,13 @@ def listRecent(days = 5, hours = None, lookup_dir = None,
 
 def listRecentPrefixes(days = 5, hours = None, lookup_dir = None,
                        light_only=True, custom_rawname_regex=None,
-                      start_time=None,end_time=None ):
+                      start_time=None,end_time=None, recent_files=None ):
     import re
-    lf = listRecent(days, hours, lookup_dir, start_time=start_time,
-                    end_time=end_time)
+    if recent_files is not None:
+        lf = recent_files
+    else:
+        lf = listRecent(days, hours, lookup_dir, start_time=start_time,
+                        end_time=end_time)
     prefixes = []
 
 
@@ -1653,211 +2019,6 @@ def collectFeatNums(output_per_raw, clf_types=None):
 
     return feat_nums_perraw, feat_nums_perraw0, feat_nums_red_perraw, feat_nums_red2_perraw, feat_numdict_perraw
 
-
-def _old_prepTableInfo2_(output_per_raw, prefixes=None, perf_to_use_list = [('perfs_XGB','perfs_XGB_red') ],
-                  to_show = [('allsep','merge_nothing','basic')],
-                  show_F1=False, use_CV_perf=True, rname_crop = slice(0,3), save_csv = True,
-                  sources_type='parcel_aal', subdir=''):
-
-    #perf_to_use is either 'perfs_XGB', 'perfs_XGB_red' or one of lda versions
-    # Todo: pert_to_use_list -- is list of couples -- one and list ot feat
-    # reductions
-
-    #if feat_nums_perraw is None or feat_nums_red_perraw is None:
-    r = collectFeatNums(output_per_raw)
-    feat_nums_perraw, feat_nums_perraw0, \
-        feat_nums_red_perraw, feat_nums_red2_perraw,\
-        feat_numdict_perraw = r
-
-#label_types = [tpl[0] for tpl in to_show]
-#print(label_types)
-    table_info_per_perf_type = {}
-    table_per_perf_type = {}
-
-    assert output_per_raw is not None
-    #rname_crop = slice(0,-5) # keeping medcond info
-    #rname_crop = slice(0,3) # keeping medcond info
-
-    if prefixes is None:
-        k0 = list( output_per_raw.keys() ) [0]
-        prefixes = list( sorted( list( output_per_raw[k0].keys() ) ) )
-
-    for tpl in perf_to_use_list:
-        clf_type,perf_to_use,perf_red_to_use = tpl
-        info_per_rn_pref ={}
-        red_mode = False
-        if perf_to_use.endswith('_red'):
-            red_mode = True
-        #table =  [ [''] +  prefix_labels_perraw[rawnames[0] ]
-        #table =  [ [''] +  [ dct.get(prefix,prefix) for dct in prefix_labels_perraw] ]
-        table =  [ [''] +  prefixes ]
-        was_valid, was_red_valid = False, False
-        for rn in output_per_raw:
-            for lt, it_grp, it_set in to_show:
-            #for lt in label_types:
-                info_per_pref = {}
-                # raw and label type (grouping+int_types) name goes here
-                # this will be a row name
-                row_name = '{}_{}'.format(rn[rname_crop], lt)
-                table_row = [row_name ]
-                for prefix in prefixes:
-                    info_cur = {}
-                    #sens,spec = res[rn].get(pref, (np.nan, np.nan))
-                    r = output_per_raw[rn].get(prefix, None)
-                    if (r is not None) and (it_grp not in r or it_set not in r[it_grp]):
-                        r = None
-
-                    perfs = None
-                    if r is None:
-                        print(f'  Warning: no prefix {prefix} for {rn}')
-                    else:
-                        mult_clf_results = r[it_grp][it_set]
-                        if mult_clf_results is not None:
-
-                            numdict_cur_ = feat_numdict_perraw[rn][prefix][(it_grp,it_set)]
-                            numdict_cur = numdict_cur_[clf_type]
-
-                            perfs_CV,perfs_noCV, perfs_red_CV,perfs_red_noCV  = None,None,None,None
-                            num,num_red = None, None
-                            if clf_type == 'XGB':
-                                if perf_to_use == 'perfs_XGB':
-                                #if perf_to_use in ['perfs_XGB','perfs_XGB_red']:
-                                    #if 'perfs_XGB' in mult_clf_results and mult_clf_results['perfs_XGB'] is not None:
-                                    if perf_to_use in mult_clf_results and mult_clf_results[perf_to_use] is not None:
-                                        perfs_XGB = mult_clf_results[perf_to_use]
-                                        ind = 0
-                                        perfs_noCV = perfs_XGB[ind]['perf_nocv']
-                                        perfs_CV = perfs_XGB[ind]['perf_aver']
-                                        if perf_red_to_use == 'perfs_XGB_red':
-                                            perfs_XGB = mult_clf_results[perf_to_use]
-                                            num_red = numdict_cur['red']
-                                        elif perf_red_to_use == 'perfs_XGB_fs_red':
-                                            perfs_XGB = mult_clf_results['perfs_XGB_fs']
-                                            num_red = numdict_cur['fs_red']
-                                        else:
-                                            raise ValueError(f'Undef! perf_red_to_use={perf_red_to_use}')
-                                        ind = -1
-                                        perfs_red_noCV = perfs_XGB[ind]['perf_nocv']
-                                        perfs_red_CV = perfs_XGB[ind]['perf_aver']
-                                        #if perf_to_use == 'perfs_XGB':
-                                        #    ind = 0
-                                        #elif perf_to_use == 'perfs_XGB_red':
-                                        #    ind = -1
-                                        num = numdict_cur['all_features']
-                                else:
-                                    XGB_anver = mult_clf_results['XGB_analysis_versions']
-                                    anver_cur = XGB_anver.get(perf_to_use)
-                                    if anver_cur is not None:
-                                        perfs_CV = anver_cur['perf_aver']
-                                        perfs_noCV = anver_cur['perf_nocv']
-                                    else:
-                                        print(f'perf_to_use (={perf_to_use}): None!')
-
-                                    anver_red_cur = XGB_anver.get(perf_red_to_use)
-                                    if anver_red_cur is not None:
-                                        perfs_red_CV = anver_red_cur['perf_aver']
-                                        perfs_red_noCV = anver_red_cur['perf_nocv']
-                                    else:
-                                        print(f'perf_to_use (={perf_to_use}): None!')
-                            elif clf_type == 'LDA':
-                                #print("DDDDDDDDDDDDDDDDDDDDDDDDDD")
-                                lda_anver = mult_clf_results.get('LDA_analysis_versions',None)
-                                if lda_anver is None:
-                                    lda_anver = mult_clf_results['lda_analysis_versions']
-
-                                anver_cur = lda_anver.get(perf_to_use,None)
-                                if anver_cur is not None:
-                                    perfs_CV = anver_cur['CV']['CV_perfs']
-                                    perfs_CV = np.mean(np.array([ perfs_CV[ip][:3] for ip in range(len(perfs_CV)) ]   ), axis=0)
-                                    perfs_CV2 = anver_cur['CV_aver']['perfs']
-                                    perfs_noCV = anver_cur['fit_to_all_data']['perfs']
-                                else:
-                                    print(f'perf_to_use (={perf_to_use}): None!')
-
-                                anver_red_cur = lda_anver.get(perf_red_to_use,None)
-                                if anver_red_cur is not None:
-                                    perfs_red_CV = anver_red_cur['CV']['CV_perfs']
-                                    perfs_red_CV = np.mean(np.array([ perfs_red_CV[ip][:3] for ip in range(len(perfs_red_CV)) ]   ), axis=0)
-                                    perfs_red_CV2 = anver_red_cur['CV_aver']['perfs']
-                                    perfs_red_noCV = anver_red_cur['fit_to_all_data']['perfs']
-                                else:
-                                    print(f'perf_red_to_use (={perf_red_to_use}): None!')
-
-                                num = numdict_cur[perf_to_use]
-                                num_red = numdict_cur[perf_red_to_use]
-
-                            if use_CV_perf:
-                                perfs = perfs_CV
-                                perfs_red = perfs_red_CV
-                            else:
-                                perfs = perfs_noCV
-                                perfs_red = perfs_red_noCV
-
-                    if perfs is None:
-                        print('Warning :',rn,prefix,lt)
-                        sens,spec,F1 = np.nan, np.nan, np.nan
-                    else:
-                        #print([type( p) for p in perfs])
-                        # sometimes perfs has confmat but sometimes not
-                        sens,spec,F1 = perfs[0],perfs[1],perfs[2]
-                        was_valid = True
-
-                    if perfs_red is None:
-                        sens_red,spec_red,F1_red = np.nan, np.nan, np.nan
-                    else:
-                        #print([type( p) for p in perfs_red])
-                        sens_red,spec_red,F1_red = perfs_red[0],perfs_red[1],perfs_red[2]
-                        was_red_valid = True
-
-                    info_cur['sens'] = sens
-                    info_cur['spec'] = spec
-                    info_cur['F1'] = F1
-                    info_cur['sens_red'] = sens_red
-                    info_cur['spec_red'] = spec_red
-                    info_cur['F1_red'] = F1_red
-                    info_cur['num'] = num
-                    info_cur['num_red'] = num_red
-                    #str_to_put = '{:.0f},{:.0f}'.format(100*sens,100*spec)
-                    if show_F1:
-                        str_to_put =  '{:.0f},{:.0f},{:.0f}'.format(100*sens,100*spec,100*F1)
-                    else:
-                        str_to_put =  '{:.0f},{:.0f}'.format(100*sens,100*spec)
-                    try:
-                        if red_mode:
-                            s = ' :{}/{}'.format(num_red,num)
-                        else:
-                            s = ' :{}/{}'.format(num,num)
-                        str_to_put = str_to_put + s
-
-                    except KeyError as e:
-                        print('AAAAA ',perf_to_use,rn,prefix,it_grp,it_set,e)
-                    table_row += [ str_to_put  ]
-                    print(rn,lt,prefix,str_to_put)
-
-                    info_per_pref[prefix] = info_cur
-
-                table += [table_row]
-                info_per_rn_pref[ (rn,it_grp, it_set) ] = info_per_pref
-
-
-            #rn,pref,lt
-
-    #         table = np.array(table)
-            if not was_valid:
-                print('All nan, skipping')
-                continue
-
-            table_fname = "pptable_{}_{}_nr{}_nprefixes{}_nlts{}_{}_CV{}.csv".\
-            format(sources_type, subdir, len(output_per_raw), len(prefixes),
-                   len(to_show), perf_to_use, int(use_CV_perf) )
-            table_fname_full = os.path.join(gv.dir_fig, table_fname)
-            print(table_fname_full)
-
-        table_per_perf_type[perf_to_use] = table
-        table_info_per_perf_type[tpl] = info_per_rn_pref
-
-    return table_info_per_perf_type, table_per_perf_type
-
 def confmat2bacc(C, mean_per_class=True, adjusted = False):
     if isinstance(C,list):
         Cs = C
@@ -1883,11 +2044,50 @@ def confmat2bacc(C, mean_per_class=True, adjusted = False):
         score /= 1 - chance
     return score
 
+def analyzeRnstr(rn):
+    mcs = []
+    if ',' in rn:
+        subjs_involved = []
+        subrns = rn.split(',')
+        mvss = []
+        mcs = []
+        for subrn in subrns:
+            parts = subrn.split('_')
+            subj = parts[0]
+            if len(parts) > 1:
+                mc = parts[1]
+                mcs += [mc]
+            mts = gv.gen_subj_info[subj].get('move_side',None)
+            mvss += [mts]
+            subjs_involved += [subj]
+        #assert len( set(mvss) ) == 1, (rn, set(mvss) )
+        #assert len( set(mcs) ) == 1
+        mainmoveside = mvss[0]
+
+        mc   = mcs[0]
+    else:
+        parts = rn.split('_')
+        subj = parts[0]
+        mainmoveside = gv.gen_subj_info[subj].get('move_side',None)
+        if len(parts) > 1:
+            mc   = parts[1]
+            mcs = [mc]
+        subjs_involved = [subj]
+        mvss = [mainmoveside]
+    assert mainmoveside is not None
+    movesidelet   = mainmoveside[0].upper()
+    moveopsidelet = utils.getOppositeSideStr( movesidelet )
+
+    mvsls  = [ s[0].upper() for s in mvss ]
+    mvosls = [ utils.getOppositeSideStr(s)[0].upper() for s in mvss ]
+
+    return  subjs_involved, mcs, mvsls, mvosls
+
 def prepTableInfo3(output_per_raw, prefixes=None, perf_to_use_list = [('perfs_XGB','perfs_XGB_red') ],
                   to_show = [('allsep','merge_nothing','basic')],
                   show_F1=False, use_CV_perf=True, rname_crop = slice(0,3), save_csv = True,
                   sources_type='parcel_aal', subdir='',
-                   scores = ['sens','spec','F1'], return_df = False, df_inc_full_dat=False ):
+                   scores = ['sens','spec','F1'], return_df = False, df_inc_full_dat=False, recalc = False ):
 
     #perf_to_use is either 'perfs_XGB', 'perfs_XGB_red' or one of lda versions
     # Todo: pert_to_use_list -- is list of couples -- one and list ot feat
@@ -1900,7 +2100,10 @@ def prepTableInfo3(output_per_raw, prefixes=None, perf_to_use_list = [('perfs_XG
     colnames += ['num','num_red','num_red2', 'bacc','acc''descr','comment_from_runstrings']
     for measure in ['sens', 'spec','F1']:
         for suff in ['','_red','_add']:
-            for recalc in ['','_recalc']:
+            rcns = ['']
+            if recalc:
+                rcns += ['_recalc']
+            for recalc in rcns:
                 colnames += [ measure + suff + recalc ]
     import pandas as pd
     df = pd.DataFrame(columns=colnames)
@@ -1934,6 +2137,11 @@ def prepTableInfo3(output_per_raw, prefixes=None, perf_to_use_list = [('perfs_XG
         table =  [ [''] +  prefixes ]
         was_valid, was_red_valid = False, False
         for rn in output_per_raw:
+
+            subjs_involved, mcs, mvsls, mvosls = analyzeRnstr(rn)
+            movesidelet = mvsls[0]
+            moveopsidelet = mvosls[0]
+
             for lt, it_grp, it_set in to_show:
             #for lt in label_types:
                 info_per_pref = {}
@@ -1942,7 +2150,14 @@ def prepTableInfo3(output_per_raw, prefixes=None, perf_to_use_list = [('perfs_XG
                 row_name = '{}_{}'.format(rn[rname_crop], lt)
                 table_row = [row_name ]
                 for prefix in prefixes:
+                    print('start row',rn,it_grp,it_set,prefix)
                     info_cur = {}
+
+                    #if len(subjs_involved) == 1:
+                    info_cur['subject'] = list(set(subjs_involved))
+                    info_cur['medcond'] = list(set(mcs))
+                    info_cur['move_hand_side_letter'] = list(set(mvsls))
+                    info_cur['move_hand_opside_letter'] = list(set(mvosls))
                     #sens,spec = res[rn].get(pref, (np.nan, np.nan))
                     r = output_per_raw[rn].get(prefix, None)
                     if (r is not None) and (it_grp not in r or it_set not in r[it_grp]):
@@ -1978,21 +2193,21 @@ def prepTableInfo3(output_per_raw, prefixes=None, perf_to_use_list = [('perfs_XG
 
                             corresp, all_runstr_info = loadRunCorresp(mult_clf_results)
 
+
                             class_label_names = mult_clf_results.get('class_label_names_ordered',None)
-                            if class_label_names is not None:
-                                subj = rn.split('_')[0]
-                                mainmoveside = gv.gen_subj_info[subj].get('move_side',None)
-                                assert mainmoveside is not None
-                                movesidelet = mainmoveside[0].upper()
-                                fn = getLogFname(mult_clf_results)
-                                print(fn)
-                                lblind_trem = class_label_names.index(f'trem_{movesidelet}')
-                                #print('prepTableInfo3: warninig: Using fixed side for tremor: trem_L')
-                            else:
-                                lblind_trem = 0
+                            if recalc:
+                                if class_label_names is not None:
+                                    assert len(set(mvsls)) == 1
+                                    fn = getLogFname(mult_clf_results)
+                                    print(fn)
+                                    lblind_trem = class_label_names.index(f'trem_{movesidelet}')
+                                    #print('prepTableInfo3: warninig: Using fixed side for tremor: trem_L')
+                                else:
+                                    lblind_trem = 0
 
                             perfs_CV,perfs_noCV, perfs_red_CV,perfs_red_noCV  = None,None,None,None
                             perfs_CV_recalc,perfs_red_CV_recalc = None,None
+                            perfs_add_CV_recalc = None,None,None
                             perf_shuffled = None
                             if clf_type == 'XGB':
                                 XGB_anver = mult_clf_results['XGB_analysis_versions']
@@ -2009,25 +2224,30 @@ def prepTableInfo3(output_per_raw, prefixes=None, perf_to_use_list = [('perfs_XG
                                         ps = perfd.get('perfs_CV', None)
 
                                         perf_shuffled = perfd['fold_type_shuffled'][-1]
-                                    perfs_CV_recalc = recalcPerfFromCV(ps,lblind_trem)
+                                    if recalc:
+                                        perfs_CV_recalc = recalcPerfFromCV(ps,lblind_trem)
 
                                     confmats_cur = [p['confmat'] for p in ps]
 
-                                    if perf_add is not None:
-                                        if perf_add == 'across_subj':
+                                    if perf_add_cur is not None:
+                                        if perf_add_cur == 'across_subj':
                                             pdict = anver_cur['across'].get('subj',None)
+                                            if pdict is None:
+                                                import pdb; pdb.set_trace()
                                             if pdict is not None:
                                                 perfs_add_CV = pdict['perf_aver']
                                                 perfs_add_noCV = pdict['perf_nocv']
                                                 ps = pdict['perfs_CV']
-                                                perfs_add_CV_recalc = recalcPerfFromCV(ps,lblind_trem)
-                                        elif perf_add == 'across_medcond':
+                                                if recalc:
+                                                    perfs_add_CV_recalc = recalcPerfFromCV(ps,lblind_trem)
+                                        elif perf_add_cur == 'across_medcond':
                                             pdict = anver_cur['across']['medcond']
                                             if pdict is not None:
                                                 perfs_add_CV = pdict['perf_aver']
                                                 perfs_add_noCV = pdict['perf_nocv']
                                                 ps = pdict['perfs_CV']
-                                                perfs_add_CV_recalc = recalcPerfFromCV(ps,lblind_trem)
+                                                if recalc:
+                                                    perfs_add_CV_recalc = recalcPerfFromCV(ps,lblind_trem)
                                 else:
                                     print(f'perf_to_use (={perf_to_use}): None!')
 
@@ -2051,7 +2271,8 @@ def prepTableInfo3(output_per_raw, prefixes=None, perf_to_use_list = [('perfs_XG
                                         perfs_red_CV = anver_red_cur['perf_dict']['perf_aver']
                                         perfs_red_noCV = anver_red_cur['perf_dict']['perf_nocv']
                                         ps = anver_red_cur['perf_dict'].get('perfs_CV', None)
-                                    perfs_red_CV_recalc = recalcPerfFromCV(ps,lblind_trem)
+                                    if recalc:
+                                        perfs_red_CV_recalc = recalcPerfFromCV(ps,lblind_trem)
                                 elif perf_red_to_use in ['interpret_EBM', 'interpret_DPEBM']:
                                     featsubset_name = 'all'
                                     EBM_dict = mult_clf_results['featsel_per_method'][perf_red_to_use][featsubset_name]
@@ -2095,7 +2316,8 @@ def prepTableInfo3(output_per_raw, prefixes=None, perf_to_use_list = [('perfs_XG
                                     ps  = anver_cur.get('perfs_CV', None)
                                 else:
                                     print(f'perf_to_use (={perf_to_use}): None!')
-                                perfs_CV_recalc = recalcPerfFromCV(ps,lblind_trem)
+                                if recalc:
+                                    perfs_CV_recalc = recalcPerfFromCV(ps,lblind_trem)
 
                                 anver_red_cur = lda_anver.get(perf_red_to_use,None)
                                 if perf_red_to_use == 'best_LFP' and 'LDA' in mult_clf_results['best_LFP']:
@@ -2114,7 +2336,8 @@ def prepTableInfo3(output_per_raw, prefixes=None, perf_to_use_list = [('perfs_XG
                                     ps = anver_red_cur.get('perfs_CV', None)
                                 else:
                                     print(f'perf_red_to_use (={perf_red_to_use}): None!')
-                                perfs_red_CV_recalc = recalcPerfFromCV(ps,lblind_trem)
+                                if recalc:
+                                    perfs_red_CV_recalc = recalcPerfFromCV(ps,lblind_trem)
 
                                 #num = numdict_cur[perf_to_use]
                                 #num_red = numdict_cur[perf_red_to_use]
@@ -2184,8 +2407,8 @@ def prepTableInfo3(output_per_raw, prefixes=None, perf_to_use_list = [('perfs_XG
                     info_cur['spec_red'] = spec_red
 
                     info_cur['perf_dict_shuffled'] = perf_shuffled
-                    
-                    info_cur['bacc_shuffled'] = _extractPerfNumber ( perf_shuffled, 'bacc' ) 
+
+                    info_cur['bacc_shuffled'] = _extractPerfNumber ( perf_shuffled, 'bacc' )
                     if perfs_red_CV_recalc is not None:
                         if isinstance(perfs_CV_recalc, (list,tuple,np.ndarray) ):
                             info_cur['sens_red_recalc'] = perfs_red_CV_recalc[0]
@@ -2196,8 +2419,9 @@ def prepTableInfo3(output_per_raw, prefixes=None, perf_to_use_list = [('perfs_XG
                     else:
                         info_cur['sens_red_recalc'] = np.nan
                         info_cur['spec_red_recalc'] = np.nan
-                    if perf_add is not None and perfs_add_CV is not None:
+                    if perf_add_cur is not None and perfs_add_CV is not None:
                         if isinstance(perfs_add_CV, (list,tuple,np.ndarray) ):
+                            print('bbbbb')
                             info_cur['sens_add'] = perfs_add_CV[0]
                             info_cur['spec_add'] = perfs_add_CV[1]
                             info_cur['F1_add'] = perfs_add_CV[2]
@@ -2205,6 +2429,7 @@ def prepTableInfo3(output_per_raw, prefixes=None, perf_to_use_list = [('perfs_XG
                             info_cur['sens_add'] = perfs_add_CV['sens']
                             info_cur['spec_add'] = perfs_add_CV['spec']
                             info_cur['F1_add']   = perfs_add_CV['F1']
+                            info_cur['bacc_add']   = perfs_add_CV['balanced_accuracy']
                         info_cur['sens_add_recalc'] = perfs_add_CV_recalc[0]
                         info_cur['spec_add_recalc'] = perfs_add_CV_recalc[1]
                     #print('sens_add',info_cur.get('sens_add',None))
@@ -2247,26 +2472,20 @@ def prepTableInfo3(output_per_raw, prefixes=None, perf_to_use_list = [('perfs_XG
                     info_cur['numpts'] = len(mult_clf_results['class_labels_good_for_classif'])
 
 
-                    subj = rn.split('_')[0]
-                    mc   = rn.split('_')[1]
-                    mainmoveside = gv.gen_subj_info[subj].get('move_side',None)
-                    assert mainmoveside is not None
-                    movesidelet = mainmoveside[0].upper()
-                    moveopsidelet = utils.getOppositeSideStr( movesidelet )
+                    #subj = rn.split('_')[0]
+                    #mc   = rn.split('_')[1]
+                    #mainmoveside = gv.gen_subj_info[subj].get('move_side',None)
 
-                    info_cur['subject'] = subj
-                    info_cur['medcond'] = mc
-                    info_cur['move_hand_side_letter'] = movesidelet
-                    info_cur['move_hand_opside_letter'] = moveopsidelet
 
                     pref_templ = None
                     for suff in ['LL','RR','LR','RL','BB','BL','BR', 'LB','RB']:
-                        if prefix.endswith(suff):
-                            suff = prefix[-2:] 
+                        #assert len(set(mvsls)) == 1, (prefix,mvsls)
+                        if prefix.endswith(suff) and len(set(mvsls)) == 1:
+                            suff = prefix[-2:]
                             suff = suff.replace(movesidelet,'^')
                             suff = suff.replace(moveopsidelet,'%')
                             pref_templ = prefix[:-2] + suff
-                    
+
                     info_cur['prefix_templ'] = pref_templ
 
                     df = df.append(info_cur,ignore_index=True)
@@ -2758,346 +2977,6 @@ def plotFeatImpStats(feat_types_all, scores_stats, fign='', axs=None,
 
     return max_mean, max_max, max_sum
 
-    #sc = scores_stats['std']
-    #ax = axs[0]
-    #xerr = sc
-    #names_cur = [nm] + names
-    #sc = [ 0 ] + list(sc)
-    #ax.barh(names_cur,np.array(sc), color=color_cur, alpha=1., xerr=xerr ); #ax.tick_params(axis='x', labelrotation=90 )
-
-
-#def plotFeatSignifSHAP(pdf,featsel_per_method, fshs, featnames_list,
-#                       class_labels_good_for_classif,
-#                       class_label_names,
-#                       featnames_subset = None, figname_prefix='',
-#                       n_individ_feats_show=20, roi_labels = None,
-#                       chnames_LFP = None, body_side='L', hh=8,
-#                       separate_by_band = False, suptitle = None, suptitle_fontsize=20,
-#                      tickfontsize = 10,
-#                       marker_mean = 'o', marker_max = 'x', axs=None):
-#    '''
-#    fshs -- names of featsel method to use
-#    '''
-#    import utils_postprocess_HPC as postp
-#    import matplotlib.pyplot as plt
-#
-#    if isinstance(fshs , str):
-#        fshs = [fshs]
-#
-#    from collections.abc import Iterable
-#    if isinstance(featnames_list, Iterable) and \
-#            (isinstance(featnames_list[0], str) ):
-#        featnames_list = [featnames_list]
-#
-#    assert len(featnames_list) == len(fshs)
-#
-#    #fsh = 'XGB_Shapley'
-#    if len(fshs) == 1:
-#        colors_fsh = len(fshs) * [None]
-#    else:
-#        colors_fsh = ['blue','red','green', 'purple']
-#
-#    fspm_def = featsel_per_method[ fshs[0]  ]
-#    scores = fspm_def.get('scores',None)
-#    if scores is None:
-#        scores_per_class_def = fspm_def.get('scores_av',None)
-#    else:
-#        assert scores.shape[-1] - 1 == len(featnames_list[0]), (scores.shape[-1] , len(featnames_list[0]))
-#        scores_per_class_def = utsne.getScoresPerClass(class_labels_good_for_classif, scores)
-#    nscores = len(scores_per_class_def)
-#
-#    nr = nscores; nc = 3; #nc= len(scores_stats) - 2;
-#    ww = 3 + 5;
-#    if axs is None:
-#        fig,axs = plt.subplots(nr,nc, figsize = (nc*ww,nr*hh), gridspec_kw={'width_ratios': [1,1,3]} );
-#        plt.subplots_adjust(top=1-0.02)
-#    else:
-#        assert axs.shape == (nr,nc)
-#
-#
-#    cmap = plt.cm.get_cmap('tab20', 20)
-#    #cmap( (ri0 + i*ri1) % 20)
-#
-#
-#    for fshi,fsh in enumerate(fshs):
-#        fspm = featsel_per_method[fsh]
-#        featnames = featnames_list[fshi]
-#        scores = fspm.get('scores',None)
-#        if scores is None:
-#            scores_per_class = fspm.get('scores_av',None)
-#            bias = fspm.get('scores_bias_av',None)
-#
-#        else:
-#            assert scores.shape[-1] - 1 == len(featnames), (scores.shape[-1] , len(featnames))
-#            # XGB doc: Note the final column is the bias term
-#            scores_per_class, bias = utsne.getScoresPerClass(class_labels_good_for_classif, scores, ret_bias=1)
-#            print( fspm.keys(), scores.shape )
-#
-#
-#        # make plots for every class label
-#        for lblind in range(scores_per_class.shape[0] ):
-#            # select points where true class is like the current one
-#            #ptinds = np.where(class_labels_good_for_classif == lblind)[0]
-#            #classid_enconded = lblind
-#            #scores_cur = np.mean(scores[ptinds,lblind,0:-1], axis=0)
-#
-#            scores_cur = scores_per_class[lblind]
-#            label_str = class_label_names[lblind]
-#
-#            ###############################
-#            ftype_info = utils.collectFeatTypeInfo(featnames)
-#
-#            feat_groups_all = []
-#            feature_groups_names = []
-#            clrs = []
-#
-#            clri = 0
-#            feat_groups_basic = [f'^{ft}_.*' for ft in ftype_info['ftypes']]
-#            feat_groups_all+= feat_groups_basic
-#            feature_groups_names += feat_groups_basic
-#            clrs += [cmap(clri)] * len(feat_groups_basic)
-#
-#            clri += 1
-#
-#            ft = 'bpcorr'
-#            if 'bpcorr' in ftype_info['ftypes']:
-#                feat_groups_two_bands = [f'^{ft}_{fb1}_.*,{fb2}_.*' for fb1,fb2 in ftype_info['fband_pairs']]
-#            #     feat_groups_two_bands = ['^bpcorr_gamma.*,tremor.*','^bpcorr_gamma.*,beta.*','^bpcorr_gamma.*,HFO.*',
-#            #                                 '^bpcorr_beta.*,tremor.*','^bpcorr_beta.*,gamma.*','^bpcorr_beta.*,HFO.*',
-#            #                                 '^bpcorr_tremor.*,beta.*','^bpcorr_tremor.*,gamma.*','^bpcorr_tremor.*,HFO.*']
-#                feat_groups_all += feat_groups_two_bands
-#                feature_groups_names += feat_groups_two_bands
-#                clrs += [cmap(clri)] * len(feat_groups_two_bands)
-#
-#            for ft in ['rbcorr', 'con']:
-#                if ft in ftype_info['ftypes']:
-#                    #feat_groups_rbcorr_band = ['^rbcorr_tremor.*', '^rbcorr_beta.*',  '^rbcorr_gamma.*']
-#                    feat_groups_one_band = [ f'^{ft}_{fb}_.*' for fb in ftype_info['fband_per_ftype'][ft] ]
-#                    feat_groups_all += feat_groups_one_band
-#                    feature_groups_names += feat_groups_one_band
-#                    clrs += [cmap(clri)] * len(feat_groups_one_band)
-#            #feat_groups_all
-#
-#            # allow HFO2 and high_beta  (allow numbers and one underscore in
-#            # the middle
-#            bnpattern = '[a-zA-Z0-9]+_?[a-zA-Z0-9]*'
-#
-#
-#            wasH = 0
-#            for ft in gv.noband_feat_types:
-#                if ft in ftype_info['ftypes']:
-#                    wasH = True
-#
-#            if wasH:
-#                ft_templ = f'({"|".join(gv.noband_feat_types) })'
-#                a = [f'^{ft_templ}_LFP.*']
-#                feat_groups_all += a
-#                feature_groups_names += [  '^Hjorth_LFP'  ]
-#                clrs += [cmap(clri)] * len(a)
-#
-#
-#            clri += 1
-#            from globvars import gp
-#            if roi_labels is not None:
-#                # main side (body)
-#                # get parcel indices of
-#                for grpn,parcel_list in gp.parcel_groupings_post.items():
-#                    #feat_groups_cur = []
-#                    #print(parcel_list)
-#                    plws = utils.addSideToParcels(parcel_list, body_side)
-#                    parcel_inds = [ roi_labels.index(parcel) for parcel in plws ]
-#
-#                    pas = '|'.join(map(str,parcel_inds) )
-#                    chn_templ = f'msrc(R|L)_9_({pas})_c[0-9]+'
-#
-#                    if wasH:
-#                        ft_templ = f'({"|".join(gv.noband_feat_types) })'
-#                        a = [f'^{ft_templ}_{chn_templ}']
-#                        feat_groups_all += a
-#                        feature_groups_names += [  f'^Hjorth_{grpn}'  ]
-#                        clrs += [cmap(clri)] * len(a)
-#                        #clri += 1
-#
-#
-#            if chnames_LFP is None:
-#                chnames_LFP = ['.*']
-#            for lfpchn in chnames_LFP:
-#
-#
-#                clri += 1
-#                separate_by_band2 = True
-#                # now group per LFPch but with free source
-#                chn_templ = 'msrc(R|L)_9_[0-9]+_c[0-9]+'
-#                grpn = 'msrc*'
-#
-#                ft = 'bpcorr'
-#                if 'bpcorr' in ftype_info['ftypes']:
-#
-#                    if separate_by_band2:
-#                        fbpairs = ftype_info['fband_pairs']
-#                        fbpairs_dispnames = fbpairs
-#                    # !! This assume LFP is always in the second place
-#                    #if chnames_LFP is not None:
-#                    #    for lfpchn in chnames_LFP:
-#                    a = [f'^{ft}_{fb1}_{chn_templ},{fb2}_{lfpchn}' for fb1,fb2 in fbpairs]
-#                    feat_groups_all += a
-#                    feature_groups_names += [f'^{ft}_{fb1}_{grpn},{fb2}_{lfpchn}' for fb1,fb2 in fbpairs_dispnames]
-#                    clrs += [cmap(clri)] * len(a)
-#                    #else:
-#                    #    feat_groups_all += [f'^{ft}_{fb1}_{chn_templ},{fb2}_.*' for fb1,fb2 in ftype_info['fband_pairs']]
-#                    #    feature_groups_names += [f'^{ft}_{fb1}_{grpn},{fb2}_.*' for fb1,fb2 in ftype_info['fband_pairs']]
-#                ft = 'rbcorr'
-#                # !! This assume LFP is always in the second place
-#                if ft in ftype_info['ftypes']:
-#                    if separate_by_band2:
-#                        fbsolos = ftype_info['fband_per_ftype'][ft]
-#                        fbsolos_dispnames = fbsolos
-#                    #if chnames_LFP is not None:
-#                    #    for lfpchn in chnames_LFP:
-#                    a = [ f'^{ft}_{fb}_{chn_templ},{fb}_{lfpchn}' for fb in fbsolos ]
-#                    feat_groups_all += a
-#                    feature_groups_names += [ f'^{ft}_{fb}_{grpn},{fb}_{lfpchn}' for fb in fbsolos_dispnames ]
-#                    clrs += [cmap(clri)] * len(a)
-#                    #else:
-#                    #    feat_groups_all += [ f'^{ft}_{fb}_{chn_templ},.*' for fb in ftype_info['fband_per_ftype'][ft] ]
-#                    #    feature_groups_names += [ f'^{ft}_{fb}_{grpn},.*' for fb in ftype_info['fband_per_ftype'][ft] ]
-#                ft = 'con'
-#                # !! This assume LFP is always in the first place
-#                if ft in ftype_info['ftypes']:
-#                    if separate_by_band2:
-#                        fbsolos = ftype_info['fband_per_ftype'][ft]
-#                        fbsolos_dispnames = fbsolos
-#                    #if chnames_LFP is not None:
-#                    #    for lfpchn in chnames_LFP:
-#                    a = [ f'^{ft}_{fb}_{lfpchn},{chn_templ}' for fb in fbsolos ]
-#                    feat_groups_all += a
-#                    feature_groups_names += [ f'^{ft}_{fb}_{lfpchn},{grpn}' for fb in fbsolos_dispnames ]
-#                    clrs += [cmap(clri)] * len(a)
-#
-#                #############################################
-#
-#                fbpairs = [(bnpattern,bnpattern)]
-#                fbsolos = [bnpattern]
-#                fbpairs_dispnames = [('*','*')]
-#                fbsolos_dispnames = ['*']
-#
-#                clri += 1
-#                if roi_labels is not None:
-#                    # main side (body)
-#                    # get parcel indices of
-#                    for grpn,parcel_list in gp.parcel_groupings_post.items():
-#                        #feat_groups_cur = []
-#                        #print(parcel_list)
-#                        plws = utils.addSideToParcels(parcel_list, body_side)
-#                        parcel_inds = [ roi_labels.index(parcel) for parcel in plws ]
-#
-#                        pas = '|'.join(map(str,parcel_inds) )
-#                        chn_templ = f'msrc(R|L)_9_({pas})_c[0-9]+'
-#
-#                        ft = 'bpcorr'
-#                        if 'bpcorr' in ftype_info['ftypes']:
-#                            if separate_by_band:
-#                                fbpairs = ftype_info['fband_pairs']
-#                                fbpairs_dispnames = fbpairs
-#                            # !! This assume LFP is always in the second place
-#                            #if chnames_LFP is not None:
-#                            #    for lfpchn in chnames_LFP:
-#                            a = [f'^{ft}_{fb1}_{chn_templ},{fb2}_{lfpchn}' for fb1,fb2 in fbpairs]
-#                            feat_groups_all += a
-#                            feature_groups_names += [f'^{ft}_{fb1}_{grpn},{fb2}_{lfpchn}' for fb1,fb2 in fbpairs_dispnames]
-#                            clrs += [cmap(clri)] * len(a)
-#                            #else:
-#                            #    feat_groups_all += [f'^{ft}_{fb1}_{chn_templ},{fb2}_.*' for fb1,fb2 in ftype_info['fband_pairs']]
-#                            #    feature_groups_names += [f'^{ft}_{fb1}_{grpn},{fb2}_.*' for fb1,fb2 in ftype_info['fband_pairs']]
-#                        ft = 'rbcorr'
-#                        # !! This assume LFP is always in the second place
-#                        if ft in ftype_info['ftypes']:
-#                            if separate_by_band:
-#                                fbsolos = ftype_info['fband_per_ftype'][ft]
-#                                fbsolos_dispnames = fbsolos
-#                            #if chnames_LFP is not None:
-#                            #    for lfpchn in chnames_LFP:
-#                            a = [ f'^{ft}_{fb}_{chn_templ},{fb}_{lfpchn}' for fb in fbsolos ]
-#                            feat_groups_all += a
-#                            feature_groups_names += [ f'^{ft}_{fb}_{grpn},{fb}_{lfpchn}' for fb in fbsolos_dispnames ]
-#                            clrs += [cmap(clri)] * len(a)
-#                            #else:
-#                            #    feat_groups_all += [ f'^{ft}_{fb}_{chn_templ},.*' for fb in ftype_info['fband_per_ftype'][ft] ]
-#                            #    feature_groups_names += [ f'^{ft}_{fb}_{grpn},.*' for fb in ftype_info['fband_per_ftype'][ft] ]
-#                        ft = 'con'
-#                        # !! This assume LFP is always in the first place
-#                        if ft in ftype_info['ftypes']:
-#                            if separate_by_band:
-#                                fbsolos = ftype_info['fband_per_ftype'][ft]
-#                                fbsolos_dispnames = fbsolos
-#                            #if chnames_LFP is not None:
-#                            #    for lfpchn in chnames_LFP:
-#                            a = [ f'^{ft}_{fb}_{lfpchn},{chn_templ}' for fb in fbsolos ]
-#                            feat_groups_all += a
-#                            feature_groups_names += [ f'^{ft}_{fb}_{lfpchn},{grpn}' for fb in fbsolos_dispnames ]
-#                            clrs += [cmap(clri)] * len(a)
-#                        #else:
-#                        #    feat_groups_all += [ f'^{ft}_{fb}_.*,{chn_templ}' for fb in ftype_info['fband_per_ftype'][ft] ]
-#                        #    feature_groups_names += [ f'^{ft}_{fb}_.*,{grpn}' for fb in ftype_info['fband_per_ftype'][ft] ]
-#
-#                #display(feat_groups_all)
-#
-#
-#            #display(feat_groups_all)
-#            feat_imp_stats = mergeScores(scores_cur, featnames,
-#                                         feat_groups_all,
-#                                         feature_names_subset=featnames_subset,
-#                                         feature_groups_names=feature_groups_names, aux=clrs)
-#            ####################################
-#
-#
-#            ####################################
-#            subaxs = axs[lblind,:]
-#            subaxs[1].set_yticklabels([])
-#            #subaxs[2].set_yticklabels([])
-#
-#            plotFeatImpStats(feat_groups_all, feat_imp_stats, axs= subaxs[:2],
-#                             bias=bias, color=colors_fsh[fshi] )
-#            subaxs[0].tick_params(axis='y', labelsize=  tickfontsize)
-#            #subaxs[0].tick_params(axis='y', labelsize=  tickfontsize)
-#            #plt.tight_layout()
-#            #ax.set_title(  )
-#            #pdf.savefig()
-#
-#
-#            #plt.figure(figsize = (12,10))
-#            #ax = plt.gca()
-#            ax = subaxs[-1]
-#            #postp.plotFeatureImportance(ax, featnames, scores[ptinds,lblind,:], 'XGB_Shapley')
-#            sort_individ_feats = fshi == 0
-#            plotFeatureImportance(ax, featnames,
-#                                        scores_per_class[lblind,:],
-#                                        'labind_vs_score', color=colors_fsh[fshi],
-#                                        sort = sort_individ_feats, nshow=n_individ_feats_show)
-#            ax.set_title( f'{figname_prefix}: ' + ax.get_title() + f'_lblind = {label_str} (lblind={lblind}):  {fsh}' )
-#            ax.tick_params(axis="x",direction="in", pad=-300)
-#
-#
-#            #plt.gcf().suptitle(f'{prefix}: lblind = {label_str} (lblind={lblind})')
-#            #pdf.savefig()
-#            #plt.close()
-#
-#    plt.tight_layout()
-#
-#    if suptitle is not None:
-#        plt.suptitle(suptitle, fontsize=suptitle_fontsize)
-#    if pdf is not None:
-#        pdf.savefig()
-#        plt.close()
-
-
-
-
-#featsel_per_method, fshs, featnames_list,
-#class_labels_good_for_classif,
-#class_label_names,
-
-#outputs_grouped   #
 def plotFeatSignifSHAP_list(pdf, outputs_grouped, fshs=['XGB_Shapley'],
                        figname_prefix='',
                        n_individ_feats_show=4, roi_labels = None,
@@ -5151,7 +5030,7 @@ def plotTableInfos_onlyBar(table_info_per_perf_type, perf_tuple,
 
     #label_fontsize = None
     import pandas as pd
-    df = pd.DataFrame( columns = ['rawname', 'barname', 'barname_pre', 'barname_pre_human', 'barname_sided', 
+    df = pd.DataFrame( columns = ['rawname', 'barname', 'barname_pre', 'barname_pre_human', 'barname_sided',
         'shuffled', 'num', 'num_red', 'num_red2', 'p', 'p_red', 'p_add'] )
 
     for rowid_tuple,rowinfo in info_per_rn_pref.items():
@@ -5165,12 +5044,7 @@ def plotTableInfos_onlyBar(table_info_per_perf_type, perf_tuple,
         for prefix_pre in prefixes_sorted:
             rn = rowid_tuple[0]
             subj=rn.split('_')[0]
-            mainmoveside = gv.gen_subj_info[subj].get('move_side',None)
-            assert mainmoveside is not None
-            movesidelet = mainmoveside[0].upper()
-            moveopsidelet = utils.getOppositeSideStr( movesidelet )
-            prefix = prefix_pre.replace('%', moveopsidelet)
-            prefix = prefix.replace('^', movesidelet)
+            prefix = prefTempl2pref(prefix_pre, subj)
 
             prefinfo = rowinfo.get(prefix,None)
             if prefinfo is None and allow_missing_prefixes:
@@ -5371,6 +5245,376 @@ def plotTableInfos_onlyBar(table_info_per_perf_type, perf_tuple,
     #plt.savefig(pjoin(gv.dir_fig, output_subdir,figfname))
     return axs, df
 
+
+def plotTableInfos_onlyBarDf(df, barnames_pre=None, output_subdir='', alpha_bar = 0.7,
+                    use_recalc_perf = True, prefixes_sorted = None,
+                   prefix2final_name = None, crop_rawname='last',
+                   sort_by_featnum = 0, show_add_info ='none', col1 = 'p',
+                             col2 = 'p_red', col3 = None,
+                   score= 'special:min(sens,spec)',
+                   per_medcond=False, rawnames = None, expand_best =
+                   0, remove_side_ending = True,
+                   hh =2, ww=5, label_fontsize = 14, xlim=(0,100)
+                   ):
+    # rawnames argument is mainly to specify order
+    import matplotlib.pyplot as plt
+
+    #info_per_rn_pref = table_info_per_perf_type[perf_tuple]
+    #rns = list( info_per_rn_pref.values() )
+    #nrpef = len( rns[0].keys() )
+    numrns = len( set( df['rawname']) )
+
+    if not per_medcond:
+        nr = numrns
+        nc = 1
+    else:
+        nc = 2
+        nr = int( np.ceil( numrns / nc ) )
+    fig,axs = plt.subplots(nr,nc, figsize = (ww*nc, hh*nr), sharex = 'col')
+    axs = axs.reshape((nr,nc))
+
+    if score.startswith('special'):
+        pveclen = 2
+    else:
+        pveclen = 1
+    colors = ['blue', 'red', 'purple', 'green']
+    color_full = colors[0]
+    color_red = colors[1]
+    color_red2 = colors[2]
+    color_add = colors[3]
+    str_per_pref_per_rowname_per_clftype = {}
+
+    pvec_summary_per_prefix_per_key = {}
+    pvec_summary_red_per_prefix_per_key = {}
+
+
+    # cycle to plot both perf
+    #for ci,clf_type in enumerate( keys ):
+    #pvec_summary_per_prefix = {}
+    #pvec_summary_red_per_prefix = {}
+
+    axind = 0
+
+    #str_per_pref_per_rowname = {}
+    if pveclen == 3:
+        #perftype = '(spec + sens + F1) / 3'
+        perftype = 'min(spec,sens,F1)'
+    elif pveclen == 2:
+        perftype = 'min(spec,sens)'
+    else:
+        perftype = score
+    #else:
+    #    raise ValueError('wrong pveclen')
+    sind_strs = []
+    #for rowid_tuple,rowinfo in info_per_rn_pref.items():
+    #    rn = rowid_tuple[0]
+    #    sind_str,medcond = rn.split('_')
+    #    sind_strs += [sind_str]
+    #sind_strs = list(sorted(set(sind_strs)))
+
+    sind_strs = list(sorted(set(df['subject']) ))
+    print('sind strs = ',sind_strs)
+
+    barnames_pre_available = list(sorted(set(df['barname_pre']) ))
+    if barnames_pre is None:
+        barnames_pre = barnames_pre_available
+    else:
+        assert set( barnames_pre ) < set(barnames_pre_available)
+    print('barnames_pre' , barnames_pre)
+
+    for rn in list(set(df['rawname'])):
+    #for index,row in df.iterrow():
+        xs, xs_red, xs_red2 = [],[],[]
+        ys, ys_red, ys_add = [],[],[]
+
+        prefixes_wnums = []
+        str_per_pref = {}
+        for barname_pre in barnames_pre:
+            subdf = df[ (df['rawname'] == rn) & ( df['barname_pre'] == barname_pre ) ]
+            assert len(subdf) == 1, (rn,barname_pre, len(subdf) )
+            row = dict( subdf.iloc[0] )
+            subj = str( row['subject'] )
+            num      = int( row.get('num',-1)      )
+            num_red  = int( row.get('num_red',-1)  )
+            num_red2 = int( row.get('num_red2',-1) )
+
+            xs += [ num]
+            xs_red += [ num_red]
+            xs_red2 += [ num_red2]
+
+            str_to_put = f'{float(row["p"]):.0f}%'
+
+            prefix_like      = str(row['barname'].values[0] )
+            prefix_like_orig = str(row['barname_pre_human'].values[0] )
+            if remove_side_ending:
+                side_endings = ['_L','_R','_B']
+                for se in side_endings:
+                    if prefix_like.find(se) >= 0:
+                        prefix_like = prefix_like.replace(se,'')
+
+            #print(prefix_like,prefix_like_orig)
+
+            if show_add_info == 'num':
+                prefixes_wnums += [prefix_like + f'. #features={num}']
+            elif show_add_info == 'num_and_strperf':
+                prefixes_wnums += [prefix_like + f'. #features={num} : {str_to_put}']
+            elif show_add_info == 'none':
+                prefixes_wnums += [prefix_like]
+            else:
+                raise ValueError('unk val of show_add_info = {show_add_info}')
+            ys     += [float(row[col1])]
+            if col2 is not None:
+                ys_red += [float(row[col2])]
+            if col3 is not None:
+                ys_add += [float(row[col3])]
+        # end of cycle over prefixed_sorted
+
+        print( 'prefixes_wnums = ',prefixes_wnums )
+        print( 'ys_red =',ys_red )
+
+        rowind_bars = 0
+        if crop_rawname == 'last':
+            rncrp = rn.split('_')[-1]
+        elif crop_rawname == 'no':
+            rncrp = rn
+        else:
+            raise ValueError('unk crop')
+        rowid_tuple_to_show = rncrp.upper()
+
+        ##########################################3
+        if per_medcond:
+            sind_str,medcond = rn.split('_')
+            rowind_bars = ['off','on'].index(medcond)
+            axind = sind_strs.index(sind_str)
+        ax = axs[axind,rowind_bars]
+        if len(xs):
+            ax.set_title(str(rowid_tuple_to_show) ) # + ';  order=' + ','.join(order[:pveclen] ) )
+        ax.yaxis.tick_right()
+        if sort_by_featnum:
+            sis = np.argsort(xs)
+        else:
+            sis = np.arange(len(prefixes_wnums) )
+        ax.barh(np.array(prefixes_wnums)[sis], np.array(ys)[sis], color = color_full,    alpha=alpha_bar)
+        ax.barh(np.array(prefixes_wnums)[sis], np.array(ys_red)[sis],
+                color = color_red, alpha=alpha_bar)
+        if len(ys_add):
+            ax.barh(np.array(prefixes_wnums)[sis], np.array(ys_add)[sis],
+                    color = color_add, alpha=alpha_bar)
+
+        if per_medcond:
+            if axind == (len(sind_strs) - 1):
+                ax.set_xlabel(perftype, fontsize = label_fontsize)
+            else:
+                ax.set_xlabel('')
+        else:
+            ax.set_xlabel(perftype, fontsize = label_fontsize)
+
+        #ax.set_xlim(0,1)
+        ax.set_xlim(xlim)
+        axind += 1
+    # end of cycle over info_per_rn_pref
+
+    plt.suptitle(  f' recalc perf {use_recalc_perf}', y=0.995, fontsize=14  )
+    plt.tight_layout()
+    return axs
+
+def plotTableInfos_onlyBarDf2(df, dfstat, barnames_pre=None, output_subdir='', alpha_bar = 0.7,
+                    use_recalc_perf = True,
+                    crop_rawname='last',
+                    sort_by_featnum = 0, show_add_info ='none', col1 = 'bacc',
+                    col2 = 'bacc_shuffled', col3 = None, sorted_by = 'bacc',
+                    per_medcond=False, rawnames = None, expand_best = 0,
+                    endings_processing = 'replace_relative_side',
+                    prefix2final_name = None,
+                    hh =2, ww=5, label_fontsize = 14, xlim=(0,100),
+                    xlabel = None):
+    # rawnames argument is mainly to specify order
+    import matplotlib.pyplot as plt
+    #numrns = len( set( df['rawname']) )
+    numrns = len( set(rawnames) & set(df['rawname']) )
+    prefixes_all  = set(df['prefix']        )
+    prefix_templs_all  = set(df['prefix_templ']        )
+    bestnames_all = set(dfstat['bestname']  )
+
+    if not per_medcond:
+        nr = numrns
+        nc = 1
+    else:
+        nc = 2
+        nr = int( np.ceil( numrns / nc ) )
+    fig,axs = plt.subplots(nr,nc, figsize = (ww*nc, hh*nr), sharex = 'col')
+    axs = axs.reshape((nr,nc))
+
+    colors = ['blue', 'red', 'purple', 'green']
+    color_full = colors[0]
+    color_red = colors[1]
+    color_red2 = colors[2]
+    color_add = colors[3]
+
+    axind = 0
+    sind_strs = list(sorted(set(df['subject']) ))
+    print('sind strs = ',sind_strs)
+
+    rows_output = []
+
+    for rn in list(set(df['rawname'])):
+    #for index,row in df.iterrow():
+        xs, xs_red, xs_red2 = [],[],[]
+        ys, ys_red, ys_add = [],[],[]
+
+        prefixes_wnums = []
+        str_per_pref = {}
+        for barname_pre in barnames_pre:
+            if barname_pre in bestnames_all:
+                mode = 'bestname'
+                dfcur = dfstat[dfstat['operation_col'] == sorted_by ]
+            elif barname_pre in prefixes_all:
+                mode = 'prefix'
+                dfcur = df
+            elif barname_pre in prefix_templs_all:
+                mode = 'prefix_templ'
+                dfcur = df
+            colname = mode
+
+            subdf = dfcur[ (dfcur['rawname'] == rn) & ( dfcur[colname] == barname_pre ) ]
+
+            assert len(subdf) == 1, (rn,barname_pre, len(subdf) )
+            row = dict( subdf.iloc[0] )
+            subj = str( row['subject'] )
+            num      = int( row.get('num',-1)      )
+            num_red  = int( row.get('num_red',-1)  )
+            num_red2 = float( row.get('num_red2',-1) )
+
+            xs += [ num]
+            xs_red += [ num_red]
+            xs_red2 += [ num_red2]
+
+            p = float( row[col1] )
+            str_to_put = f'{p:.0f}%'
+
+            prefix_like_orig      = prefix2final_name[barname_pre]
+            assert prefix_like_orig is not None
+
+            print(prefix_like_orig)
+
+
+
+            bai = prefix_like_orig.find('best area')  # best area index
+            wai = prefix_like_orig.find('worst area')  # worst area index
+            if expand_best and bai >= 0:
+                assert row['parcel_group_names'] is not None, (barname_pre,row)
+                print(prefix_like_orig,row['name_nice'])
+                #prefix_like = prefix_like[:bai] + \
+                #    prefinfo['name_nice_best'].split()[-1].split('+')[-1]
+                side_suff = [ '_L', '_R', '_B']
+                sided = False
+                #nnb = prefinfo['name_nice_best']
+                #for suff in side_suff:
+                #    if prefinfo['name_nice_best'].find(suff):
+                #        sided = True
+                #        nnb.split()
+                #area = prefinfo['name_nice_best'].split()[-1].split('+')[-1]
+                #prefix_like = prefix_like.replace('best area',area)
+                #prefix_like = prefix_like.replace('best area', prefinfo['name_nice_best'] )
+                prefix_like = prefix_like_orig.replace('best area',
+                                    row['parcel_group_names'] )
+            elif expand_best and wai >= 0:
+                print(prefix_like_orig,row['name_nice'])
+                side_suff = [ '_L', '_R', '_B']
+                sided = False
+                prefix_like = prefix_like_orig.replace('worst area',
+                                    row['parcel_group_names'] )
+            else:
+                prefix_like = prefix_like_orig
+
+            row['barname_pre']      = barname_pre
+            #rot['barname_pre'] = prefTempl2pref(barname_pre, subj)
+            row['prefix_like_orig'] = prefix_like_orig
+            row['prefix_like']      = prefix_like
+            rows_output += [row]
+
+
+
+            #prefix_like_orig = str(row['barname_pre_human'].values[0] )
+            side_endings = ['_L','_R','_B']
+            for se in side_endings:
+                if prefix_like.find(se) >= 0:
+                    if endings_processing == 'remove':
+                        prefix_like = prefix_like.replace(se,'')
+                    elif endings_processing == 'replace_relative_side':
+                        sidelet = se[-1]
+                        side_templ_symbol = sidelet2sideTempl(sidelet, subj)
+                        prefix_like = prefix_like.replace(se,' ' + STS2ststr[side_templ_symbol] )
+
+
+            #print(prefix_like,prefix_like_orig)
+
+            if show_add_info == 'num':
+                prefixes_wnums += [prefix_like + f'. #features={num}']
+            elif show_add_info == 'num_and_strperf':
+                prefixes_wnums += [prefix_like + f'. #features={num} : {str_to_put}']
+            elif show_add_info == 'none':
+                prefixes_wnums += [prefix_like]
+            else:
+                raise ValueError('unk val of show_add_info = {show_add_info}')
+            ys         += [float(row[col1])]
+            if col2 is not None:
+                ys_red += [float(row[col2])]
+            if col3 is not None:
+                ys_add += [float(row[col3])]
+        # end of cycle over prefixed_sorted
+
+        print( 'prefixes_wnums = ',prefixes_wnums )
+        print( 'ys_red =',ys_red )
+
+        rowind_bars = 0
+        if crop_rawname == 'last':
+            rncrp = rn.split('_')[-1]
+        elif crop_rawname == 'no':
+            rncrp = rn
+        else:
+            raise ValueError('unk crop')
+        rowid_tuple_to_show = rncrp.upper()
+
+        ##########################################3
+        if per_medcond:
+            sind_str,medcond = rn.split('_')
+            rowind_bars = ['off','on'].index(medcond)
+            axind = sind_strs.index(sind_str)
+        ax = axs[axind,rowind_bars]
+        if len(xs):
+            ax.set_title(str(rowid_tuple_to_show) ) # + ';  order=' + ','.join(order[:pveclen] ) )
+        ax.yaxis.tick_right()
+        if sort_by_featnum:
+            sis = np.argsort(xs)
+        else:
+            sis = np.arange(len(prefixes_wnums) )
+        ax.barh(np.array(prefixes_wnums)[sis], np.array(ys)[sis], color = color_full,    alpha=alpha_bar)
+        ax.barh(np.array(prefixes_wnums)[sis], np.array(ys_red)[sis],
+                color = color_red, alpha=alpha_bar)
+        if len(ys_add):
+            ax.barh(np.array(prefixes_wnums)[sis], np.array(ys_add)[sis],
+                    color = color_add, alpha=alpha_bar)
+
+        if xlabel is None:
+            xlabel = col1
+        if per_medcond:
+            if axind == (len(sind_strs) - 1):
+                ax.set_xlabel(xlabel, fontsize = label_fontsize)
+            else:
+                ax.set_xlabel('')
+        else:
+            ax.set_xlabel(xlabel, fontsize = label_fontsize)
+
+        #ax.set_xlim(0,1)
+        ax.set_xlim(xlim)
+        axind += 1
+    # end of cycle over info_per_rn_pref
+    dfout = pd.DataFrame( rows_output )
+
+    plt.suptitle(  f' recalc perf {use_recalc_perf} col1={col1}, col2={col2}, sorted_by={sorted_by}', y=0.995, fontsize=14  )
+    plt.tight_layout()
+    return dfout, axs
 
 def plotFeatNum2Perf(output_per_raw, perflists, prefixes=None, balance_level = 0.75, skip_plot=False, xlim=None ):
     import matplotlib.pyplot as plt
@@ -5694,14 +5938,30 @@ def plotImportantFeatLocations(sind_str, multi_clf_output,
 
     plt.tight_layout()
 
-def getConfmat(mult_clf_output,grouping,it,best_LFP=False, reaver_confmats=False, 
-        normalize_mode = 'true', keep_beh_state_sides = False, ret_pct = True, shuffled=False):
+def getConfmat(mult_clf_output,grouping,it,best_LFP=False,
+        reaver_confmats=False,
+        normalize_mode = 'true', keep_beh_state_sides = False,
+        ret_pct = True, shuffled=False, across = None):
     # returns confmat (averaged over CV folds)  in percents
     if not best_LFP:
-        pcm = mult_clf_output['XGB_analysis_versions']['all_present_features']['perf_dict']
+        pre_pcm = mult_clf_output['XGB_analysis_versions']['all_present_features']
+        if across is not None:
+            if across not in pre_pcm['across']:
+                print(f'{across} not in pre_pcm["across"] (keys = {pre_pcm["across"].keys() } )')
+                return None,None
+            else:
+                pcm  = pre_pcm['across'][across]
+        else:
+            pcm = pre_pcm['perf_dict']
     else:
         chn_LFP = mult_clf_output['best_LFP']['XGB']['winning_chan']
-        pcm = mult_clf_output['XGB_analysis_versions'][f'all_present_features_only_{chn_LFP}']['perf_dict']
+        pre_pcm = mult_clf_output['XGB_analysis_versions'][f'all_present_features_only_{chn_LFP}']
+
+
+        if across is not None:
+            pcm  = pre_pcm['across'][across]['perf_dict']
+        else:
+            pcm = pre_pcm['perf_dict']
 
     if shuffled:
         perf_shuffled = pcm['fold_type_shuffled'][-1]
@@ -5720,7 +5980,7 @@ def getConfmat(mult_clf_output,grouping,it,best_LFP=False, reaver_confmats=False
         if confmat is None:
             confmat = pcm.get('confmat_aver', None)
         assert confmat is not None
-        confmat_normalized = utsne.confmatNormalize(confmat,normalize_mode) 
+        confmat_normalized = utsne.confmatNormalize(confmat,normalize_mode)
 
     if ret_pct:
         confmat_normalized *= 100
@@ -5753,23 +6013,86 @@ def getConfmat(mult_clf_output,grouping,it,best_LFP=False, reaver_confmats=False
 
         if 'interval_order_per_merge_it' in vars(gp):
             canon_order = gp.interval_order_per_merge_it[(grouping,it)]
-        else: 
+        else:
             canon_order = interval_order_per_merge_it[(grouping,it)]
-        
+
 
     perm = [ class_label_names_ticks.index(intname) for intname in canon_order]
-    assert tuple(np.array(class_label_names_ticks)[perm]) == tuple( canon_order) 
+    assert tuple(np.array(class_label_names_ticks)[perm]) == tuple( canon_order)
     class_label_names_ticks  = canon_order
 
     confmat_normalized_reord = confmat_normalized[perm,:][:,perm]
 
     return confmat_normalized_reord, class_label_names_ticks
 
-def getTremorDetPerf(mult_clf_output,grouping,it, ret_pct=False):
+
+
+# old, now we incoroporate in df directly
+def extractBehStateDur(tpll, grp, prefix, CID_most_recent, rawnames, prefixes, subdir):
+    pref_print = prefix
+    r = {}
+    for tpl in sorted(tpll, key= lambda x: rawnames.index(x[0]) * 1000 + prefixes.index(x[1]) ):
+        if tpl[2] != grp or tpl[1] != pref_print:
+            continue
+        cts = tpl[-1]['counts']
+        tot = np.sum( list(cts.values()) )
+        cts2 = cts.copy()
+        s = ''
+        for k,v in cts.items():
+            k2 = k[:-2]
+            #k2 = k
+            stmp = f'{v / tot * 100:4.1f}%={v/32:5.1f}s'
+            cts2[k2] = stmp
+            s += f', {k2}: {stmp}'
+        #print(tpl[:2],  cts2)
+        print(f'{tpl[0]:7} {s[1:]}')
+        #print(tpl[:2],  cts2['trem_L'])
+        #k = ','.join( tpl[:-1] )
+        k = tpl[:-1]
+        r[k] = {}
+        r[k]['counts'] = cts
+        r[k]['infostr'] = s
+        r[k]['total'] = tot / 32
+        r[k]['bacc'] = tpl[-1]['XGB_analysis_versions']['all_present_features']['perf_dict']\
+            ['perf_aver']['balanced_accuracy']
+
+    if len(r):
+        # import json
+        # fn_full  = pjoin(gv.data_dir,subdir,'beh_states_durations.json')
+        # with open(fn_full,'w') as f:
+        #     json.dump(r,f)
+        fn_full  = pjoin(gv.data_dir,subdir,f'beh_states_durations_CID{CID_most_recent}.npz')
+        np.savez(fn_full, r)
+        print('beh state duration saved to ',fn_full)
+    else:
+        print('zero len!')
+
+    return r
+
+
+def getMocFromRow(row : dict, output_per_raw: dict) -> dict:
+    grp,it = row['grouping'],row['interval_set']
+    try:
+        moc = output_per_raw[row['rawname']][row['prefix']][grp][it]
+    except KeyError:
+        moc = None
+    return moc
+
+def getTremorDetPerf(mult_clf_output,grouping,it, ret_pct=False,
+        across=None, sidelet=None):
     # returns in percents
-    cm,clnames = getConfmat(mult_clf_output,grouping,it,ret_pct=ret_pct)
-    ti = clnames.index('trem')
-    return cm[ti,ti]
+    if mult_clf_output is None:
+        return np.nan
+    cm,clnames = getConfmat(mult_clf_output,grouping,it,ret_pct=ret_pct,
+            across=across)
+    if cm is None:
+        return np.nan
+    else:
+        lbl = 'trem'
+        if sidelet is not None:
+            lbl += '_' + sidelet
+        ti = clnames.index(lbl)
+        return cm[ti,ti]
 
 #def plotConfmats(outputs_grouped, normalize_mode = 'true', best_LFP=False, common_norm = True,
 #                 ww=3,hh=3):
@@ -5804,7 +6127,7 @@ def plotConfmats(outputs_per_raw, normalize_mode = 'true', best_LFP=False, commo
     axs = axs.flatten()
     for ax in axs:
         ax.set_visible(False)
-        
+
     confmats_normalized = []
     for axi,(ax,tpl) in enumerate(zip(axs, tpll ) ):
         rn = tpl[0]
@@ -5846,10 +6169,13 @@ def plotConfmats(outputs_per_raw, normalize_mode = 'true', best_LFP=False, commo
     else:
         canon_order = gp.int_types_basic
 
+
     import matplotlib as mpl
     if common_norm:
         norm = mpl.colors.Normalize(vmin=0, vmax=100)
     else:
+        mn,mx = np.nan,np.nan
+        raise ValueError('Need to implement mn,mx computation!')
         norm = mpl.colors.Normalize(vmin=mn, vmax=mx)
     #for axi,(ax,(rn,(spec_key,mult_clf_output) ) ) in enumerate(zip(axs, outputs_grouped.items() ) ):
     confmats_normalized_reord = []
@@ -5895,7 +6221,7 @@ def plotConfmats(outputs_per_raw, normalize_mode = 'true', best_LFP=False, commo
             class_label_names_ticks = [cln[:-2] for cln in class_label_names]
 
         perm = [ class_label_names_ticks.index(intname) for intname in canon_order]
-        assert tuple(np.array(class_label_names_ticks)[perm]) == tuple( canon_order) 
+        assert tuple(np.array(class_label_names_ticks)[perm]) == tuple( canon_order)
         class_label_names_ticks  = canon_order
 
         # changing class names to publication-ready
@@ -5917,7 +6243,7 @@ def plotConfmats(outputs_per_raw, normalize_mode = 'true', best_LFP=False, commo
         #print(rn, 'class_label_names_ticks=', class_label_names_ticks)
         confmat_normalized_reord = confmat_normalized[perm,:][:,perm]
         confmats_normalized_reord += [confmat_normalized_reord]
-        
+
         pc = ax.pcolor(confmat_normalized_reord, norm=norm)
 
         # setting ticks and labels nicely, not for all axes, only for the left and bottom ones
@@ -6513,6 +6839,8 @@ def _extractPerfNumber( perf_dict, score):
 
     return perf_one_number
 
+
+
 #base_perf_per_mode
 def computeImprovementsPerParcelGroup(output_per_raw, base_perf_prefix,
                                       base_perf_low_prefix = None,
@@ -6664,18 +6992,45 @@ def computeImprovementsPerParcelGroup(output_per_raw, base_perf_prefix,
                 print(prefix,pgn, medcond,improvement * 100)
     return impr_wrt_base_per_medcond_per_pgn, impr_per_medcond_per_pgn, impr_wrtLFP_per_medcond_per_pgn, perfs_aver_per_medcond
 
+def sidelet2sideTempl(sidelet : str, subject : str) -> str:
+    assert len(sidelet) == 1
+
+    mainmoveside = gv.gen_subj_info[subject].get('move_side',None)
+    assert mainmoveside is not None
+    movesidelet = mainmoveside[0].upper()
+    moveopsidelet = utils.getOppositeSideStr( movesidelet )
+
+    if sidelet == movesidelet:
+        return '%'
+    elif sidelet == moveopsidelet:
+        return '^'
+    else:
+        raise ValueError(f'wrong lettter {sidelet}')
+
+
+def prefTempl2pref(pref_templ, subject):
+    mainmoveside = gv.gen_subj_info[subject].get('move_side',None)
+    assert mainmoveside is not None
+    movesidelet = mainmoveside[0].upper()
+    moveopsidelet = utils.getOppositeSideStr( movesidelet )
+    pref = pref_templ.replace('%', moveopsidelet)
+    pref = pref.replace('^', movesidelet)
+    return pref
+
 def _getPrefixInds(tpll,prefix_to_test):
     # it respects '%' and '^' wildcards
     prefix_inds = []
     for tpli,tpl in enumerate(tpll):
         rn,pref_cur = tpl[:2]
         subj = rn.split('_')[0]
-        mainmoveside = gv.gen_subj_info[subj].get('move_side',None)
-        assert mainmoveside is not None
-        movesidelet = mainmoveside[0].upper()
-        moveopsidelet = utils.getOppositeSideStr( movesidelet )
-        pref = prefix_to_test.replace('%', moveopsidelet)
-        pref = pref.replace('^', movesidelet)
+        #mainmoveside = gv.gen_subj_info[subj].get('move_side',None)
+        #assert mainmoveside is not None
+        #movesidelet = mainmoveside[0].upper()
+        #moveopsidelet = utils.getOppositeSideStr( movesidelet )
+        #pref = prefix_to_test.replace('%', moveopsidelet)
+        #pref = pref.replace('^', movesidelet)
+
+        pref = prefTempl2pref(prefix_to_test, subj)
         if pref == pref_cur:
             prefix_inds += [tpli]
 
@@ -6892,6 +7247,7 @@ def plotTableInfoBrain(impr_per_medcond_per_pgn , medcond,
 
 
     #############################
+    from postprocess import updateSrcGroups
     srcgrp_new, brain_area_labels, intensities = updateSrcGroups(impr_per_medcond_per_pgn[medcond], roi_labels, srcgrp,
             use_both_sides = True, want_sided = True )
     #brain_area_labels = ['unlabeled'] + list( sorted( gp.parcel_groupings_post.keys() ) )
@@ -7057,63 +7413,6 @@ def plotTableInfoBrain(impr_per_medcond_per_pgn , medcond,
     #plt.colorbar();
     #plotTableInfoBrain(impr_per_medcond_per_pgn, output)
 
-def updateSrcGroups(ipmpp, roi_labels, srcgrp, use_both_sides = True, want_sided = True ):
-    from globvars import gp
-    #medcond = 'on'
-    #ipmpp = info['impr_per_medcond_per_pgn'][medcond]
-    if want_sided:
-        brain_area_labels = ['unlabeled'] + list( sorted( gp.parcel_groupings_post_sided.keys() ) )
-    else:
-        brain_area_labels = ['unlabeled'] + list( sorted( gp.parcel_groupings_post.keys() ) )
-    intensities = [np.nan] * len(brain_area_labels)
-    srcgrp_new = np.nan * np.ones( len(srcgrp) )
-    print(len(ipmpp))
-    for pgn in ipmpp:
-        if (pgn in ['LFP']) or pgn.startswith('base_'):
-            continue
-
-        if pgn.endswith('_L') or pgn.endswith('_R'):
-            if want_sided:
-                pgn_eff = pgn
-            else:
-                pgn_eff = pgn[:-2]
-            sided = True
-        elif pgn.endswith('_B'):
-            pgn_eff = pgn[:-2]
-            sided = False
-        else:
-            pgn_eff = pgn
-            sided = False
-        assert want_sided == sided
-
-        if sided:
-            parcel_labels = gp.parcel_groupings_post_sided[pgn_eff]
-        else:
-            parcel_labels = gp.parcel_groupings_post[pgn_eff] #without side information
-
-        if not use_both_sides:
-            # TODO: use contralat instead of fixed
-            if pgn == 'Cerebellum':
-                sidestr = '_R'
-            else:
-                sidestr = '_L'
-            parcel_inds = [ roi_labels.index(pl + sidestr) for pl in parcel_labels ]
-        else:
-            parcel_inds = [ roi_labels.index(pl) for pl in parcel_labels ]
-        #parcel_inds += [ roi_labels.index(pl + '_R') for pl in parcel_labels ]
-
-        ind = brain_area_labels.index(pgn_eff)
-        for pi in parcel_inds:
-            srcgrp_new[srcgrp==pi]  = ind
-            #print(srcgrp_new[srcgrp==pi])
-
-        #brain_area_labels += [pgn]
-
-        intensity_cur = ipmpp[pgn] #* intensity_mult
-        #print(pgn,ind, intensity_cur)
-        intensities[ind ]= intensity_cur #cmap(intensity_cur)  #* len(parcel_inds)
-    assert np.any( ~np.isnan( srcgrp_new ) ), srcgrp[ np.isnan( srcgrp_new ) ]
-    return srcgrp_new, brain_area_labels, intensities
 
 def getLogFname(mco,folder = '$OSCBAGDIS_DATAPROC_CODE/slurmout'):
     jobid = dict(mco['cmd'][0] )['--SLURM_job_id']
@@ -7153,10 +7452,10 @@ def filterOutputs(outputs_grouped,rns=None,prefs=None,grps=None,its=None):
         rns = outputs_grouped.keys()
     for rn in rns:
         subj = rn.split('_')[0]
-        mainmoveside = gv.gen_subj_info[subj].get('move_side',None)
-        assert mainmoveside is not None
-        movesidelet = mainmoveside[0].upper()
-        moveopsidelet = utils.getOppositeSideStr( movesidelet )
+        #mainmoveside = gv.gen_subj_info[subj].get('move_side',None)
+        #assert mainmoveside is not None
+        #movesidelet = mainmoveside[0].upper()
+        #moveopsidelet = utils.getOppositeSideStr( movesidelet )
 
         outputs_res[rn] = {}
         o_cur_rn = outputs_grouped[rn]
@@ -7164,8 +7463,10 @@ def filterOutputs(outputs_grouped,rns=None,prefs=None,grps=None,its=None):
         if prefs is not None:
             prefs_cur = prefs
         for pref in prefs_cur:
-            pref = pref.replace('%', moveopsidelet)
-            pref = pref.replace('^', movesidelet)
+            #pref = pref.replace('%', moveopsidelet)
+            #pref = pref.replace('^', movesidelet)
+
+            pref = prefTempl2pref(pref, subj)
 
             o_cur_pref = o_cur_rn.get(pref, None)
             if o_cur_pref is None:

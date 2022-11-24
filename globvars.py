@@ -153,6 +153,8 @@ common_regexs[ 'match_feat_beg_H'] = re.compile(r'^(H_[a-z]{1,5})_(\w+)')
 common_regexs[ 'match_feat_beg_notH'] = re.compile(r'^([a-zA-Z0-9]+)_')
 common_regexs[ 'match_band_ch_band_ch_beg'] = re.compile(r'^([a-zA-Z0-9]+)_(.+),([a-zA-Z0-9]+)_(.+)$')
 
+interval_names_pub = {'notrem':'quet','move':'grasp','trem':'tremor','hold':'hold'}
+
 
 def paramFileRead(fname,recursive=True):
     print('--Log: reading paramFile {0}'.format(fname) )
@@ -183,6 +185,11 @@ def paramFileRead(fname,recursive=True):
             paramsAgain = paramFileRead(fname,recursive=False)
             params.update(paramsAgain)
 
+
+    if 'code_ver' not in params:
+        with open( pjoin(code_dir,'last_code_ver_synced_with_HPC.txt'), 'r' ) as f:
+            cvs = f.read()
+            params['code_ver'] = cvs
     return params
 
 class globparams:

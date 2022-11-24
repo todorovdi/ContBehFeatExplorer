@@ -10,6 +10,8 @@ SYNC_MODE="both"
 if [[ $# -eq 2 ]]; then
   SYNC_MODE=$2
 fi
+#FETCH_NPZ_AND_JSON=1
+FETCH_NPZ_AND_JSON=0
 
 if [[ $SYNC_MODE != "get_from" && $SYNC_MODE != "send_to" && $SYNC_MODE != "both"  ]]; then
   echo "wrong param, exit"
@@ -19,6 +21,7 @@ fi
 run="python3 _rsync_careful.py"
 #run="ipython3 -i _rsync_careful.py --"
   
+echo '' > sync_dest_changes.log
  
 RUNTYPE=$1
 DRY_RUN_FLAG=""
@@ -114,42 +117,59 @@ if [[ $SYNC_MODE != "get_from" ]]; then
   $run --mode:$RUNTYPE "$LOCAL_DIR/test_data/*.py" "$JUSUF_CODE/test_data/"
 fi
 
+
 if [[ $SYNC_MODE != "send_to" ]]; then
   echo "  rev sync params"
   $run --mode:$RUNTYPE "$JUSUF_CODE/params/*HPC*.ini" "$LOCAL_DIR/params/" 
   echo "  rev sync helper_scripts"
   $run --mode:$RUNTYPE "$JUSUF_CODE/helper_scripts/*.sh" "$LOCAL_DIR/helper_scripts/" 
-  echo "  rev sync EXPORT"
-  sd=joint_noskip
-  mkdir $DATA_DUSS/$sd  
-  $run --mode:$RUNTYPE "$JUSUF_BASE/data_duss/$sd/EXPORT*.npz" "$DATA_DUSS/$sd" 
-  sd=per_subj_per_medcond_best_LFP
-  mkdir $DATA_DUSS/$sd  
-  $run --mode:$RUNTYPE "$JUSUF_BASE/data_duss/$sd/EXPORT*.npz" "$DATA_DUSS/$sd" 
-  $run --mode:$RUNTYPE "$JUSUF_BASE/data_duss/$sd/beh_states_durations.npz" "$DATA_DUSS/$sd" 
-  sd=per_subj_per_medcond_best_LFP_wholectx
-  mkdir $DATA_DUSS/$sd  
-  $run --mode:$RUNTYPE "$JUSUF_BASE/data_duss/$sd/EXPORT*.npz" "$DATA_DUSS/$sd" 
-  $run --mode:$RUNTYPE "$JUSUF_BASE/data_duss/$sd/perftable*.npz" "$DATA_DUSS/$sd" 
-  $run --mode:$RUNTYPE "$JUSUF_BASE/data_duss/$sd/beh_states_durations.npz" "$DATA_DUSS/$sd" 
-  echo "  rev sync bestLFP"
-  sd=searchLFP_both_sides
-  mkdir $DATA_DUSS/$sd  
-  $run --mode:$RUNTYPE "$JUSUF_BASE/data_duss/$sd/best_LFP_info_both_sides.json" "$DATA_DUSS/$sd" 
-  $run --mode:$RUNTYPE "$JUSUF_BASE/data_duss/$sd/best_LFP_info_both_sides_ext.json" "$DATA_DUSS/$sd" 
-  $run --mode:$RUNTYPE "$JUSUF_BASE/data_duss/$sd/best_LFP_info_both_sides.json" "$LOCAL_DIR"
-  $run --mode:$RUNTYPE "$JUSUF_BASE/data_duss/$sd/best_LFP_info_both_sides_ext.json" "$LOCAL_DIR"
-  sd=searchLFP_both_sides_oversample
-  $run --mode:$RUNTYPE "$JUSUF_BASE/data_duss/$sd/best_LFP_info_both_sides_ext.json" "$LOCAL_DIR/best_LFP_info_both_sides_oversample.json"
+
 fi
+
 
 
 if [[ $SYNC_MODE != "get_from" ]]; then
   # save current code version and make it transferable to HPC (we don't have git there)
-  git tag | tail -1 > last_code_ver_synced_with_HPC.txt
+  v=`git tag | tail -1` 
+  h=`git rev-parse --short HEAD`
+  echo "$v, hash=$h" > last_code_ver_synced_with_HPC.txt
+  wait
 
-  echo "  sync req"
-  $run --mode:$RUNTYPE ""$LOCAL_DIR/requirements.txt"" "$JUSUF_CODE/"
-  $run --mode:$RUNTYPE ""$LOCAL_DIR/last_code_ver_synced_with_HPC.txt"" "$JUSUF_CODE/"
-  $SLEEP
+  echo "  sync req and code ver"
+  $run --mode:$RUNTYPE "$LOCAL_DIR/requirements.txt" "$JUSUF_CODE/"
+  #$SLEEP
+  $run --mode:$RUNTYPE "$LOCAL_DIR/last_code_ver_synced_with_HPC.txt" "$JUSUF_CODE/"
 fi
+
+
+
+if [[ $SYNC_MODE != "send_to" ]]; then
+  if [[ $FETCH_NPZ_AND_JSON -ne 0 ]]; then
+    echo "  rev sync EXPORT"
+    rsync -rtvz --progress $JUSUF_BASE/data_duss/per_subj_per_medcond_best_LFP_wholectx/*.pkl $DATA_DUSS/per_subj_per_medcond_best_LFP_wholectx/
+
+    sd=joint_noskip
+    mkdir $DATA_DUSS/$sd  
+    $run --mode:$RUNTYPE "$JUSUF_BASE/data_duss/$sd/EXPORT*.npz" "$DATA_DUSS/$sd" 
+    sd=per_subj_per_medcond_best_LFP
+    mkdir $DATA_DUSS/$sd  
+    $run --mode:$RUNTYPE "$JUSUF_BASE/data_duss/$sd/EXPORT*.npz" "$DATA_DUSS/$sd" 
+    $run --mode:$RUNTYPE "$JUSUF_BASE/data_duss/$sd/beh_states_durations.npz" "$DATA_DUSS/$sd" 
+    sd=per_subj_per_medcond_best_LFP_wholectx
+    mkdir $DATA_DUSS/$sd  
+    $run --mode:$RUNTYPE "$JUSUF_BASE/data_duss/$sd/EXPORT*.npz" "$DATA_DUSS/$sd" 
+    $run --mode:$RUNTYPE "$JUSUF_BASE/data_duss/$sd/perftable*.npz" "$DATA_DUSS/$sd" 
+    $run --mode:$RUNTYPE "$JUSUF_BASE/data_duss/$sd/beh_states_durations.npz" "$DATA_DUSS/$sd" 
+    echo "  rev sync bestLFP"
+    sd=searchLFP_both_sides
+    mkdir $DATA_DUSS/$sd  
+    $run --mode:$RUNTYPE "$JUSUF_BASE/data_duss/$sd/best_LFP_info_both_sides.json" "$DATA_DUSS/$sd" 
+    $run --mode:$RUNTYPE "$JUSUF_BASE/data_duss/$sd/best_LFP_info_both_sides_ext.json" "$DATA_DUSS/$sd" 
+    $run --mode:$RUNTYPE "$JUSUF_BASE/data_duss/$sd/best_LFP_info_both_sides.json" "$LOCAL_DIR"
+    $run --mode:$RUNTYPE "$JUSUF_BASE/data_duss/$sd/best_LFP_info_both_sides_ext.json" "$LOCAL_DIR"
+    sd=searchLFP_both_sides_oversample
+    $run --mode:$RUNTYPE "$JUSUF_BASE/data_duss/$sd/best_LFP_info_both_sides_ext.json" "$LOCAL_DIR/best_LFP_info_both_sides_oversample.json"
+  fi
+fi
+
+

@@ -1,4 +1,6 @@
+# saves data and collect stats
 # we do not do rescaling here! Only stat gathering
+
 
 
 import sys,os,getopt
@@ -21,7 +23,7 @@ pdf = None
 
 plot_stat_scatter = 0
 use_main_moveside = 1
-use_lfp_HFO = 1
+use_LFP_HFO = 1
 src_type_to_use  = 'parcel_ICA'     # or mean_td
 sources_type     = 'HirschPt2011'
 save_dat   = 1
@@ -34,6 +36,8 @@ calc_stats_multi_band = 0
 brain_side_to_use = 'body_move_side'
 body_side_for_baseline_int = 'body_move_side'
 channel_order = 'side,mod'
+
+prep_dat_prefix = ""
 
 n_free_cores = gp.n_free_cores
 n_jobs = max(1, mpr.cpu_count() - n_free_cores)
@@ -70,7 +74,7 @@ opts, args = getopt.getopt(effargv,"hr:",
          "input_subdir=", "output_subdir=",
          "save_dat=", "save_stats=", "param_file=",
          "bands_precision=", "calc_stats_multi_band=", "exit_after=",
-         "use_preloaded_raws=", "allow_CUDA=", "n_jobs=" ])
+         "use_preloaded_raws=", "allow_CUDA=", "n_jobs=", "prep_dat_prefix=" ])
 print('opts is ',opts)
 print('args is ',args)
 
@@ -130,6 +134,8 @@ for opt,arg in pars.items():
                 os.makedirs(subdir)
     elif opt == "src_grouping_fn":
         src_file_grouping_ind = int(arg)
+    elif opt == "prep_dat_prefix":
+        prep_dat_prefix = ""
     elif opt == "mods":
         data_modalities = arg.split(',')   #lfp of msrc
     elif opt == "calc_stats_multi_band":
@@ -179,7 +185,7 @@ for opt,arg in pars.items():
         elif arg.find('LFP') >= 0:   # maybe I want to specify expliclity channel name
             raise ValueError('to be implemented')
     elif opt == 'useHFO':
-        use_lfp_HFO = int(arg)
+        use_LFP_HFO = int(arg)
     elif opt == 'plot_only':
         load_feat = 1
         save_feat = 0
@@ -248,7 +254,7 @@ mods_to_load = ['LFP', 'src', 'EMG']
 #mods_to_load = ['LFP', 'src', 'EMG', 'SSS','resample', 'FTraw']
 #mods_to_load = ['LFP', 'src', 'EMG', 'resample', 'afterICA']
 #mods_to_load = ['src', 'FTraw']
-if use_lfp_HFO:
+if use_LFP_HFO:
     mods_to_load += ['LFP_hires']
 
 if not use_preloaded_raws:
@@ -264,7 +270,7 @@ sfreqs = [ int(raws_permod_both_sides[rn]['LFP'].info['sfreq']) for rn in rawnam
 assert len(set(sfreqs)) == 1
 sfreq = sfreqs[0]
 
-if use_lfp_HFO:
+if use_LFP_HFO:
     sfreqs_hires = [ int(raws_permod_both_sides[rn]['LFP_hires'].info['sfreq']) for rn in rawnames]
     assert len(set(sfreqs_hires)) == 1
     sfreq_hires = sfreqs_hires[0]
@@ -301,6 +307,7 @@ for rn in rawnames:
 
 
 # the output is dat only from the selected hemisphere
+# no artifact-related modif, only loading
 r = ugf.collectDataFromMultiRaws(rawnames, raws_permod_both_sides, sources_type,
                              src_file_grouping_ind, src_grouping, use_main_LFP_chan,
                              brain_side_to_use, new_main_body_side, data_modalities,
@@ -335,7 +342,7 @@ if save_dat:
         rawn = rawnames[rawi]
         fname = utils.genPrepDatFn(rawn, new_main_body_side, data_modalities,
                                    use_main_LFP_chan, src_file_grouping_ind,
-                                   src_grouping, brain_side_to_use)
+                                   src_grouping, brain_side_to_use, prep_dat_prefix)
         #fname = '{}_'.format(rawn) + fn_suffix_dat
         fname_dat_full = pjoin(gv.data_dir, output_subdir, fname)
         print('Saving data to ',fname_dat_full)
@@ -432,7 +439,7 @@ for combine_type in gv.rawnames_combine_types_rawdata:
     #for dati in range(len(dat_pri) ):
     #    dat_pri[dati] = dat_T_scaled[dati].T
 
-    if use_lfp_HFO:
+    if use_LFP_HFO:
         dat_T_pri = [0]*len(dat_lfp_hires_pri)
         for dati in range(len(dat_lfp_hires_pri) ):
             dat_T_pri[dati] = dat_lfp_hires_pri[dati].T
@@ -459,7 +466,7 @@ if save_stats:
     #fname_stats = 'stats_{}_{}_'.format(inds_str,nr)  + fn_suffix_dat
     fname_stats = utils.genStatsFn(rawnames, new_main_body_side, data_modalities,
                                    use_main_LFP_chan, src_file_grouping_ind,
-                                   src_grouping, brain_side_to_use )
+                                   src_grouping, brain_side_to_use, prep_dat_prefix )
     fname_stats_full = pjoin( gv.data_dir, output_subdir, fname_stats)
     print('Saving stats to',fname_stats_full)
     np.savez(fname_stats_full, stats_per_ct=stats_per_ct, stats_HFO_per_ct=stats_HFO_per_ct,
@@ -558,7 +565,7 @@ if calc_stats_multi_band:
         #fname_stats = 'stats_{}_{}_'.format(inds_str,nr)  + fn_suffix_dat
         fname_stats = utils.genStatsMultiBandFn(rawnames, new_main_body_side, data_modalities,
                                     use_main_LFP_chan, src_file_grouping_ind,
-                                    src_grouping, bands_precision, brain_side_to_use )
+                                    src_grouping, bands_precision, brain_side_to_use, prep_dat_prefix )
         fname_stats_full = pjoin( gv.data_dir, output_subdir, fname_stats)
         print('Saving multiband stats ',fname_stats_full)
         np.savez(fname_stats_full, stats_multiband_bp_per_ct=stats_multiband_bp_per_ct,

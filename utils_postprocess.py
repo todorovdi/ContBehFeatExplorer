@@ -1063,3 +1063,62 @@ def getBestLFPfromDict(best_LFP_dict,subj,metric='balanced_accuracy',
     if side != 'both':
         assert best[3] == side[0].upper(), (best,side)  # otherwise we'll get 0 features
     return best
+
+
+def updateSrcGroups(ipmpp, roi_labels, srcgrp, use_both_sides = True, want_sided = True ):
+    from globvars import gp
+    #medcond = 'on'
+    #ipmpp = info['impr_per_medcond_per_pgn'][medcond]
+    if want_sided:
+        brain_area_labels = ['unlabeled'] + list( sorted( gp.parcel_groupings_post_sided.keys() ) )
+    else:
+        brain_area_labels = ['unlabeled'] + list( sorted( gp.parcel_groupings_post.keys() ) )
+    intensities = [np.nan] * len(brain_area_labels)
+    srcgrp_new = np.nan * np.ones( len(srcgrp) )
+    #print(len(ipmpp))
+    for pgn in ipmpp:
+        if (pgn in ['LFP']) or pgn.startswith('base_'):
+            continue
+
+        if pgn.endswith('_L') or pgn.endswith('_R'):
+            if want_sided:
+                pgn_eff = pgn
+            else:
+                pgn_eff = pgn[:-2]
+            sided = True
+        elif pgn.endswith('_B'):
+            pgn_eff = pgn[:-2]
+            sided = False
+        else:
+            pgn_eff = pgn
+            sided = False
+        assert want_sided == sided
+
+        if sided:
+            parcel_labels = gp.parcel_groupings_post_sided[pgn_eff]
+        else:
+            parcel_labels = gp.parcel_groupings_post[pgn_eff] #without side information
+
+        if not use_both_sides:
+            # TODO: use contralat instead of fixed
+            if pgn == 'Cerebellum':
+                sidestr = '_R'
+            else:
+                sidestr = '_L'
+            parcel_inds = [ roi_labels.index(pl + sidestr) for pl in parcel_labels ]
+        else:
+            parcel_inds = [ roi_labels.index(pl) for pl in parcel_labels ]
+        #parcel_inds += [ roi_labels.index(pl + '_R') for pl in parcel_labels ]
+
+        ind = brain_area_labels.index(pgn_eff)
+        for pi in parcel_inds:
+            srcgrp_new[srcgrp==pi]  = ind
+            #print(srcgrp_new[srcgrp==pi])
+
+        #brain_area_labels += [pgn]
+
+        intensity_cur = ipmpp[pgn] #* intensity_mult
+        #print(pgn,ind, intensity_cur)
+        intensities[ind ]= intensity_cur #cmap(intensity_cur)  #* len(parcel_inds)
+    assert np.any( ~np.isnan( srcgrp_new ) ), srcgrp[ np.isnan( srcgrp_new ) ]
+    return srcgrp_new, brain_area_labels, intensities

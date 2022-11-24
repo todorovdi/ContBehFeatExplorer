@@ -1241,6 +1241,7 @@ def downsample(X, skip, axis=0, mean=True, printLog = 1):
     return res
 
 def findByPrefix(data_dir, rawname, prefix, ftype='PCA',regex=None, ret_aux=0):
+    # allows regular expressions
     #returns relative path
     import os, re
     if regex is None:

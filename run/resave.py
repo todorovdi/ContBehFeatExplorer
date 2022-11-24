@@ -314,10 +314,13 @@ for rawname_ in rawnames:
         f.info = mod_info
 
         raw_lfp = upre.saveLFP(fname_noext, skip_if_exist =
-                               skip_existing_LFP,sfreq=freqResample, raw_FT=f,n_jobs=n_jobs)
+                               skip_existing_LFP,
+                               sfreq=freqResample, raw_FT=f,n_jobs=n_jobs,
+                               notch=1)
         raw_lfp_highres = upre.saveLFP(fname_noext, skip_if_exist =
                                        skip_existing_LFP,sfreq=freqResample_high,
-                                       raw_FT=f,n_jobs=n_jobs )
+                                       raw_FT=f,n_jobs=n_jobs,
+                                       notch=1)
 
     upre.extractEMGData(f,fname_noext, skip_if_exist = skip_existing_EMG)  #saves emg_rectconv
     #continue
@@ -385,6 +388,7 @@ for rawname_ in rawnames:
         f.drop_channels(meg_chnames)
 
     if do_notch:
+        # there is no way to say about artifacts explicitly in notch
         print('Start notch filtering!')
         f.notch_filter(freqsToKill, n_jobs=n_jobs)
 

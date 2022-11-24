@@ -65,6 +65,9 @@ nfeats_per_comp_LDA_strongred = 5
 
 show_plots = 0
 
+runCID = None
+runstring_ind = None
+
 discard_outliers_q = 1e-2
 qshift = 1e-2
 force_single_core = False
@@ -571,6 +574,8 @@ for opt,arg in pars.items():
         rawnames = arg.split(',')
     elif opt.startswith('iniAdd'):
         print('skip ',opt)
+    elif opt.startswith('code_ver'):
+        print(f'code ver = {arg}')
     else:
         print('Unrecognized option {} with arg {}, exiting'.format(opt,arg) )
         sys.exit('Unrecognized option')
@@ -1714,6 +1719,10 @@ if do_Classif:
             results_cur['featnames_nice_for_fit'] = featnames_nice_for_fit
 
             results_cur['icaobj'] = ica
+
+            results_cur['runCID'] = runCID
+            results_cur['runstring_ind'] =  runstring_ind
+            results_cur['SLURM_job_id'] =  SLURM_job_id
 
             try:
                 # we really want this and not Xconcat good cur here

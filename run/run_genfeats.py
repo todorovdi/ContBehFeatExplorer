@@ -26,7 +26,7 @@ if sys.argv[0].find('ipykernel_launcher') < 0:
 #######  Main params
 exit_after = 'end'
 
-use_lfp_HFO = 1
+use_LFP_HFO = 1
 brain_side_to_use = 'body_move_side'
 body_side_for_baseline_int = 'body_move_side'
 #use_main_moveside = 1  # 0 both , -1 opposite
@@ -276,8 +276,11 @@ for opt,arg in pars.items():
         if len(output_subdir) > 0:
             subdir = pjoin(gv.data_dir,output_subdir)
             if not os.path.exists(subdir ):
-                print('Creating output subdir {}'.format(subdir) )
-                os.makedirs(subdir)
+                import time
+                time.sleep(5) # in seconds
+                if not os.path.exists(subdir ):
+                    print('Creating output subdir {}'.format(subdir) )
+                    os.makedirs(subdir)
     elif opt == "src_grouping_fn":
         src_file_grouping_ind = int(arg)
     elif opt == "mods":
@@ -327,7 +330,7 @@ for opt,arg in pars.items():
         elif arg.find('LFP') >= 0:   # maybe I want to specify expliclity channel name
             raise ValueError('to be implemented')
     elif opt == 'useHFO':
-        use_lfp_HFO = int(arg)
+        use_LFP_HFO = int(arg)
     elif opt == 'plot_only':
         if int(arg):
             load_feat = 1
@@ -388,6 +391,8 @@ for opt,arg in pars.items():
         load_rbcorr = int(arg)
     elif opt == 'load_bpcorr':
         load_bpcorr = int(arg)
+    elif opt == 'prep_dat_prefix':
+        prep_dat_prefix = arg
     elif opt == 'Kalman_smooth':
         do_Kalman = int(arg)
     elif opt == 'n_jobs':
@@ -396,6 +401,8 @@ for opt,arg in pars.items():
         use_existing_TFR = int(arg)
     elif opt.startswith('iniAdd'):
         print('skip ',opt)
+    elif opt.startswith('code_ver'):
+        print(f'code ver = {arg}')
     else:
         raise ValueError('Unknown option {},{}'.format(opt,arg) )
 
@@ -480,7 +487,7 @@ mods_to_load = ['LFP', 'src', 'EMG']
 #mods_to_load = ['LFP', 'src', 'EMG', 'SSS','resample', 'FTraw']
 #mods_to_load = ['LFP', 'src', 'EMG', 'resample', 'afterICA']
 #mods_to_load = ['src', 'FTraw']
-if use_lfp_HFO:
+if use_LFP_HFO:
     mods_to_load += ['LFP_hires']
 
 # these are just to play and plot because the side can change from patient to
@@ -561,7 +568,7 @@ else:
     for rawi,rawn in enumerate(rawnames):
         fname = utils.genPrepDatFn(rawn, new_main_body_side, data_modalities,
                                     use_main_LFP_chan, src_file_grouping_ind,
-                                    src_grouping, brain_side_to_use)
+                                    src_grouping, brain_side_to_use, prep_dat_prefix)
         fname_dat_full = pjoin(gv.data_dir, input_subdir, fname)
         f = np.load(fname_dat_full, allow_pickle=True)
         fname_dat_full_pri[rawi] = fname_dat_full
@@ -641,8 +648,12 @@ for rawname_ in rawnames:
     print('Load rec_info from ',src_rec_info_fn_full)
 
     if input_subdir != output_subdir:
-        src_rec_info_fn_full2 = pjoin(gv.data_dir, output_subdir,
-                                            src_rec_info_fn)
+        #src_rec_info_fn_full2 = pjoin(gv.data_dir, output_subdir,
+        #                                    src_rec_info_fn)
+        src_rec_info_fn_full2 = utils.genRecInfoFn(rawname_,sources_type,
+                                         src_file_grouping_ind,
+                                         output_subdir)
+
         import shutil
         shutil.copyfile(src_rec_info_fn_full,src_rec_info_fn_full2)
         print("run_genfeats, copy src_rec_info {} to {}".format( src_rec_info_fn_full,src_rec_info_fn_full2)  )
@@ -994,7 +1005,7 @@ if scale_data_combine_type != 'no_scaling':
             gc.collect()
 
 
-        if use_lfp_HFO:
+        if use_LFP_HFO:
             dat_T_pri = [0]*len(dat_lfp_hires_pri)
             for dati in range(len(dat_lfp_hires_pri) ):
                 dat_T_pri[dati] = dat_lfp_hires_pri[dati].T
@@ -1064,7 +1075,7 @@ if do_plot_raw_stats:
     plt.tight_layout()
     pdf.savefig()
 
-    if use_lfp_HFO:
+    if use_LFP_HFO:
         #utsne.plotBasicStatsMultiCh(dat_lfp_hires_scaled, subfeature_order_lfp_hires,
         #                            printMeans = 0)
         utsne.plotBasicStatsMultiCh(dat_lfp_hires_pri[0], subfeature_order_lfp_hires,
@@ -1212,7 +1223,7 @@ if (not (use_existing_TFR and have_TFR) ) and 'con' in features_to_use:
     from utils_genfeats import prepTFR,prepCSD
     tfrr = prepTFR(rawnames,anndict_per_intcat_per_rawn,
              dat_pri,subfeature_order,sfreq,windowsz,skip,freqs,n_cycles,
-             use_lfp_HFO,
+             use_LFP_HFO,
              dat_lfp_hires_pri,subfeature_order_lfp_hires,
              sfreq_hires, windowsz_hires,skip_hires,
              skip_div_TFR,freqs_inc_HFO,n_cycles_inc_HFO,
@@ -1368,7 +1379,7 @@ if 'Hjorth' in features_to_use or 'H_act' in features_to_use or 'H_mob' in featu
     #mob = np.vstack( [ mob, mob_lfp] )
     #compl = np.vstack( [ compl, compl_lfp] )
 
-    #if use_lfp_HFO:
+    #if use_LFP_HFO:
     #    dat_for_H = dat_scaled_src
     #else:
     #    dat_for_H = dat_scaled
@@ -1376,7 +1387,7 @@ if 'Hjorth' in features_to_use or 'H_act' in features_to_use or 'H_mob' in featu
 
 
     # if we have LFP data we better obtain Hjorth parameter from hires data
-    if use_lfp_HFO:
+    if use_LFP_HFO:
         #dat_lfp_hires_total = np.hstack( dat_lfp_hires_pri )
         #act_lfp,mob_lfp,compl_lfp  = utils.Hjorth(dat_lfp_hires_scaled, 1/sfreq_hires,
         #                            windowsz=int( (windowsz/sfreq)*sfreq_hires ) )
@@ -1403,10 +1414,13 @@ if 'Hjorth' in features_to_use or 'H_act' in features_to_use or 'H_mob' in featu
 
     for acti in range(len(act_pri) ):
         w1 = wbd_H_pri[acti]
-        w2 = wbd_H_lfp_hires_pri[acti]
-        assert w1[0][0] == w2[0][0]
-        ml = min( w1.shape[1], w2.shape[1] )
-        assert w1[1][ml-1] == int( w2[1][ml-1] / sfreq_hires * sfreq)
+        if use_LFP_HFO:
+            w2 = wbd_H_lfp_hires_pri[acti]
+            assert w1[0][0] == w2[0][0]
+            ml = min( w1.shape[1], w2.shape[1] )
+            assert w1[1][ml-1] == int( w2[1][ml-1] / sfreq_hires * sfreq)
+        else:
+            ml = min( w1.shape[1] )
         subsl = slice(0,ml,None)
         sl = (slice(None,None,None), subsl )
         act_pri[acti]   =  np.vstack( [  act_pri[acti][sl] ,  act_lfp_pri[acti][sl] ] )
@@ -1414,7 +1428,8 @@ if 'Hjorth' in features_to_use or 'H_act' in features_to_use or 'H_mob' in featu
         compl_pri[acti] =  np.vstack( [compl_pri[acti][sl], compl_lfp_pri[acti][sl] ] )
 
         wbd_H_pri[acti]           = w1[sl]
-        wbd_H_lfp_hires_pri[acti] = w2[sl]
+        if use_LFP_HFO:
+            wbd_H_lfp_hires_pri[acti] = w2[sl]
 
     #act_lfp   = np.hstack(act_lfp  )
     #mob_lfp   = np.hstack(mob_lfp  )
@@ -1727,7 +1742,7 @@ if 'bpcorr' in features_to_use:
                     ('high_beta','low_gamma', 'corr') , ('high_beta','high_gamma', 'corr') ]
     else:
         bandPairs = [('tremor','beta', 'corr'), ('tremor','gamma', 'corr'), ('beta','gamma', 'corr') ]
-    if use_lfp_HFO:
+    if use_LFP_HFO:
         # HFO should be always on the second place unless we use HFO-HFO
         # coupling in LFP!
         bandPairs += [ ('tremor','HFO', 'corr'), ('beta','HFO', 'corr'), ('gamma','HFO', 'corr') ]
@@ -1885,7 +1900,7 @@ for rawind in range(len(dat_pri) ):
                 bpow_abscsd_reshaped = bpow_abscsd
 
             feat_dict['con']['names'] = csdord_strs[:]
-            if use_lfp_HFO:
+            if use_LFP_HFO:
                 if bpow_abscsd_LFP_HFO.ndim == 3:
                     bpow_abscsd_LFP_HFO_reshaped = bpow_abscsd_LFP_HFO.reshape(
                         bpow_abscsd_LFP_HFO.size//ntimebins_ , ntimebins_ )
@@ -1922,7 +1937,7 @@ for rawind in range(len(dat_pri) ):
 
         #tmp_ord
         #csdord1 = csdord_bandwise.reshape( (bpow_abscsd_reshaped.shape[0], 3) )
-        #if use_lfp_HFO:
+        #if use_LFP_HFO:
         #    csdord2 = csdord_bandwise_LFP_HFO.reshape( (bpow_abscsd_LFP_HFO_reshaped.shape[0], 3) )
         #csdords = [csdord1, csdord2  ]
         #csdord = np.vstack(csdords  )
@@ -2160,7 +2175,8 @@ if save_feat:
         info['rawind'] = rawind
 
         info['bands_only'] = bands_only
-        info['use_lfp_HFO'] = use_lfp_HFO
+        info['use_LFP_HFO'] = use_LFP_HFO
+        info['use_lfp_HFO'] = use_LFP_HFO  # old ver, for compat
         #info['use_main_moveside'] = use_main_moveside
         info['brain_side_to_use'] = brain_side_to_use
         info['new_main_body_side'] = new_main_body_side

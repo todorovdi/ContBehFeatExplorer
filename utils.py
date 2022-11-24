@@ -2588,12 +2588,18 @@ def findRawArtifacts(raw , thr_mult = 2.5, thr_use_mean=0, show_max_always=0, da
         chnames_curside = chnames_perside_mod[side]
         moddat, times = raw_only_mod[chnames_curside]
         #moddat = raw_only_mod.get_data()
+
+        # first rescale using only 50% of the data. We take so little compute
+        # the data range
         me, mn,mx = utsne.robustMean(moddat, axis=1, per_dim =1, ret_aux=1, q = .25)
         if np.min(mx-mn) <= 1e-15:
             raise ValueError('mx == mn for side {}'.format(side) )
         moddat_scaled = ( moddat - me[:,None] ) / (mx-mn)[:,None]
+
+        # then sum
         moddat_sum = np.sum(np.abs(moddat_scaled),axis=0)
-        me_s, mn_s,mx_s = utsne.robustMean(moddat_sum, axis=None, per_dim =1, ret_aux=1, pos = 1)
+        # use 90% of the data
+        me_s, mn_s,mx_s = utsne.robustMean(moddat_sum, axis=None, per_dim =1, ret_aux=1, pos = 1, q=0.05)
 
         if thr_use_mean:
             moddat_sum_mod = moddat_sum/ me_s
@@ -3094,6 +3100,9 @@ def getMainEMGcomp(emg):
     return res
 
 def getIntervalMaxs(raw,intervals, q=0.995):
+    '''
+    intervals is a list of tuples (in the mne.Annotations-compatible format)
+    '''
     #m = np.zeros(2)
     alldat = []
     qpi = []
@@ -4373,7 +4382,7 @@ def genRecInfoFn(rawname_,sources_type='parcel_aal',src_file_grouping_ind=10,inp
     return r
 
 def genPrepDatFn(rawn, new_main_body_side, data_modalities, use_main_LFP_chan, src_file_grouping_ind,
-                 src_grouping,body_side_to_use):
+                 src_grouping,body_side_to_use, prep_dat_prefix):
     assert isinstance(body_side_to_use,str), body_side_to_use
     # OMS = old main side
     # NMS = new main side
@@ -4388,15 +4397,15 @@ def genPrepDatFn(rawn, new_main_body_side, data_modalities, use_main_LFP_chan, s
 
 def genStatsFn(rawnames,
                new_main_body_side, data_modalities, use_main_LFP_chan, src_file_grouping_ind,
-                 src_grouping, body_side_to_use, prefix=None):
+                 src_grouping, body_side_to_use, prep_dat_prefix=None):
     fn_suffix_dat = 'dat_{}_OMS{}_NMS{}_mainLFP{}_grp{}-{}.npz'.format(','.join(data_modalities),
                                                                           body_side_to_use,
                                                                    new_main_body_side[0].upper(),
                                                                 use_main_LFP_chan,
                                                                 src_file_grouping_ind, src_grouping)
 
-    if rawnames is None and prefix is not None:
-        fname_stats = prefix + fn_suffix_dat
+    if rawnames is None and prep_dat_prefix is not None:
+        fname_stats = prep_dat_prefix + fn_suffix_dat
     else:
         nr = len(rawnames)
         sind_str_list_sorted = list( sorted( set([rawn[0:3] for rawn in rawnames] ) ))
@@ -4406,7 +4415,7 @@ def genStatsFn(rawnames,
 
 def genStatsMultiBandFn(rawnames,
                new_main_body_side, data_modalities, use_main_LFP_chan, src_file_grouping_ind,
-                 src_grouping, bands_precision, body_side_to_use, prefix=None):
+                 src_grouping, bands_precision, body_side_to_use, prep_dat_prefix=None):
     fn_suffix_dat = '{}_dat_{}_OMS{}_NMS{}_mainLFP{}_grp{}-{}.npz'.format(bands_precision,
                                                                       ','.join(data_modalities),
                                                                           body_side_to_use,
@@ -4414,8 +4423,8 @@ def genStatsMultiBandFn(rawnames,
                                                                 use_main_LFP_chan,
                                                                 src_file_grouping_ind, src_grouping)
 
-    if rawnames is None and prefix is not None:
-        fname_stats = prefix + fn_suffix_dat
+    if rawnames is None and prep_dat_prefix is not None:
+        fname_stats = prep_dat_prefix + fn_suffix_dat
     else:
         nr = len(rawnames)
         l = list( sorted( set([rawn[0:3] for rawn in rawnames] ) ))
@@ -4720,13 +4729,13 @@ def pcaica2featCoef(pca,ica):
     mix_appl = pca.components_.T @ mix_large  #np.dot(mix_large,   ica.pca_components_ ) [ sel]
     return mix_appl
 
-def loadLabelsDict(rncur = 'S01_off_hold', verbose = 0):
+def loadLabelsDict(rncur = 'S01_off_hold', input_subdir = None, verbose = 0):
     ## load labels (not important where from exactly)
 
     #sind_str,mc,tk  = getParamsFromRawname(rncur)
     #sources_type='parcel_aal'
     #src_file_grouping_ind = 10
-    src_rec_info_fn_full = genRecInfoFn(rncur)
+    src_rec_info_fn_full = genRecInfoFn(rncur, input_subdir = input_subdir)
     #src_rec_info_fn = '{}_{}_grp{}_src_rec_info'.format(rncur,
     #                                                    sources_type,src_file_grouping_ind)
     #src_rec_info_fn_full = os.path.join(gv.data_dir, src_rec_info_fn + '.npz')
@@ -4739,9 +4748,9 @@ def loadLabelsDict(rncur = 'S01_off_hold', verbose = 0):
     del rec_info
     return labels_dict
 
-def loadROILabels(rncur = 'S01_off_hold'):
+def loadROILabels(rncur = 'S01_off_hold', input_subdir = None):
     #src_rec_info_fn_full = os.path.join(gv.data_dir, src_rec_info_fn)
-    src_rec_info_fn_full = genRecInfoFn(rncur)
+    src_rec_info_fn_full = genRecInfoFn(rncur, input_subdir = input_subdir)
     rec_info = np.load(src_rec_info_fn_full, allow_pickle=True)
 
     #print( list(rec_info.keys()) )
@@ -4766,7 +4775,7 @@ def loadSurfAndGrids(sind_strs, source_coords, load_def=True, src_order = None):
         vi = {}
         hdf = pymr.read_mat(pjoin(gv.data_dir,f'headmodel_grid_{sind_str}_surf.mat'))
 
-        hdf_mod = pymr.read_mat(pjoin(gv.code_dir,f'{sind_str}_modcoord_parcel_aal.mat'))
+        hdf_mod = pymr.read_mat(pjoin(gv.data_dir, 'coords', f'{sind_str}_modcoord_parcel_aal.mat'))
 
 
         vi['hdf'] = hdf
@@ -4814,7 +4823,7 @@ def loadSurfAndGrids(sind_strs, source_coords, load_def=True, src_order = None):
     #print('
 
     if load_def:
-        cgMNI = pymr.read_mat(pjoin(gv.code_dir,'cortical_grid_MNI.mat') )
+        cgMNI = pymr.read_mat(pjoin(gv.data_dir, 'coords', 'cortical_grid_MNI.mat') )
         #cgMNI['cortical_grid'].shape  #(3, 567)
         vi = {}
         vi['headsurfgrid_verts']  = cgMNI['cortical_grid']
