@@ -1420,7 +1420,7 @@ if 'Hjorth' in features_to_use or 'H_act' in features_to_use or 'H_mob' in featu
             ml = min( w1.shape[1], w2.shape[1] )
             assert w1[1][ml-1] == int( w2[1][ml-1] / sfreq_hires * sfreq)
         else:
-            ml = min( w1.shape[1] )
+            ml = w1.shape[1]
         subsl = slice(0,ml,None)
         sl = (slice(None,None,None), subsl )
         act_pri[acti]   =  np.vstack( [  act_pri[acti][sl] ,  act_lfp_pri[acti][sl] ] )

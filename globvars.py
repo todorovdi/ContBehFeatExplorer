@@ -132,6 +132,7 @@ bichan_bifreq_feat_types = ['rbcorr', 'bpcorr' ]
 bichan_bifreq_cross_feat_types = [ 'bpcorr' ]
 noband_feat_types = [ 'H_act', 'H_mob', 'H_compl']
 feat_types_all = [ 'con',  'Hjorth', 'H_act', 'H_mob', 'H_compl', 'bpcorr', 'rbcorr']
+data_modalities_all = ['LFP', 'msrc']
 # used for ML and VIF selection
 desired_feature_order = ['H_act', 'H_mob',  'H_compl', 'con', 'rbcorr', 'bpcorr' ]
 
@@ -189,6 +190,8 @@ def paramFileRead(fname,recursive=True):
     if 'code_ver' not in params:
         with open( pjoin(code_dir,'last_code_ver_synced_with_HPC.txt'), 'r' ) as f:
             cvs = f.read()
+            if cvs[-1] == '\n':
+                cvs = cvs[:-1]
             params['code_ver'] = cvs
     return params
 

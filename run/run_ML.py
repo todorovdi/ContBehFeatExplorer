@@ -74,20 +74,16 @@ force_single_core = False
 ##########################
 
 # all possible
-feat_types_all = [ 'con',  'H_act', 'H_mob', 'H_compl', 'bpcorr', 'rbcorr', 'Hjorth']
-data_modalities_all = ['LFP', 'msrc']
+from globvars import (feat_types_all,data_modalities_all,fband_names_crude,
+    fband_names_fine,fband_names_crude_inc_HFO,fband_names_fine_inc_HFO)
 
 # can be changed later
 features_to_use = [ 'con',  'H_act', 'H_mob', 'H_compl', 'bpcorr', 'rbcorr']
 data_modalities = [ 'msrc', 'LFP']  # order is important!
 msrc_inds = np.arange(8,dtype=int)  #indices appearing in channel (sources) names, not channnel indices
 use_main_LFP_chan = False
-use_lfp_HFO = 1
+use_LFP_HFO = 1
 
-fband_names_crude = ['tremor', 'beta', 'gamma']
-fband_names_fine = ['tremor', 'low_beta', 'high_beta', 'low_gamma', 'high_gamma' ]
-fband_names_crude_inc_HFO = fband_names_crude + ['HFO']
-fband_names_fine_inc_HFO = fband_names_fine + ['HFO1', 'HFO2', 'HFO3']
 fbands_to_use = fband_names_fine_inc_HFO
 bands_type = 'fine'
 fbands_per_mod = {}
@@ -159,6 +155,7 @@ best_LFP_data_mods = ['LFP']
 best_LFP_featstr = 'onlyH_act'
 bestLFP_disjoint = 'auto'
 best_LFP_exCB = None
+tune_search_best_LFP = True
 
 save_output = 1
 rescale_feats = 1
@@ -254,7 +251,7 @@ exit_after = 'end'  #load, rescale, artif_processed
 helpstr = 'Usage example\nrun_ML.py --rawnames <rawname_naked1,rawnames_naked2> '
 opts, args = getopt.getopt(effargv,"hr:n:s:w:p:",
         ["rawnames=", "n_channels=",  "windowsz=", "pcexpl=",
-         "show_plots=","discard_outliers_q=", 'feat_types=', 'use_HFO=', 'mods=',
+         "show_plots=","discard_outliers_q=", 'feat_types=', 'use_HFO=','useHFO=',  'mods=',
          'prefix=', 'load_only=', 'prep_for_clf_only=', 'exit_after=',
          'fbands=',   'fbands_mod1=','fbands_mod2=',
          'n_feats=', 'single_core=',
@@ -278,7 +275,7 @@ opts, args = getopt.getopt(effargv,"hr:n:s:w:p:",
           "savefile_rawname_format=",
          "selMinFeatSet_after_featsel=", "n_jobs=", "label_groups_to_use=",
          "SLURM_job_id=", "runCID=", "featsel_only_best_LFP=",
-         "best_LFP_info_file=",  "bestLFP_disjoint=",
+         "best_LFP_info_file=",  "bestLFP_disjoint=", "tune_search_best_LFP=",
          "XGB_max_depth=", "XGB_min_child_weight=", "XGB_tune_param=",
          "EBM_tune_param=", "EBM_tune_max_evals=",
          "runstring_ind=",
@@ -348,6 +345,8 @@ for opt,arg in pars.items():
         best_LFP_info_file = arg
     elif opt == "bestLFP_disjoint":
         bestLFP_disjoint = arg # may be string, not always int
+    elif opt == "tune_search_best_LFP":
+        tune_search_best_LFP = arg
     elif opt == "label_groups_to_use":
         label_groups_to_use = arg.split(',')
     elif opt == "skip_XGB":
@@ -562,8 +561,8 @@ for opt,arg in pars.items():
             use_main_LFP_chan = 0
         elif arg.find('LFP') >= 0:   # maybe I want to specify expliclity channel name
             raise ValueError('to be implemented')
-    elif opt == 'use_HFO':
-        use_lfp_HFO = int(arg)
+    elif opt in ['use_HFO', 'useHFO' ]:
+        use_LFP_HFO = int(arg)
     elif opt == 'prep_for_clf_only':
         prep_for_clf_only = int(arg)
     elif opt == "pcexpl":
@@ -962,7 +961,7 @@ for rawn in rawnames:
                                       msrc_inds, parcel_group_names,
                                       roi_labels,srcgrouping_names_sorted,
                                       src_file_grouping_ind, fbands_def,
-                                      fband_names_fine_inc_HFO, use_lfp_HFO,
+                                      fband_names_fine_inc_HFO, use_LFP_HFO,
                                       use_main_LFP_chan, mainLFPchan,
                                       mainLFPchan_new_name_templ,
                                       brain_side_to_use_cur, LFP_side_to_use_cur,
@@ -1063,7 +1062,7 @@ if show_plots:
 
     out_name_plot = rn_str + out_name + \
         'mainLFP{}_HFO{}_{}_{}'.\
-        format(int(use_main_LFP_chan), int(use_lfp_HFO), str_mods, str_feats)
+        format(int(use_main_LFP_chan), int(use_LFP_HFO), str_mods, str_feats)
     pdf= PdfPages(pjoin(subdir_fig, out_name_plot + '.pdf' ))
 
 if load_only or exit_after == 'load':
@@ -1358,7 +1357,8 @@ info['features_to_use'] = features_to_use
 info['data_modalities'] = data_modalities
 info['msrc_inds' ]  = msrc_inds
 info['use_main_LFP_chan'] = use_main_LFP_chan
-info['use_lfp_HFO'] = use_lfp_HFO
+info['use_lfp_HFO'] = use_LFP_HFO
+info['use_LFP_HFO'] = use_LFP_HFO
 info['nPCA_comp'] = nPCA_comp
 info['feat_fnames'] = feat_fnames
 info['selected_feat_inds_pri'] = selected_feat_inds_pri
@@ -2365,12 +2365,16 @@ if do_Classif:
 
                 if 'XGB' in search_best_LFP and (not use_main_LFP_chan) \
                         and ('LFP' in data_modalities) and len(chnames_LFP) > 1:
+                    # we will do two types of best LFP selection -- per body
+                    # side and in total over all channels (across sides)
                     if feat_body_side == 'both' and 'XGB' in search_best_side:
+                        # over both body sides
                         for sidelet in ['L', 'R']:
                             _,chnames_LFP_curside = \
                                 utsne.selFeatsRegex(None,chnames_LFP,
                                     [f'LFP{sidelet}'])
                             feat_inds_cur_side = []
+                            # LFPs in current body side
                             for chn_LFP in chnames_LFP_curside:
                                 feat_inds_curLFP, feat_inds_except_curLFP = \
                                     getFeatIndsRelToOnlyOneLFPchan(featnames,
@@ -2394,18 +2398,22 @@ if do_Classif:
 
                             XGB_version_name = 'all_present_features_only_{}_side_LFP_rel'.format(sidelet)
                             print(f'Starting XGB {XGB_version_name} on X.shape = {X_cur.shape}')
-                            tune_savedir = pjoin(output_subdir_full,f'{XGB_version_name}/XGB_tune/')
+                            if tune_search_best_LFP:
+                                tune_savedir = pjoin(output_subdir_full,f'{XGB_version_name}/XGB_tune/')
 
-                            add_clf_creopts_cur_side, best_params_list, \
-                                cv_resutls_best_list, num_boost_round_best =\
-                                utsne.gridSearchSeq(X_orig,y_orig, add_clf_creopts_CV,
-                                                XGB_params_search_grid,
-                                                XGB_param_list_search_seq,
-                                                num_boost_round=100,
-                                    early_stopping_rounds=10, nfold=n_splits, seed=0,
-                                    main_metric=tune_metric, savedir=tune_savedir)
+                                add_clf_creopts_cur_side, best_params_list, \
+                                    cv_resutls_best_list, num_boost_round_best =\
+                                    utsne.gridSearchSeq(X_orig,y_orig, add_clf_creopts_CV,
+                                                    XGB_params_search_grid,
+                                                    XGB_param_list_search_seq,
+                                                    num_boost_round=100,
+                                        early_stopping_rounds=10, nfold=n_splits, seed=0,
+                                        main_metric=tune_metric, savedir=tune_savedir)
 
-                            clf_XGB_ = XGBClassifier(**add_clf_creopts_cur_side)
+                                clf_XGB_ = XGBClassifier(**add_clf_creopts_cur_side)
+                            else:
+                                clf_XGB_ = XGBClassifier(**add_clf_creopts_CV)
+
                             if XGB_balancing == 'oversample':
                                 clf_XGB_.fit(X_cur_oversampled, y_cur_oversampled, **add_fitopts)
                             else:
@@ -2424,9 +2432,10 @@ if do_Classif:
                                             XGB_version_name, 'XGB_analysis_versions' )
 
                             gc.collect()
+                        # end of cycle over body sides
+                    # end of if feat_bdoy_side == 'both'
 
                     for chn_LFP in chnames_LFP:
-
                         feat_inds_curLFP, feat_inds_except_curLFP = \
                             getFeatIndsRelToOnlyOneLFPchan(featnames,
                                 chn=chn_LFP, chnames_LFP=chnames_LFP)
@@ -2448,23 +2457,27 @@ if do_Classif:
                         XGB_version_name = 'all_present_features_but_{}'.format(chn_LFP)
                         print(f'Starting XGB {XGB_version_name} on X.shape = {X_cur.shape}')
 
-                        tune_savedir = pjoin(output_subdir_full,f'{XGB_version_name}/XGB_tune/')
-                        add_clf_creopts_minus_curLFP, best_params_list, \
-                            cv_resutls_best_list, num_boost_round_best =\
-                            utsne.gridSearchSeq(X_orig,y_orig,  add_clf_creopts_CV,
-                                            XGB_params_search_grid,
-                                            XGB_param_list_search_seq,
-                                            num_boost_round=100,
-                                early_stopping_rounds=10, nfold=n_splits, seed=0,
-                                                main_metric=tune_metric,
-                                                savedir = tune_savedir)
+                        if tune_search_best_LFP:
+                            tune_savedir = pjoin(output_subdir_full,f'{XGB_version_name}/XGB_tune/')
+                            add_clf_creopts_minus_curLFP, best_params_list, \
+                                cv_resutls_best_list, num_boost_round_best =\
+                                utsne.gridSearchSeq(X_orig,y_orig,  add_clf_creopts_CV,
+                                                XGB_params_search_grid,
+                                                XGB_param_list_search_seq,
+                                                num_boost_round=100,
+                                    early_stopping_rounds=10, nfold=n_splits, seed=0,
+                                                    main_metric=tune_metric,
+                                                    savedir = tune_savedir)
 
 
-                        #add_fitopts_cur = dict(add_fitopts.items())
-                        #if num_boost_round_best is not None:
-                        #    add_fitopts_cur['n_estimators'] = num_boost_round_best
+                            #add_fitopts_cur = dict(add_fitopts.items())
+                            #if num_boost_round_best is not None:
+                            #    add_fitopts_cur['n_estimators'] = num_boost_round_best
 
-                        clf_XGB_ = XGBClassifier(**add_clf_creopts_minus_curLFP)
+                            clf_XGB_ = XGBClassifier(**add_clf_creopts_minus_curLFP)
+                        else:
+                            clf_XGB_ = XGBClassifier(**add_clf_creopts_CV)
+
                         if XGB_balancing == 'oversample':
                             clf_XGB_.fit(X_cur_oversampled, y_cur_oversampled, **add_fitopts)
                         else:
@@ -2497,24 +2510,27 @@ if do_Classif:
 
                         XGB_version_name = 'all_present_features_only_{}'.format(chn_LFP)
                         print(f'Starting XGB {XGB_version_name} on X.shape = {X_cur.shape}')
-                        tune_savedir = pjoin(output_subdir_full,f'{XGB_version_name}/XGB_tune/')
+                        if tune_search_best_LFP:
+                            tune_savedir = pjoin(output_subdir_full,f'{XGB_version_name}/XGB_tune/')
 
-                        add_clf_creopts_curLFP, best_params_list, \
-                            cv_resutls_best_list, num_boost_round_best =\
-                            utsne.gridSearchSeq(X_orig,y_orig, add_clf_creopts_CV,
-                                            XGB_params_search_grid,
-                                            XGB_param_list_search_seq,
-                                            num_boost_round=100,
-                                early_stopping_rounds=10, nfold=n_splits, seed=0,
-                                                main_metric=tune_metric,
-                                                savedir = tune_savedir)
+                            add_clf_creopts_curLFP, best_params_list, \
+                                cv_resutls_best_list, num_boost_round_best =\
+                                utsne.gridSearchSeq(X_orig,y_orig, add_clf_creopts_CV,
+                                                XGB_params_search_grid,
+                                                XGB_param_list_search_seq,
+                                                num_boost_round=100,
+                                    early_stopping_rounds=10, nfold=n_splits, seed=0,
+                                                    main_metric=tune_metric,
+                                                    savedir = tune_savedir)
 
-                        #add_fitopts_cur = dict(add_fitopts.items())
-                        #if num_boost_round_best is not None:
-                        #    add_fitopts_cur['n_estimators'] = num_boost_round_best
+                            #add_fitopts_cur = dict(add_fitopts.items())
+                            #if num_boost_round_best is not None:
+                            #    add_fitopts_cur['n_estimators'] = num_boost_round_best
 
+                            clf_XGB_ = XGBClassifier(**add_clf_creopts_curLFP)
+                        else:
+                            clf_XGB_ = XGBClassifier(**add_clf_creopts_CV)
 
-                        clf_XGB_ = XGBClassifier(**add_clf_creopts_curLFP)
                         if XGB_balancing == 'oversample':
                             clf_XGB_.fit(X_cur_oversampled, y_cur_oversampled, **add_fitopts)
                         else:
@@ -2542,6 +2558,8 @@ if do_Classif:
                     results_cur['best_LFP']['XGB'] = {'perf_drop':pdrop ,
                                             'winning_chan':winning_chan,
                                             'winning_chan_sens_only':winning_chan_sens_only }
+
+                    # end of cycle over all LFP channels
 
 
                 if exit_after == 'XGB_search_LFP':
@@ -3372,7 +3390,7 @@ if not single_fit_type_mode:
 
         str_feats = ','.join(features_to_use)
         str_mods = ','.join(data_modalities)
-        #use_lfp_HFO
+        #use_LFP_HFO
         #use_main_LFP_chan
 
         # I don't include rawname in template because I want to use it for PDF name

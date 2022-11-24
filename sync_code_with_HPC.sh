@@ -48,7 +48,7 @@ if [ $DIRECT_SSH -ne 0 ]; then
   JUSUF_CODE="judac:data_proc_code"
   JUSUF_BASE="judac:ju_oscbagdis"
   #SLEEP="sleep 1s"
-  SLEEP=""
+  SLEEP="wait"
   echo "not implemented; need to change _rsync_careful"; exit 1
 else
   mountpath="$HOME/ju_oscbagdis"
@@ -68,7 +68,7 @@ else
   SSH_FLAG=""
   JUSUF_CODE="$HOME/ju_oscbagdis/data_proc_code"
   JUSUF_BASE="$HOME/ju_oscbagdis"
-  SLEEP=""
+  SLEEP="wait"
 fi
   
 #$run --mode:$RUNTYPE --exclude="*HPC*.py"  "$LOCAL_DIR/*.py"  "$JUSUF_CODE/"
