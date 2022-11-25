@@ -688,6 +688,7 @@ feat_info_pri = []
 fname_feat_full_pri = []
 chnames_src_pri = []
 chnames_LFP_pri = []
+feat_pars_pri = []
 
 bindict_per_rawn = {}
 bindict_hires_per_rawn = {}
@@ -782,6 +783,9 @@ for rawn in rawnames:
     nedgeBins = feat_info['nedgeBins']
     assert skip_ == skip
 
+    pars_cur_featfile = f['pars'][()]
+    feat_pars_pri += [ pars_cur_featfile ]
+
     # this is what is actually in features already, so it is needed only for
     # annotations. Body side is meant, not brain side
 
@@ -790,7 +794,7 @@ for rawn in rawnames:
         baseline_int_pri += [ f'notrem_{mainmoveside_cur[0].upper() }' ]
         feat_body_side_cur = feat_info.get('main_body_side','left')
     else:
-        bint_side = f['pars'][()]['body_side_for_baseline_int']
+        bint_side = pars_cur_featfile['body_side_for_baseline_int']
         baseline_int_pri += [ feat_info['baseline_int'] ]
         feat_body_side_cur = feat_info.get('feat_body_side','left')
     bint_side_pri += [bint_side]
@@ -1072,11 +1076,33 @@ if load_only or exit_after == 'load':
     sys.exit(0)
 
 if rescale_feats:
-    print('Rescaling features')
+    print('Rescaling features before ML using precalc stats')
+
+    #finfo['baseline_int']
+    baseline_int_pri
+    # pcff['body_side_for_baseline_int']
+    bint_side_pri
+    scale_data_combine_type_pri = [pcff['scale_data_combine_type'] for pcff in feat_pars_pri]
+    baseline_int_type_pri = [pcff['baseline_int_type']  for pcff in feat_pars_pri]
+
+
+    if len(set(baseline_int_pri)) > 1:
+        print(f'Warning: baseline_int_pri not unique {baseline_int_pri}')
+    if len(set(bint_side_pri)) > 1:
+        print(f'Warning: bint_side_pri not unique {bint_side_pri}')
+    if len(set(baseline_int_type_pri)) > 1:
+        print(f'Warning: baseline_int_type_pri not unique {baseline_int_type_pri}')
+    if len(set(scale_data_combine_type_pri)) > 1:
+        print(f'Warning: scale_data_combine_type_pri not unique {scale_data_combine_type_pri}')
+
+    # set in args to this script (run_ML)
+    assert baseline_int_type_pri[0]       == baseline_int_type, (baseline_int_type_pri,baseline_int_type)
+    assert scale_data_combine_type_pri[0] == scale_feat_combine_type, (scale_data_combine_type_pri, scale_feat_combine_type )
 
     # WARNING: This will give wrong results if we have inconsistent sides
     #assert len(set(main_side_pri) ) == 1
     assert len(set(feat_body_side_pri) ) == 1
+    # pcff['body_side_for_baseline_int']
     assert len(set(bint_side_pri) ) == 1
     #feat_body_side_let = feat_body_side[0].upper()
     #baseline_int_type = 'notrem_{}'.format(feat_body_side[0].upper() )
@@ -1723,6 +1749,7 @@ if do_Classif:
             results_cur['runCID'] = runCID
             results_cur['runstring_ind'] =  runstring_ind
             results_cur['SLURM_job_id'] =  SLURM_job_id
+            results_cur['feat_pars_pri'] = feat_pars_pri
 
             try:
                 # we really want this and not Xconcat good cur here

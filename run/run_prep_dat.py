@@ -337,6 +337,8 @@ if exit_after == 'collectDataFromMultiRaws':
 #                                                              ','.join(data_modalities),
 #                                                               use_main_LFP_chan,
 #                                                            src_file_grouping_ind, src_grouping)
+# saving NOT SCALED data WITHOUT artif-related modif
+# all datasets at the same time
 if save_dat:
     for rawi in range(len(rawnames) ):
         rawn = rawnames[rawi]

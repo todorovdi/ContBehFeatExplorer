@@ -863,7 +863,9 @@ assert len(roi_labels) == 1, 'several groupings in single run -- not implmemente
 #print('Total raw data length for {} datasets is {} bins (={}s)'.format(len(rawnames), len(times),
 #                                                                       len(times) // sfreq ) )
 
+#########################################################
 ################# scale raw data
+#########################################################
 
 # here we plot even if we don't actually rescale
 if show_plots and do_plot_stat_scatter and len(set( n_channels_pri ) ) == 1 :
@@ -1160,6 +1162,10 @@ else:
 #    sys.exit(0)
 #def computeTFR():
 #    return
+
+##############################################################################
+###################### generate filenames for TFR and CSD so that we can old
+##############################################################################
 
 gs_tfr = np.zeros(len(rawnames) )    # ages
 gs_csd = np.zeros(len(rawnames) )
