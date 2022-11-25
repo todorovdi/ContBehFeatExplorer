@@ -102,8 +102,9 @@ prefix = ''
 #artif_handling_before_fit = 'impute' #or 'reject' or 'do_nothing'
 artif_handling_before_fit  = 'reject'
 feat_stats_artif_handling  = 'reject'
+artif_force_all_modalities = 0
 do_outliers_discard = 1
-do_cleanup = 1
+do_cleanup = 1  # removing varialbes (to save memory), unset if doing interactive debug
 
 def_sources_type = 'parcel_aal'
 old_sources_type = 'HirschPt2011'
@@ -452,6 +453,10 @@ for opt,arg in pars.items():
     elif opt == "artif_handling":
         assert arg in ['impute' , 'reject']
         artif_handling_before_fit = arg
+    elif opt == 'artif_force_all_modalities':
+        artif_force_all_modalities = int(arg)
+    elif opt == 'feat_stats_artif_handling':
+        feat_stats_artif_handling  = arg
     elif opt == "crop":
         cr =  arg.split(',')
         crop_start = float(cr[0])
@@ -1155,9 +1160,34 @@ if rescale_feats:
         if len(plot_types) == 1:
             pdf.close()
 
+    for Xns,Xs in zip(X_pri,X_pri_rescaled):
+        assert Xns.shape == Xs.shape
     Xconcat = np.concatenate(X_pri_rescaled,axis=0)
 else:
     Xconcat = np.concatenate(X_pri,axis=0)
+
+
+dsattrib = np.nan * np.ones( len(Xconcat) )
+internal_inds = np.nan * np.ones( len(Xconcat) )
+ind = 0
+for rawi,Xcur in enumerate(X_pri):
+    lX = len(Xcur)
+    dsattrib[ind:ind + lX] = rawi
+    internal_inds[ind:ind + lX] = np.arange(lX)
+    ind += lX
+assert not np.any(np.isnan(dsattrib))
+
+import pandas as pd
+dfinds = pd.DataFrame( {'rawi':dsattrib, 'wndi_within_raw':internal_inds,
+                'wndi_across_raw': np.arange(len(Xconcat) ) } )
+dfdat = pd.DataFrame( Xconcat, featnames )
+# maybe I need join = "inner" or to reindex?
+df = pd.concat( [dfinds, dfdat] , axis=1)
+df['times_within_raw'] = np.hstack(rawtimes_pri)
+df['wblb_within_raw'] = np.hstack(wbd_pri)[0]
+df['wbrb_within_raw'] = np.hstack(wbd_pri)[1]
+assert len(df) == len(Xconcat)
+
 
 lens_pri = [ Xcur.shape[0] for Xcur in X_pri ]
 if single_fit_type_mode and not gv.DEBUG_MODE and do_cleanup:
@@ -1179,6 +1209,7 @@ if exit_after == 'rescale':
 
 
 nbins_total =  sum( [ len(times) for times in rawtimes_pri ] )
+assert nbins_total == len(Xconcat)
 # merge wbds
 #cur_zeroth_bin = 0
 #wbds = []
@@ -1198,6 +1229,10 @@ anns, anns_pri, times_concat, dataset_bounds, wbd_merged = utsne.concatAnns(rawn
                                                           side_rev_pri = side_switch_happened_pri,
                                                          wbd_pri = wbd_pri, sfreq=sfreq, ret_wbd_merged=1)
 print('times_concat end {} wbd end {}'.format(times_concat[-1] * sfreq, wbd_merged[1,-1] ) )
+assert len(df) == len(times_concat)
+assert len(df) == len(wbd_merged)
+df['times_concat'] = times_concat
+df['wbd_merged'] = wbd_merged
 
 ivalis = utils.ann2ivalDict(anns)
 ivalis_tb_indarrays_merged = \
@@ -1208,14 +1243,17 @@ ivalis_tb_indarrays_merged = \
 #ivalis_tb, ivalis_tb_indarrays = utsne.getAnnBins(ivalis, Xtimes, nedgeBins, sfreq, skip, windowsz, dataset_bounds)
 #ivalis_tb_indarrays_merged = utsne.mergeAnnBinArrays(ivalis_tb_indarrays)
 
-##############################  Artifacts ####################################
+##############################################################################
+##############################  Artifact handling  ###########################
+##############################################################################
 
 #######################   naive artifacts
 bininds_noartif_nounlab = np.arange(Xconcat.shape[0])    #everything
 if do_outliers_discard:
     artif_naive_bininds, qvmult, discard_ratio = \
         utsne.findOutlierLimitDiscard(Xconcat,discard=discard_outliers_q,qshift=1e-2)
-    bininds_noartif_nounlab = np.setdiff1d( bininds_noartif_nounlab, artif_naive_bininds)
+    bininds_noartif_nounlab = np.setdiff1d( bininds_noartif_nounlab,
+                                           artif_naive_bininds)
 
     print('Outliers selection result: qvmult={:.3f}, len(artif_naive_bininds)={} of {} = {:.3f}s, discard_ratio={:.3f} %'.
         format(qvmult, len(artif_naive_bininds), Xconcat.shape[0],
@@ -1223,14 +1261,18 @@ if do_outliers_discard:
 
 
 
-#######################   artifacts by hads
+###########################   artifacts, collected by hand
 ann_MEGartif_prefix_to_use = '_ann_MEGartif_flt'
 # collect artifacts now annotations first
 suffixes = []
-if 'LFP' in data_modalities:
+if artif_force_all_modalities:
     suffixes += [ '_ann_LFPartif' ]
-if 'msrc' in data_modalities:
     suffixes += [ ann_MEGartif_prefix_to_use ]
+else:
+    if 'LFP' in data_modalities:
+        suffixes += [ '_ann_LFPartif' ]
+    if 'msrc' in data_modalities:
+        suffixes += [ ann_MEGartif_prefix_to_use ]
 anns_artif, anns_artif_pri, times_, dataset_bounds_ = \
     utsne.concatAnns(rawnames,rawtimes_pri, suffixes,crop=(crop_start,crop_end),
                  allow_short_intervals=True, side_rev_pri =
@@ -1259,6 +1301,7 @@ ivalis_artif_tb_indarrays_merged = \
 #ivalis_artif_tb_indarrays_merged = utsne.mergeAnnBinArrays(ivalis_artif_tb_indarrays)
 
 
+# set artifacts to NaN
 Xconcat_artif_nan = utils.setArtifNaN(Xconcat,
                         ivalis_artif_tb_indarrays_merged,
                         featnames, ignore_shape_warning=test_mode)
@@ -1271,10 +1314,13 @@ else:
 num_nans = np.sum(np.isnan(Xconcat_artif_nan), axis=0)
 print('Max artifact NaN percentage is {:.4f}%'.format(100 * np.max(num_nans)/Xconcat_artif_nan.shape[0] ) )
 
+# set artifacts to zero
 imp_mean = SimpleImputer(missing_values=np.nan, strategy='constant', fill_value=0.)
 imp_mean.fit(Xconcat_artif_nan)
 Xconcat_imputed = imp_mean.transform(Xconcat_artif_nan)
-#Xconcat_to_fit is NOT about removing points, it is used TOGETHER with bininds_noartif_nounlab
+
+# Xconcat_to_fit is NOT about removing points,
+# it is used TOGETHER with bininds_noartif_nounlab
 if artif_handling_before_fit == 'impute':
     # replacing artifact-related NaNs with zeros
     # mean should be zero since we centered features earlier
@@ -1306,7 +1352,10 @@ print( f'Num of indices not assigned to any interval = {len(unset_inds) } ')
 #else:
 #    all_interval_artif_inds = np.array([])
 
-remove_pts_unlabeled_beh_states = 1
+
+#####################################################
+# Update bininds_noartif_nounlab by removing unlabeled points
+remove_pts_unlabeled_beh_states = 1  # before fit
 if remove_pts_unlabeled_beh_states:
     #do somthing
     bininds_concat_good_yes_label = np.setdiff1d( bininds_noartif_nounlab, unset_inds)
@@ -1315,6 +1364,7 @@ if remove_pts_unlabeled_beh_states:
     bininds_noartif_nounlab = bininds_concat_good_yes_label
 else:
     print('Warning not removing unlabeled before PCA')
+#####################################################
 
 
 featnames_nice = utils.nicenFeatNames(featnames,

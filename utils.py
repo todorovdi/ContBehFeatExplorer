@@ -775,6 +775,7 @@ def getBinsInside(bins, b1, b2, retBool = True, rawname = None):
 def filterArtifacts(k, chn, bins, retBool = True, rawname = None):
     '''
     returns binmask without articats
+    so more like "filter out"
     '''
     validbins_bool = np.ones( len(bins) , dtype=bool)
     if gv.artifact_intervals is not None and (k in gv.artifact_intervals):
@@ -1255,6 +1256,9 @@ def _compute_tfr(epoch_data, freqs, sfreq=1.0, method='morlet',
 
 
 ############################# Tremor-related
+#    my analog of
+# mne.preprocessing.annotate_amplitude(raw, peak=None, flat=None, bad_percent=5,
+# min_duration=0.005, picks=None, *, verbose=None)[source]
 
 def getIntervals(bininds,width=100,thr=0.1, percentthr=0.8,inc=5, minlen=50,
         extFactorL = 0.25, extFactorR  = 0.25, endbin = None, cvl=None,
@@ -1394,6 +1398,7 @@ def getIntervals(bininds,width=100,thr=0.1, percentthr=0.8,inc=5, minlen=50,
 
 def fillBinsFromAnns(anns,  duration, sfreq=256,
                      descr_to_skip=['notrem_L', 'notrem_R'], printLog=0):
+    # duration should be float (i.e. time, not bin)
     # returns bin mask, where everything that belongs to at least one of the
     # annotations from the list (except descr_to_skip), is marked with 1
     if isinstance(anns,mne.Annotations):
@@ -1408,7 +1413,8 @@ def fillBinsFromAnns(anns,  duration, sfreq=256,
             if ann_type in descr_to_skip:
                 continue
             for start,end,it in ivalis[ann_type]:
-                if end >= duration:
+                if end >= duration + 1/sfreq:
+                #if end >= duration:
                     print('fillBinsFromAnns: Warning: one of anns ({},{},{}) is beyond duration boundary {}'.\
                             format(start,end,it,duration) )
                 if printLog:
@@ -1421,6 +1427,8 @@ def mergeAnns(anns, duration, sfreq=256, descr_to_skip=['notrem_L', 'notrem_R'],
              out_descr = 'merged'):
     '''
     merges all annotaions into one, skipping descr_to_skip
+    here 'merge' means intersection
+    duration should be float (i.e. time, not bin)
     '''
     if isinstance(anns,mne.Annotations):
         anns = [anns]
@@ -3519,50 +3527,6 @@ def setArtifNaN(X, ivalis_artif_tb_indarrays_merged, feat_names, ignore_shape_wa
 
     return Xout
 
-def getArtifForFiltering(chn,ann_artif):
-    # creates a new annotation tailored specifically for this channel using different levels
-    onsets = []
-    durations = []
-    descrs = []
-    try:
-        for a in ann_artif:
-            descr = a['description']
-            r = re.match('^BAD_(LFP|MEG)(.?)(.*)',descr)
-            mod,side,chn_sub_id = r.groups()
-            if mod == 'MEG':
-                mod_chn = 'msrc'
-            else:
-                mod_chn = mod
-            t = mod_chn +side+ chn_sub_id
-            #print(r.groups(),descr, t)
-            if chn.find( t) >= 0:
-                onsets += [a['onset']]
-                durations += [a['duration']]
-                if mod == 'LFP':
-                    descrs += [f'BAD_{chn}']
-                else:
-                    descrs += [f'BAD_{mod}{side}']
-    except AttributeError as e:
-        nanns = len(ann_artif.onset)
-        for i in range(nanns ):
-            descr = ann_artif.description[i]
-            r = re.match('^BAD_(LFP|MEG)(.?)(.*)',descr)
-            mod,side,chn_sub_id = r.groups()
-            if mod == 'MEG':
-                mod_chn = 'msrc'
-            else:
-                mod_chn = mod
-            t = mod_chn +side+ chn_sub_id
-            #print(r.groups(),descr, t)
-            if chn.find( t) >= 0:
-                onsets += [ann_artif.onset[i] ]
-                durations += [ann_artif.duration[i] ]
-                if mod == 'LFP':
-                    descrs += [f'BAD_{chn}']
-                else:
-                    descrs += [f'BAD_{mod}{side}']
-                #print('badom')
-    return mne.Annotations(onsets,durations,descrs)
 
 def parseIntervalName(interval_name):
     r = {}
@@ -3707,13 +3671,14 @@ def makeRawFromFeats(X, feat_names, skip, sfreq=256, namelen = 15):
 def makeSimpleRaw(dat,ch_names=None,sfreq=256,rescale=True,l=10,
                   force_trunc_renum=False, verbose=False, copy=False):
     # does rescaling to one
+    ll = l
     assert dat.ndim == 2
     if ch_names is None:
         ch_names = list(  map(str, np.arange( len(dat)) ) )
     elif force_trunc_renum or np.max( [len(chn) for chn in ch_names ] ) > 15:
         ch_names = list(ch_names)[:]
         for chni in range(len(ch_names) ):
-            ch_names[chni] = ch_names[chni][:l] + '_{}'.format(chni)
+            ch_names[chni] = ch_names[chni][:ll] + '_{}'.format(chni)
 
     info_ = mne.create_info( ch_names=list(ch_names), ch_types= ['csd']*len(ch_names), sfreq=sfreq)
 
@@ -4906,50 +4871,160 @@ def getMainLFPchan(subj,best_LFP_prefix = 'modLFP',
     return mainLFPchan
 
 
-def filterAnnDict(anndict, sidelet = 'L', artif_best_LFP_only = True):
+def filterAnnDict(anndict, sidelet = 'L', artif_best_LFP_only = True,
+        pattern = None):
+    '''
+    only select arifacts related to the main LFP channel
+    '''
     import copy
       # body side
 
+    single_mode = False
+    if isinstance(anndict, mne.Annotations):
+        assert not artif_best_LFP_only
+        anndict = {'S01_whatever':anndict}
+        single_mode = True
+
     anndict_flt = copy.deepcopy(anndict)
     for k,v in anndict_flt.items():
-        subj = k.split('_')[0]
-        mainLFPchan = getMainLFPchan(subj)
-        for kk,vv in v.items():
-            if isinstance(vv,dict):  # artif
-                for kkk,vvv in vv.items():
-                    l = len(vvv.duration)
-                    z = zip(vvv.onset,vvv.duration,vvv.description)
+        if artif_best_LFP_only:
+            subj = k.split('_')[0]
+            # TODO: I could make the gettin main LFP chan more flexible
+            mainLFPchan = getMainLFPchan(subj)
+        else:
+            mainLFPchan = None
+
+        if isinstance(v,dict):  # artif
+            for kk,vv in v.items():
+                if isinstance(vv,dict):  # artif
+                    for kkk,vvv in vv.items():
+                        ll = len(vvv.duration)
+                        z = zip(vvv.onset,vvv.duration,vvv.description)
+                        zr = []
+                        for zt in z:
+                            include = True
+                            if artif_best_LFP_only and zt[-1].startswith('BAD_LFP') :
+                                include = (zt[-1] == f'BAD_{mainLFPchan}')
+                            elif sidelet is not None:
+                                include = zt[-1].endswith('_' + sidelet)
+
+                            if pattern is not None:
+                                r = re.match(pattern,zt[-1])
+                            include = include and (r is not None)
+
+                            if include:
+                                zr += [zt]
+                        if len(zr):
+                            on,dur,des=zip(*zr)
+                        else:
+                            on,dur,des = [],[],[]
+                        #vvv2 = mne.Annotations(list(on),list(dur),list(des),
+                        #                      ch_names = [[]]*l)
+                        vvv2 = mne.Annotations(on,dur,des,
+                                            ch_names = [[]]*len(zr))
+                        vv[kkk] = vvv2
+                else:
+                    ll = len(vv.duration)
+
+                    z = zip(vv.onset,vv.duration,vv.description)
                     zr = []
                     for zt in z:
                         include = True
-                        if zt[-1].startswith('BAD_LFP') and artif_best_LFP_only:
+                        if  artif_best_LFP_only and zt[-1].startswith('BAD_LFP'):
                             include = (zt[-1] == f'BAD_{mainLFPchan}')
+                        elif sidelet is not None:
+                            include = zt[-1].endswith('_' + sidelet)
+
+                        if pattern is not None:
+                            r = re.match(pattern,zt[-1])
+                        include = include and (r is not None)
+
                         if include:
                             zr += [zt]
                     if len(zr):
                         on,dur,des=zip(*zr)
                     else:
                         on,dur,des = [],[],[]
-                    #vvv2 = mne.Annotations(list(on),list(dur),list(des),
-                    #                      ch_names = [[]]*l)
-                    vvv2 = mne.Annotations(on,dur,des,
-                                          ch_names = [[]]*len(zr))
-                    vv[kkk] = vvv2
-            else:
-                l = len(vv.duration)
+                    #print(len(zr))
+                    vv2 = mne.Annotations(on,dur,des,
+                                        ch_names = [[]]*len(zr))
+                    v[kk] = vv2
+    else:
+        ll = len(v.duration)
 
-                z = zip(vv.onset,vv.duration,vv.description)
-                zr = []
-                for zt in z:
-                    include = zt[-1].endswith('_' + sidelet)
-                    if include:
-                        zr += [zt]
-                if len(zr):
-                    on,dur,des=zip(*zr)
+        z = zip(v.onset,v.duration,v.description)
+        zr = []
+        for zt in z:
+            include = True
+            if  artif_best_LFP_only and zt[-1].startswith('BAD_LFP'):
+                include = (zt[-1] == f'BAD_{mainLFPchan}')
+
+            if sidelet is not None:
+                include = zt[-1].endswith('_' + sidelet)
+
+            if pattern is not None:
+                r = re.match(pattern,zt[-1])
+
+            include = include and (r is not None)
+            #print(zt, pattern, r)
+
+            if include:
+                zr += [zt]
+        if len(zr):
+            on,dur,des=zip(*zr)
+        else:
+            on,dur,des = [],[],[]
+        #print(len(zr))
+        vv2 = mne.Annotations(on,dur,des,
+                            ch_names = [[]]*len(zr))
+        anndict_flt[k] = vv2
+
+    if single_mode:
+        return anndict_flt[ list(anndict_flt.keys() )[0] ]
+    else:
+        return anndict_flt
+
+def getArtifForFiltering(chn,ann_artif):
+    # creates a new annotation tailored specifically for this channel using different levels
+    onsets = []
+    durations = []
+    descrs = []
+    try:
+        for a in ann_artif:
+            descr = a['description']
+            r = re.match('^BAD_(LFP|MEG)(.?)(.*)',descr)
+            mod,side,chn_sub_id = r.groups()
+            if mod == 'MEG':
+                mod_chn = 'msrc'
+            else:
+                mod_chn = mod
+            t = mod_chn +side+ chn_sub_id
+            #print(r.groups(),descr, t)
+            if chn.find( t) >= 0:
+                onsets += [a['onset']]
+                durations += [a['duration']]
+                if mod == 'LFP':
+                    descrs += [f'BAD_{chn}']
                 else:
-                    on,dur,des = [],[],[]
-                #print(len(zr))
-                vv2 = mne.Annotations(on,dur,des,
-                                      ch_names = [[]]*len(zr))
-                v[kk] = vv2
-    return anndict_flt
+                    descrs += [f'BAD_{mod}{side}']
+    except AttributeError as e:
+        nanns = len(ann_artif.onset)
+        for i in range(nanns ):
+            descr = ann_artif.description[i]
+            r = re.match('^BAD_(LFP|MEG)(.?)(.*)',descr)
+            mod,side,chn_sub_id = r.groups()
+            if mod == 'MEG':
+                mod_chn = 'msrc'
+            else:
+                mod_chn = mod
+            t = mod_chn +side+ chn_sub_id
+            #print(r.groups(),descr, t)
+            if chn.find( t) >= 0:
+                onsets += [ann_artif.onset[i] ]
+                durations += [ann_artif.duration[i] ]
+                if mod == 'LFP':
+                    descrs += [f'BAD_{chn}']
+                else:
+                    descrs += [f'BAD_{mod}{side}']
+                #print('badom')
+    return mne.Annotations(onsets,durations,descrs)

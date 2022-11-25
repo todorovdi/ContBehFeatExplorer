@@ -919,9 +919,6 @@ if scale_data_combine_type != 'no_scaling':
     print('Start data prescaling with combine_type={}, main_side={}'.
           format(combine_type,main_side_let ) )
 
-    #combine_type = 'no'
-    #feat_stats_artif_handling = 'no'
-    #baseline_int = 'entire'
     if gv.DEBUG_MODE:
         dat_pri_unscaled = [0]*len(dat_pri)
         for dati in range(len(dat_pri) ):
@@ -988,7 +985,7 @@ if scale_data_combine_type != 'no_scaling':
                 None, sfreq, times_pri, int_type = baseline_int,
                 main_side = None, side_rev_pri = side_switched_pri,
                 minlen_bins = 5 * sfreq, combine_within=combine_type,
-                artif_handling=feat_stats_artif_handling,
+                artif_handling_statcollect=feat_stats_artif_handling,
                 means=means, stds=stds, indsets= newindsets,
                 bindict_per_rawn=bindict_per_rawn)
         for dati in range(len(dat_pri) ):
@@ -998,9 +995,10 @@ if scale_data_combine_type != 'no_scaling':
         if show_plots and do_plot_stat_scatter and len(set( n_channels_pri ) ) == 1 :
             int_types_to_stat = [it + '_{}'.format(main_side_let) for it in gp.int_types_basic]
             upre.plotFeatStatsScatter(rawnames,dat_T_scaled, int_types_to_stat,
-                            subfeature_order_pri,sfreq,
-                            times_pri,side_switched_pri, wbd_pri=None,
-                                    save_fig=False, separate_by = 'mod', artif_handling=feat_stats_artif_handling )
+                subfeature_order_pri,sfreq,
+                times_pri,side_switched_pri,
+                wbd_pri=None, save_fig=False, separate_by = 'mod',
+                artif_handling=feat_stats_artif_handling)
             plt.suptitle('Stats of nonHFO data after rescaling')
             pdf.savefig()
             plt.close()
@@ -1032,7 +1030,8 @@ if scale_data_combine_type != 'no_scaling':
                 main_side = None, side_rev_pri = side_switched_pri,
                 minlen_bins = 5 * sfreq_hires, combine_within=combine_type,
                 means=means, stds=stds, indsets= newindsets,
-                bindict_per_rawn=bindict_hires_per_rawn)
+                bindict_per_rawn=bindict_hires_per_rawn,
+                artif_handling_statcollect=feat_stats_artif_handling)
             for dati in range(len(dat_lfp_hires_pri) ):
                 dat_lfp_hires_pri[dati] = dat_T_scaled[dati].T
 

@@ -635,74 +635,6 @@ def collectAllMarkedIntervalBins(rn,times,main_side, side_rev,
 
     return markedIntervals2Bins(anndict_per_intcat,times,sfreq,wbd=wbd)
 
-    #bindict_per_bintype = {'artif':{}, 'beh_state':{} }
-    #wbd = np.vstack([times*sfreq,1 + times*sfreq] ).astype(int)
-
-
-    ##anns_mvt, anns_artif_pri, times2, dataset_bounds = \
-    ##utsne.concatAnns([rn],[times],side_rev_pri=[side_rev],
-    ##                 allow_missing=allow_missing_files)
-    ###ivalis_mvt = utils.ann2ivalDict(anns_mvt)
-    ##lens_mvt = utils.getIntervalsTotalLens(anns_mvt, include_unlabeled
-    ##                                        =False, times=times)
-    ##if printLog:
-    ##    print(rn,lens_mvt)
-    ##import pdb; pdb.set_trace()
-    #anns_mvt = anndict_per_intcat['beh_state']
-
-    #ib_mvt_perit_merged = \
-    #utils.getWindowIndicesFromIntervals(wbd,utils.ann2ivalDict(anns_mvt) ,
-    #                sfreq,ret_type='bins_contig',
-    #                wbd_type='contig',
-    #                ret_indices_type =
-    #                    'window_inds', nbins_total=len(times) )
-
-    #bindict_per_bintype['beh_state'] = ib_mvt_perit_merged
-
-
-    ##anns_MEGartif, anns_artif_pri, times2, dataset_bounds = \
-    ##    utsne.concatAnns([rn],[times],[ann_MEGartif_prefix_to_use],
-    ##                     side_rev_pri=[side_rev],
-    ##                     allow_missing=allow_missing_files )
-    ##lens_MEGartif = utils.getIntervalsTotalLens(anns_MEGartif, include_unlabeled =False,
-    ##                                        times=times)
-    ##if printLog:
-    ##    print(rn,lens_MEGartif)
-
-    #anns_MEGartif = anndict_per_intcat['artif']['MEG']
-    ## here I don't want to remove artifacts from "wrong" brain side because
-    ## we use ipsilateral CB
-    #ib_MEG_perit_merged = \
-    #    utils.getWindowIndicesFromIntervals(wbd,utils.ann2ivalDict(anns_MEGartif) ,
-    #                                    sfreq,ret_type='bins_contig',
-    #                                    wbd_type='contig',
-    #                                    ret_indices_type =
-    #                                        'window_inds', nbins_total=len(times) )
-    #bindict_per_bintype['artif']['MEG'] = ib_MEG_perit_merged
-
-    ##anns_LFPartif, anns_artif_pri, times2, dataset_bounds = \
-    ##    utsne.concatAnns([rn],[times],['_ann_LFPartif'],
-    ##                     side_rev_pri=[side_rev],
-    ##                     allow_missing=allow_missing_files )
-    ##lens_LFPartif = utils.getIntervalsTotalLens(anns_LFPartif, include_unlabeled =False,
-    ##                                        times=times)
-    ##if printLog:
-    ##    print(rn,lens_LFPartif)
-    ##anns_LFPartif = utils.removeAnnsByDescr(anns_LFPartif, ['artif_LFP{}'.format(wrong_brain_sidelet) ])
-    #anns_LFPartif = anndict_per_intcat['artif']['LFP']
-
-    #ib_LFP_perit_merged = \
-    #        utils.getWindowIndicesFromIntervals(wbd,utils.ann2ivalDict(anns_LFPartif) ,
-    #                                        sfreq,ret_type='bins_contig',
-    #                                        wbd_type='contig',
-    #                                        ret_indices_type =
-    #                                            'window_inds', nbins_total=len(times) )
-
-    #bindict_per_bintype['artif']['LFP'] = ib_LFP_perit_merged
-
-    #return bindict_per_bintype
-
-
 def collecInfoForPlotHistAcrossDatasets(raws_permod_both_sides,
     aux_info_perraw=None, fnames_noext = None,  modalities = ['src', 'LFP'],
     qch_hist_xshift = 0.1, qmult = 1.15,
@@ -713,7 +645,7 @@ def collecInfoForPlotHistAcrossDatasets(raws_permod_both_sides,
     qch_hist_xshift
     '''
     if fnames_noext is None:
-       fnames_noext = list(sorted(raws_permod_both_sides.keys() ))
+        fnames_noext = list(sorted(raws_permod_both_sides.keys() ))
 
     assert int_types_templ is not None
 
@@ -770,6 +702,9 @@ def collecInfoForPlotHistAcrossDatasets(raws_permod_both_sides,
                 utsne.mergeAnnBinArrays(ivalis_artif_tb_indarrays)
 
 
+            # I set it to something now just to avoid syntax errors
+            meg_chis = None
+            src_chis = None
             for j in range(len(int_types_templ)):
                 if mod == 'MEG':
                     chdata,times = raw[meg_chis,:]
@@ -833,8 +768,6 @@ def collecInfoForPlotHistAcrossDatasets(raws_permod_both_sides,
 
     print('\nStats gather finished')
     return dat_permod_perraw_perint, xshifts_rel_perint_permod
-
-
 
 def plotHistAcrossDatasets(raws_permod_both_sides, dat_permod_perraw_perint,
         xshifts_rel_perint_permod, src_chis , aux_info_perraw,
@@ -912,6 +845,8 @@ def plotHistAcrossDatasets(raws_permod_both_sides, dat_permod_perraw_perint,
                 chds = dat_permod_perraw_perint[mod][rawname_].get(itcur,None)
                 if chds is None:
                     continue
+
+                meg_chis = None
                 if mod == 'MEG':
                     chnames = np.array(raw.ch_names)[meg_chis]
                 elif mod == 'src':
@@ -1340,17 +1275,19 @@ def rescaleFeats(rawnames, X_pri, featnames_pri, wbd_pri,
                  side_rev_pri = None,
                  minlen_bins = 5 * 256 / 32, combine_within='no',
                  means=None, stds=None, indsets=None, stat_fname_full=None,
-                 artif_handling = 'reject', bindict_per_rawn=None ):
+                 artif_handling_statcollect = 'reject', bindict_per_rawn=None ):
     '''
     rescales in-place
     usually notrem_<sidelet>
     modifies raws in place. Rescales to zero mean, unit std
+    it does not do anything with artifacts, artif_handling_statcollect is just
+        what controls statistics collection
     '''
     assert isinstance(int_type,str)
         #int_type_pri = [ 'entire' ] * len(rawnames)
     assert int_type.find('{}') < 0  # it should not be a template
 
-    assert artif_handling in ['reject', 'no', 'impute']
+    assert artif_handling_statcollect in ['reject', 'no', 'impute']
 
     assert len(rawnames) == len(featnames_pri)
     for i in range(len(X_pri) ):
@@ -1390,7 +1327,7 @@ def rescaleFeats(rawnames, X_pri, featnames_pri, wbd_pri,
                 gatherFeatStats(rawnames, X_pri, featnames_pri, wbd_pri, sfreq, times_pri,
                         int_type, side_rev_pri = side_rev_pri,
                         combine_within = combine_within, minlen_bins = minlen_bins,
-                                artif_handling=artif_handling,
+                                artif_handling=artif_handling_statcollect,
                                 bindict_per_rawn= bindict_per_rawn)
     else:
         assert len(means) == len(stds)
@@ -1913,7 +1850,7 @@ def saveLFP(rawname_naked, f_highpass = 2, skip_if_exist = 1,
     if highpass:
         print('saveLFP: highpass')
         subraw.filter(l_freq=lowest_freq_to_preserve, h_freq=None,
-                      skip_by_annotation='BAD_LFP', n_jobs= nj,
+                      skip_by_annotation='BAD_LFP', n_jobs= n_jobs,
                       pad='symmetric')
 
     if not save_with_anns:
@@ -2371,7 +2308,10 @@ def concatRaws(raws,rescale=True,interval_for_stats = (0,300) ):
     #rectconvraw_perside[side] = tmp
 
 
-def getGenIntervalInfoFromRawname(rawname_, crop=None):
+def getGenIntervalInfoFromRawname(rawname_, crop=None,
+                                collect_artif_info = True,
+                                  ann_MEGartif_prefix_to_use = '_ann_MEGartif_flt' ,
+                                  print_empty = False, artif_thr_pct = 10):
     # crop -- crop range in seconds
     import utils
     import globvars as gv
@@ -2379,22 +2319,29 @@ def getGenIntervalInfoFromRawname(rawname_, crop=None):
     subj,medcond,task  = utils.getParamsFromRawname(rawname_)
 
     maintremside = gv.gen_subj_info[subj]['tremor_side']
-    moveside = gv.gen_subj_info[subj].get('move_side','UNDEF')
+    move_side = gv.gen_subj_info[subj].get('move_side','UNDEF')
     tremfreq = gv.gen_subj_info[subj]['tremfreq']
 
 
     nonmaintremside = utils.getOppositeSideStr(maintremside)
-    mts_letter = maintremside[0].upper()
-    #print(rawname_,'Main trem side ' ,maintremside,mts_letter)
-    print('----{}\n{} is maintremside, tremfreq={} move side={}'.format(rawname_, mts_letter,tremfreq,
-                                                                          moveside) )
+    if move_side == 'UNDEF':
+        main_side_let = maintremside[0].upper()
+    else:
+        main_side_let = move_side[0].upper()
+    #print(rawname_,'Main trem side ' ,maintremside,main_side_let)
+    print('----{}\n{} is maintremside, tremfreq={} move side={}'.format(rawname_, maintremside,tremfreq,
+                                                                          move_side) )
     print(r'^ is tremor, * is main tremor side')
 
-    rawname = rawname_ + '_resample_raw.fif'
-    fname_full = os.path.join(gv.data_dir,rawname)
+    #rawname = rawname_ + '_resample_raw.fif'
+    rawname = rawname_ + '_LFPonly.fif'
+    fname_full = os.path.join(gv.data_dir,rawname)   #only needed to get times
 
     # read file -- resampled to 256 Hz,  Electa MEG, EMG, LFP, EOG channels
-    raw = mne.io.read_raw_fif(fname_full, None, verbose=0)
+    import warnings
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        raw = mne.io.read_raw_fif(fname_full, None, verbose=0, preload=0)
 
     times = raw.times
     if crop is None:
@@ -2407,10 +2354,10 @@ def getGenIntervalInfoFromRawname(rawname_, crop=None):
     endtime = min(times[-1], crop[1] )
     ##########
 
-    ots_letter = utils.getOppositeSideStr(mts_letter)
-    mts_trem_str = 'trem_{}'.format(mts_letter)
-    mts_notrem_str = 'notrem_{}'.format(mts_letter)
-    mts_task_str = '{}_{}'.format(task,mts_letter)
+    ots_letter = utils.getOppositeSideStr(main_side_let)
+    mts_trem_str = 'trem_{}'.format(main_side_let)
+    mts_notrem_str = 'notrem_{}'.format(main_side_let)
+    mts_task_str = '{}_{}'.format(task,main_side_let)
     ots_task_str = '{}_{}'.format(task,ots_letter)
 
     ########
@@ -2432,6 +2379,24 @@ def getGenIntervalInfoFromRawname(rawname_, crop=None):
     #ann_dict = {'Jan':anns_cnv_Jan, 'prev_me':anns_cnv, 'new_me':anns_upd}
     ann_dict = { 'new_me':anns_upd}
 
+    ###########
+
+    if collect_artif_info:
+        suffixes = []
+        data_modalities = ['LFP', 'msrc' ]
+        if 'LFP' in data_modalities:
+            suffixes += [ '_ann_LFPartif' ]
+        if 'msrc' in data_modalities:
+            suffixes += [ ann_MEGartif_prefix_to_use ]
+        anns_artif, anns_artif_pri, times_, dataset_bounds_ = \
+            utsne.concatAnns([rawname_],[times], suffixes,crop=(crop[0],crop[1]),
+                        allow_short_intervals=True,
+                            side_rev_pri = [0],
+                            wbd_pri = None, sfreq=int(raw.info['sfreq']))
+
+        ann_dict['artif'] = anns_artif
+    ############
+
 
 
     ann_len_dict = {}
@@ -2443,40 +2408,98 @@ def getGenIntervalInfoFromRawname(rawname_, crop=None):
         if anns is None:
             continue
         lens = utils.getIntervalsTotalLens(anns, True, times=raw.times,
-                                           crop=crop)
+                                           interval=crop)
 
         lens_keys = list(sorted(lens.keys()) )
         for lk in lens_keys:
             lcur = lens[lk]
             lk_toshow = lk
-            if lk.find('trem') == 0:  #lk, not lk_toshow!
-                lk_toshow = '^' + lk_toshow
-            if lk.find('_' + mts_letter) >= 0:
-                lk_toshow = '*' + lk_toshow
-            print('{:10}: {:6.2f} = {:6.3f}% of total {:.2f}s'.
-                  format(lk_toshow, lcur,  lcur/(endtime-begtime) * 100, endtime-begtime))
+
+            if ann_name != 'artif':
+                if lk.find('trem') == 0:  #lk, not lk_toshow!
+                    lk_toshow = '^' + lk_toshow
+                if lk.find('_' + main_side_let) >= 0:
+                    lk_toshow = '*' + lk_toshow
+            else:
+                if lk.endswith(ots_letter) >= 0:
+                    lk_toshow = '*' + lk_toshow
+
+            if not (ann_name == 'artif' and lk.startswith('nolabel') ):
+                print('{:10}: {:6.2f}s = {:6.3f}% of total {:.2f}s'.
+                    format(lk_toshow, lcur,  lcur/(endtime-begtime) * 100, endtime-begtime))
         #display(lens  )
         #lens_cnv_Jan = utils.getIntervalsTotalLens(anns_cnv_Jan, True, times=raw.times)
         #display(lens_cnv_Jan  )
-        if mts_trem_str not in anns.description:
-            print('!! There is no tremor, accdording to {}'.format(ann_name))
+        if ann_name != 'artif':
+            if mts_trem_str not in anns.description:
+                print('!! There is no tremor, accdording to {}'.format(ann_name))
 
-        meaningul_label_totlen = lens.get(mts_trem_str,0) + lens.get(mts_task_str,0)
-        meaningful_totlens[ann_name] = meaningul_label_totlen
-        if meaningul_label_totlen < 10:
-            print('Too few meaningful labels {}'.format(ann_name))
+            meaningul_label_totlen = lens.get(mts_trem_str,0) + lens.get(mts_task_str,0)
+            meaningful_totlens[ann_name] = meaningul_label_totlen
+            if meaningul_label_totlen < 10:
+                print('Too few meaningful labels {}'.format(ann_name))
 
         for it in lens:
-            if it.find(mts_task_str) < 0 and it.find(ots_task_str) >= 0:
-                print('{} has task {} which is opposite side to tremor {}'.format(
-                    ann_name, ots_task_str, mts_task_str) )
-            assert not( it.find(mts_task_str) >= 0 and it.find(ots_task_str) >= 0),\
-                'task marked on both sides :('
+            if ann_name != 'artif':
+                if it.find(mts_task_str) < 0 and it.find(ots_task_str) >= 0:
+                    print('{} has task {} which is opposite side to tremor {}'.format(
+                        ann_name, ots_task_str, mts_task_str) )
+                assert not( it.find(mts_task_str) >= 0 and it.find(ots_task_str) >= 0),\
+                    'task marked on both sides :('
+            #else:
+            #    print('{} has task {} which is opposite side to tremor {}'.format(
+            #        ann_name, ots_task_str, mts_task_str) )
+
+        if ann_name == 'artif':
+
+            for let in ['R','L','.']:
+                for pattern in [ f'.*(MEG{let}|LFP{let})', f'.*LFP{let}', f'.*MEG{let}']:
+                    newlab = f'{pattern[2:]}, brain side = {let}'
+                    artif_cur = utils.filterAnnDict(anns, sidelet=None,
+                                                        artif_best_LFP_only=False,
+                                                        pattern = pattern)
+                    artif_cur = utils.mergeAnns(artif_cur, times[-1],
+                                                sfreq = int(raw.info['sfreq']),
+                                                out_descr = newlab)
+                    lens_artif = utils.getIntervalsTotalLens(artif_cur, True, times=raw.times,
+                                                    interval=crop)
+                    if newlab not in lens_artif:
+                        if print_empty:
+                            print(pattern[2:],'NO ') #,lens_artif)
+                    else:
+                        lcur = lens_artif[newlab]
+                        pct_val = lcur/(endtime-begtime) * 100
+                        if artif_thr_pct is not None and pct_val >= artif_thr_pct:
+                            print('{:10}: {:6.2f}s = {:6.3f}% of total {:.2f}s'.
+                                format(newlab, lcur,  lcur/(endtime-begtime) * 100,
+                                endtime-begtime))
+
+
+            newlab = 'artif_all'
+            artif_cur = utils.mergeAnns(anns, times[-1],
+                                        sfreq = int(raw.info['sfreq']),
+                                        out_descr = newlab)
+            lens_artif = utils.getIntervalsTotalLens(artif_cur, True, times=raw.times,
+                                            interval=crop)
+            if newlab not in lens_artif:
+                print('NO ',lens_artif)
+            else:
+                lcur = lens_artif[newlab]
+                pct_val = lcur/(endtime-begtime) * 100
+                print('{:10}: {:6.2f}s = {:6.3f}% of total {:.2f}s'.
+                    format(newlab, lcur,  pct_val,
+                        endtime-begtime))
+
+
+            # TODO filter LFP
+            # TODO filter LFP by side
+            # TODO filter MEG
+            # TODO filter MEG by side
 
 
         print('\n')
 
-    return lens
+    return lens, ann_dict
     # print('\nmy prev interval lengths')
     # lens_cnv = utils.getIntervalsTotalLens(anns_cnv, True, times=raw.times)
     # display(lens_cnv )
