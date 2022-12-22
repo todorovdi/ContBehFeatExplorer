@@ -239,7 +239,7 @@ params_cmd = {}
 
 prep_for_clf_only = 0
 
-perf_inds_to_print = [0,1,2,10,-1]
+perf_inds_to_print = [0, 1, 2, 10, -1]
 
 strong_correl_level = 0.9
 
@@ -280,6 +280,7 @@ opts, args = getopt.getopt(effargv,"hr:n:s:w:p:",
          "XGB_max_depth=", "XGB_min_child_weight=", "XGB_tune_param=",
          "EBM_tune_param=", "EBM_tune_max_evals=",
          "runstring_ind=",
+         "n_permutations_permtest=",
          "EBM_compute_pairwise=", "EBM_featsel_feats=",
          "EBM_balancing=", "EBM_balancing_numfeats_thr=",
          'XGB_featsel_feats=',
@@ -287,7 +288,8 @@ opts, args = getopt.getopt(effargv,"hr:n:s:w:p:",
          "do_cleanup=", "VIF_thr=", "VIF_search_worst=", "compute_ICA=",
          "use_ICA_for_classif=", "load_XGB_params_auto=", "XGB_grid_dim=",
          "XGB_grid_test_only=", "load_XGB_params_date_thr=",
-         "XGB_balancing=", "load_EBM_params_auto=", "EBM_CV="])
+         "XGB_balancing=", "load_EBM_params_auto=", "EBM_CV=",
+         "ann_MEGartif_prefix_to_use="])
 print(sys.argv)
 print('Argv str = ',' '.join(sys.argv ) )
 print(opts)
@@ -326,10 +328,16 @@ for opt,arg in pars.items():
     elif opt == "n_feats":
         n_feats = int(arg)
         n_feats_set_explicitly = True
+    elif opt == "n_permutations_permtest":
+        n_permutations_permtest = int(arg)
     elif opt == "scale_feat_combine_type":
         scale_feat_combine_type = arg
     elif opt == "allow_CUDA":
         allow_CUDA = int(arg)
+    elif opt == "use_matching_folds_main_LFP":
+        use_matching_folds_main_LFP = int(arg)
+    elif opt == "ann_MEGartif_prefix_to_use":
+        ann_MEGartif_prefix_to_use = arg
     elif opt == "selMinFeatSet_drop_perf_pct":
         selMinFeatSet_drop_perf_pct = float(arg)
     elif opt == "selMinFeatSet_conv_perf_pct":
@@ -838,6 +846,25 @@ for rawn in rawnames:
     mainLFPchan = None
     if use_main_LFP_chan:
         best_LFP_info_fname_full = pjoin(gv.data_dir, best_LFP_info_file)
+
+        from pathlib import Path
+        search_LFP_dir = Path(best_LFP_info_fname_full).parent
+        use_matching_folds_main_LFP = 1
+        if use_matching_folds_main_LFP:
+            # go to corresponding medcond dir, load folds
+            assert len(rawnames) == 2
+            rnstr = ','.join(rawnames)
+            p = pjoin(search_LFP_dir, rnstr)
+            fold_info = np.load('fold_info.npz')
+            folds_train_holdout = fold_info['folds_train_holdout']
+            folds_trainfs_testfs = fold_info['folds_trainfs_testfs']
+            folds_train_holdout_trainfs_testfs = fold_info['folds_train_holdout_trainfs_testfs']
+            # with g
+            foldsg_train_holdout = fold_info['foldsg_train_holdout']
+            foldsg_trainfs_testfs = fold_info['foldsg_trainfs_testfs']
+            foldsg_train_holdout_trainfs_testfs = fold_info['foldsg_train_holdout_trainfs_testfs']
+
+
         print(f'Best LFP fname = {best_LFP_info_fname_full}')
         with open(best_LFP_info_fname_full, 'r') as f:
             best_LFP_info = json.load(f)
@@ -873,6 +900,9 @@ for rawn in rawnames:
                 exCB = True
         else:
             exCB = best_LFP_exCB
+
+        # TODO: return here filename as well
+        # TODO: load this file and check that labels are the same
         mainLFPchan = getBestLFPfromDict(best_LFP_info,subj,
                 disjoint=disjoint,
                 brain_side = brain_side_to_use,
@@ -1102,7 +1132,10 @@ if rescale_feats:
 
     # set in args to this script (run_ML)
     assert baseline_int_type_pri[0]       == baseline_int_type, (baseline_int_type_pri,baseline_int_type)
-    assert scale_data_combine_type_pri[0] == scale_feat_combine_type, (scale_data_combine_type_pri, scale_feat_combine_type )
+    if not gv.DEBUG_MODE:
+        assert scale_data_combine_type_pri[0] == scale_feat_combine_type, (scale_data_combine_type_pri, scale_feat_combine_type )
+    else:
+        print( f'scale_data_combine_type_pri={scale_data_combine_type_pri}, scale_feat_combine_type={scale_feat_combine_type} ')
 
     # WARNING: This will give wrong results if we have inconsistent sides
     #assert len(set(main_side_pri) ) == 1
@@ -1141,7 +1174,7 @@ if rescale_feats:
             sfreq, rawtimes_pri, int_type = baseline_int,
             main_side = None,
             side_rev_pri = side_switch_happened_pri,
-            artif_handling=feat_stats_artif_handling,
+            artif_handling_statcollect=feat_stats_artif_handling,
             minlen_bins = 5 * sfreq // skip,
             combine_within=scale_feat_combine_type,
             bindict_per_rawn=bindict_per_rawn  )
@@ -1180,10 +1213,10 @@ assert not np.any(np.isnan(dsattrib))
 import pandas as pd
 dfinds = pd.DataFrame( {'rawi':dsattrib, 'wndi_within_raw':internal_inds,
                 'wndi_across_raw': np.arange(len(Xconcat) ) } )
-dfdat = pd.DataFrame( Xconcat, featnames )
+dfdat = pd.DataFrame( Xconcat, columns=featnames )
 # maybe I need join = "inner" or to reindex?
 df = pd.concat( [dfinds, dfdat] , axis=1)
-df['times_within_raw'] = np.hstack(rawtimes_pri)
+#df['times_within_raw'] = np.hstack(rawtimes_pri) # this is wrong because rawtimes have high sampling rate
 df['wblb_within_raw'] = np.hstack(wbd_pri)[0]
 df['wbrb_within_raw'] = np.hstack(wbd_pri)[1]
 assert len(df) == len(Xconcat)
@@ -1201,15 +1234,19 @@ if len(set(feat_body_side_pri)  ) > 1:
     #raise ValueError(ws)
 
 
+featnames_nice = utils.nicenFeatNames(featnames,
+                                    roi_labels,srcgrouping_names_sorted)
+assert len(featnames_nice) == len(featnames)
+
 if exit_after == 'rescale':
     print(f'Got exit_after={exit_after}, exiting!')
     #if show_plots:
     #    pdf.close()
     sys.exit(0)
 
-
+#nbins total -- total number (hires) timebins
 nbins_total =  sum( [ len(times) for times in rawtimes_pri ] )
-assert nbins_total == len(Xconcat)
+#nbins_total =  wbd[-1]
 # merge wbds
 #cur_zeroth_bin = 0
 #wbds = []
@@ -1229,10 +1266,10 @@ anns, anns_pri, times_concat, dataset_bounds, wbd_merged = utsne.concatAnns(rawn
                                                           side_rev_pri = side_switch_happened_pri,
                                                          wbd_pri = wbd_pri, sfreq=sfreq, ret_wbd_merged=1)
 print('times_concat end {} wbd end {}'.format(times_concat[-1] * sfreq, wbd_merged[1,-1] ) )
-assert len(df) == len(times_concat)
-assert len(df) == len(wbd_merged)
-df['times_concat'] = times_concat
-df['wbd_merged'] = wbd_merged
+assert len(df) == wbd_merged.shape[1]
+#df['times_concat'] = times_concat
+df['wblb_merged'] = wbd_merged[0]
+df['wbrb_merged'] = wbd_merged[1]
 
 ivalis = utils.ann2ivalDict(anns)
 ivalis_tb_indarrays_merged = \
@@ -1248,26 +1285,25 @@ ivalis_tb_indarrays_merged = \
 ##############################################################################
 
 #######################   naive artifacts
-bininds_noartif_nounlab = np.arange(Xconcat.shape[0])    #everything
+# here we only select indices in fact, not touch Xconcat itself
 if do_outliers_discard:
     artif_naive_bininds, qvmult, discard_ratio = \
         utsne.findOutlierLimitDiscard(Xconcat,discard=discard_outliers_q,qshift=1e-2)
-    bininds_noartif_nounlab = np.setdiff1d( bininds_noartif_nounlab,
+    bininds_clean1 = np.setdiff1d( np.arange(Xconcat.shape[0]),
                                            artif_naive_bininds)
 
     print('Outliers selection result: qvmult={:.3f}, len(artif_naive_bininds)={} of {} = {:.3f}s, discard_ratio={:.3f} %'.
         format(qvmult, len(artif_naive_bininds), Xconcat.shape[0],
             len(artif_naive_bininds)/sfreq,  100 * discard_ratio ) )
-
-
+else:
+    bininds_clean1 = np.arange(Xconcat.shape[0])    #everything
 
 ###########################   artifacts, collected by hand
-ann_MEGartif_prefix_to_use = '_ann_MEGartif_flt'
 # collect artifacts now annotations first
 suffixes = []
 if artif_force_all_modalities:
     suffixes += [ '_ann_LFPartif' ]
-    suffixes += [ ann_MEGartif_prefix_to_use ]
+    suffixes += [ann_MEGartif_prefix_to_use ]
 else:
     if 'LFP' in data_modalities:
         suffixes += [ '_ann_LFPartif' ]
@@ -1277,6 +1313,7 @@ anns_artif, anns_artif_pri, times_, dataset_bounds_ = \
     utsne.concatAnns(rawnames,rawtimes_pri, suffixes,crop=(crop_start,crop_end),
                  allow_short_intervals=True, side_rev_pri =
                  side_switch_happened_pri, wbd_pri = wbd_pri, sfreq=sfreq)
+# remove wrong side artifacts (but keeping all channels on given side)
 if LFP_side_to_use == "baseline_int_side":
     wrong_brain_side_let = baseline_int[-1].upper()  # ipsilater is wrong for LFP
     anns_artif = utils.removeAnnsByDescr(anns_artif,
@@ -1307,69 +1344,71 @@ Xconcat_artif_nan = utils.setArtifNaN(Xconcat,
                         featnames, ignore_shape_warning=test_mode)
 isnan = np.isnan( Xconcat_artif_nan)
 if np.sum(isnan):
-    artif_bininds = np.where( isnan )[0]
+    artif_manual_bininds = np.where( isnan )[0]
 else:
-    artif_bininds = []
-#bininds_noartif = np.setdiff1d( np.arange(len(Xconcat) ) , artif_bininds)
+    artif_manual_bininds = []
+#bininds_noartif = np.setdiff1d( np.arange(len(Xconcat) ) , artif_manual_bininds)
 num_nans = np.sum(np.isnan(Xconcat_artif_nan), axis=0)
 print('Max artifact NaN percentage is {:.4f}%'.format(100 * np.max(num_nans)/Xconcat_artif_nan.shape[0] ) )
 
-# set artifacts to zero
-imp_mean = SimpleImputer(missing_values=np.nan, strategy='constant', fill_value=0.)
+# set artifacts to zero. Keeping them as NaN is not an option, ML will fail
+imp_mean = SimpleImputer(missing_values=np.nan,
+                         strategy='constant', fill_value=0.)
 imp_mean.fit(Xconcat_artif_nan)
 Xconcat_imputed = imp_mean.transform(Xconcat_artif_nan)
 
-# Xconcat_to_fit is NOT about removing points,
+# Xconcat_inc_impute is NOT about removing points it whether some points are
+# imputed or not,
 # it is used TOGETHER with bininds_noartif_nounlab
 if artif_handling_before_fit == 'impute':
     # replacing artifact-related NaNs with zeros
     # mean should be zero since we centered features earlier
 
     #we DO NOT change bininds_noartif_nounlab here
-    Xconcat_to_fit = Xconcat_imputed
+    Xconcat_inc_impute = Xconcat_imputed
+    bininds_clean2 = bininds_clean1
 elif artif_handling_before_fit == 'reject':
-    bininds_noartif_nounlab = np.setdiff1d(bininds_noartif_nounlab, artif_bininds)
-    Xconcat_to_fit = Xconcat
+    #bininds_noartif_nounlab = np.setdiff1d(bininds_clean1, artif_manual_bininds)
 
-    assert not np.any( np.isnan(Xconcat[bininds_noartif_nounlab] ) )
+    # here we use both bininds_clean1 and artif_manual_bininds come from the
+    # original indices, not computed one on top of another
+    bininds_clean2 = np.setdiff1d(bininds_clean1, artif_manual_bininds)
+    Xconcat_inc_impute = Xconcat # before rejecting
+
+    assert not np.any( np.isnan(Xconcat[bininds_clean2] ) )
+    #bininds_for_fit = bininds_clean2
 else:
     raise ValueError('wrong value of artif_handling_before_fit = {}'.format(artif_handling_before_fit) )
     #Xconcat_all    = Xconcat
 #elif artif_handling_before_fit == 'do_nothing':
-#    #Xconcat_to_fit = Xconcat
+#    #Xconcat_inc_impute = Xconcat
 #    Xconcat_all    = Xconcat
 
-# collect all marked behavioral states
+###########################################################
+########################  Unlabeled points
+###########################################################
+# collect all marked behavioral states, these are indices in the original
+# Xconcat, without removing any artifacts
 lst =  [inds for inds in ivalis_tb_indarrays_merged.values()]
 all_interval_inds = np.hstack(lst  )
 unset_inds = np.setdiff1d(np.arange(len(Xconcat)), all_interval_inds)
 print( f'Num of indices not assigned to any interval = {len(unset_inds) } ')
 
-# this is the most bruteforce way when I join all artifacts
-#lst2 =  [inds for inds in ivalis_artif_tb_indarrays_merged.values()]
-#if len(lst2):
-#    all_interval_artif_inds = np.hstack(lst2  )
-#else:
-#    all_interval_artif_inds = np.array([])
-
-
-#####################################################
 # Update bininds_noartif_nounlab by removing unlabeled points
 remove_pts_unlabeled_beh_states = 1  # before fit
 if remove_pts_unlabeled_beh_states:
     #do somthing
-    bininds_concat_good_yes_label = np.setdiff1d( bininds_noartif_nounlab, unset_inds)
+    bininds_concat_good_yes_label = \
+        np.setdiff1d( bininds_clean2, unset_inds)
     print('Removing {} unlabeled pts before PCA'.
-          format(len(bininds_noartif_nounlab) - len(bininds_concat_good_yes_label) ) )
-    bininds_noartif_nounlab = bininds_concat_good_yes_label
+          format(len(bininds_clean2) - len(bininds_concat_good_yes_label) ) )
+    bininds_for_fit = bininds_concat_good_yes_label
 else:
     print('Warning not removing unlabeled before PCA')
+    bininds_for_fit = bininds_clean2
+
 #####################################################
 
-
-featnames_nice = utils.nicenFeatNames(featnames,
-                                    roi_labels,srcgrouping_names_sorted)
-assert len(featnames_nice) == len(featnames)
 
 if exit_after == 'artif_processed':
     print(f'Got exit_after={exit_after}, exiting!')
@@ -1380,9 +1419,9 @@ if exit_after == 'artif_processed':
 # bininds_noartif_nounlab  are inds of bin where I have thrown away outliers and removed
 # unlabeled
 
-print('Input PCA dimension ', (len(bininds_noartif_nounlab),Xconcat.shape[1]) )
+print('Input PCA dimension ', (len(bininds_for_fit),Xconcat.shape[1]) )
 pca = PCA(n_components=nPCA_comp)
-Xsubset_to_fit = Xconcat_to_fit[bininds_noartif_nounlab]
+Xsubset_to_fit = Xconcat_inc_impute[bininds_for_fit]
 #Xsubset_to_fit = Xsubset_to_fit
 pca.fit(Xsubset_to_fit )   # fit to not-outlier data
 pcapts = pca.transform(Xconcat_imputed)  # transform outliers as well
@@ -1564,7 +1603,7 @@ if do_Classif:
                         indend += lens_pri[rawi+1]
                 # we should have labeled everything
                 assert np.sum( group_labels  ==0) == 0
-                group_labels = group_labels[bininds_noartif_nounlab]
+                group_labels = group_labels[bininds_for_fit]
                 group_labels_dict[int_types_key_cur] = group_labels.copy()
                 revdict_per_dataset_int_type[int_types_key_cur] = revdict
                 class_ids_grouped_per_dataset_int_type[int_types_key_cur] = class_ids_grouped
@@ -1572,7 +1611,7 @@ if do_Classif:
             if int_types_key in gp.int_type_datset_rel:
                 # distinguishing datasets
                 class_labels = group_labels
-                class_labels_good = class_labels[bininds_noartif_nounlab]
+                class_labels_good = class_labels[bininds_for_fit]
                 revdict = revdict_per_dataset_int_type[int_types_key]
                 class_ids_grouped = class_ids_grouped_per_dataset_int_type[int_types_key]
 
@@ -1605,7 +1644,7 @@ if do_Classif:
                 class_labels, class_labels_good, revdict, class_ids_grouped,inds_not_neut  = \
                     utsne.makeClassLabels(sides_hand, grouping,
                         int_types_to_distinguish,
-                        ivalis_tb_indarrays_merged, bininds_noartif_nounlab,
+                        ivalis_tb_indarrays_merged, bininds_for_fit,
                         len(Xconcat_imputed),
                         rem_neut = discard_remaining_int_types_during_fit)
 
@@ -1614,7 +1653,7 @@ if do_Classif:
                 class_labels_nm, class_labels_good_nm, revdict_nm, class_ids_grouped_nm,inds_not_neut_nm  = \
                     utsne.makeClassLabels(sides_hand, gp.groupings['merge_nothing'],
                         int_types_to_distinguish,
-                        ivalis_tb_indarrays_merged, bininds_noartif_nounlab,
+                        ivalis_tb_indarrays_merged, bininds_for_fit,
                         len(Xconcat_imputed),
                         rem_neut = discard_remaining_int_types_during_fit)
 
@@ -1793,6 +1832,10 @@ if do_Classif:
             results_cur['feature_names_nice'] = featnames_nice #=feature_names_pri[0]
             results_cur['featnames_for_fit'] = featnames_for_fit
             results_cur['featnames_nice_for_fit'] = featnames_nice_for_fit
+
+            results_cur['bininds_noartif_naive'] = bininds_clean1
+            results_cur['bininds_noartif_naive_and_manual'] = \
+                bininds_clean2
 
             results_cur['icaobj'] = ica
 
@@ -2128,9 +2171,39 @@ if do_Classif:
             #lab_enc.fit(class_labels_for_heavy)
             #class_labels_good_for_classif = lab_enc.transform(class_labels_for_heavy)
 
+            # TODO: if there is subskip > 1, it should be done HERE ONLY
+            if not use_main_LFP_chan or (not use_matching_folds_main_LFP):
+                folds_train_holdout, folds_trainfs_testfs,\
+                    folds_train_holdout_trainfs_testfs =\
+                    utsne.getFolds(X_for_heavy, class_labels_good_for_classif,
+                        n_splits=n_splits, group_labels=None,
+                        stratified=True, holdout=True,seed=0)
 
+                from packaging.version import parse as vparse
+                import sklearn
+                group_fold_stratif = vparse(sklearn.__version__) > vparse('0.25')
 
-            do_XGB_cur =  do_XGB and not (int_types_key in gp.int_type_datset_rel and skip_XGB_aux_intervals  )
+                n_splitsg = min(n_splits, len(set(group_labels)))
+                foldsg_train_holdout, foldsg_trainfs_testfs,\
+                    foldsg_train_holdout_trainfs_testfs =\
+                    utsne.getFolds(X_for_heavy, class_labels_good_for_classif,
+                        n_splits=n_splitsg, group_labels=group_labels,
+                        stratified=group_fold_stratif,
+                        holdout=True, seed=0)
+
+            fold_info = {}
+            fold_info['folds_train_holdout'] = folds_train_holdout
+            fold_info['folds_trainfs_testfs'] = folds_trainfs_testfs
+            fold_info['folds_train_holdout_trainfs_testfs'] = folds_train_holdout_trainfs_testfs
+            # with g
+            fold_info['foldsg_train_holdout'] = foldsg_train_holdout
+            fold_info['foldsg_trainfs_testfs'] = foldsg_trainfs_testfs
+            fold_info['foldsg_train_holdout_trainfs_testfs'] = foldsg_train_holdout_trainfs_testfs
+            results_cur['fold_info'] = fold_info
+            saveResToFolder(results_cur, 'fold_info')
+
+            do_XGB_cur =  do_XGB and not (int_types_key in\
+                gp.int_type_datset_rel and skip_XGB_aux_intervals  )
             clf_XGB = None
             best_inds_XGB = None
             perfs_XGB = None
@@ -2237,13 +2310,14 @@ if do_Classif:
                         add_clf_creopts, best_params_list, cv_resutls_best_list,\
                             num_boost_round_best=\
                             utsne.gridSearchSeq(X_orig,y_orig, add_clf_creopts_CV,
-                                            XGB_params_search_grid,
-                                            XGB_param_list_search_seq,
-                                            num_boost_round=100,
-                                early_stopping_rounds=15, nfold=n_splits, seed=0,
-                                            sel_num_boost_round=1,
-                                                main_metric=tune_metric,
-                                                printLog=1,savedir=tune_savedir)
+                                XGB_params_search_grid,
+                                XGB_param_list_search_seq,
+                                num_boost_round=100,
+                                early_stopping_rounds=15,
+                                nfold=n_splits, seed=0,
+                                sel_num_boost_round=1,
+                                main_metric=tune_metric,
+                                printLog=1,savedir=tune_savedir)
                     else:
                         add_clf_creopts = add_clf_creopts_tuned
                         add_fitopts = add_fitopts_tuned
@@ -2352,11 +2426,15 @@ if do_Classif:
                     else:
                         clf_XGB.fit(X_orig, y_orig, **add_fitopts, sample_weight=class_weights)
 
+
                     r0 = utsne.getPredPowersCV(clf_XGB,X_orig,y_orig,
                         class_ind_to_check_lenc, printLog = 0,
                         n_splits=n_splits, add_fitopts=add_fitopts,
                         add_clf_creopts=add_clf_creopts,
-                        ret_clf_obj=True, balancing=XGB_balancing, seed=0)
+                        ret_clf_obj=True, balancing=XGB_balancing, seed=0,
+                        fold_split = folds_train_holdout,
+                        perm_test = 1,
+                        n_permutations = n_permutations_permtest)
                     rc = {'perf_dict':r0, 'importances':clf_XGB.feature_importances_}
                     rc['add_clf_creopts'] = add_clf_creopts
                     rc['add_fitopts'] = add_fitopts
@@ -2382,7 +2460,7 @@ if do_Classif:
                         rc['perf_per_cp_exc' ] =  (e, traceback_info)
                     rc['perf_per_cp' ] =  perf_per_cp
 
-                    # here we do NO want the main interval typ to be of
+                    # here we do NOT want the main interval type to be of
                     # 'dataset' kind
                     if int_types_key not in gp.int_type_datset_rel:
                         rc['across'] = {}
@@ -2403,7 +2481,8 @@ if do_Classif:
                                     n_splits=ngroups, add_fitopts=add_fitopts,
                                     add_clf_creopts=add_clf_creopts,
                                     ret_clf_obj=False, seed=0, balancing=XGB_balancing,
-                                    group_labels=group_labels[::subskip_fit])
+                                    fold_split=foldsg_train_holdout,
+                                    perm_test=0)
                                 rc['across'][label_group_name] = r0_across
 
                                 perfstr = utsne.sprintfPerfs(r0_across['perf_aver'])
@@ -2442,6 +2521,9 @@ if do_Classif:
 
                 if 'XGB' in search_best_LFP and (not use_main_LFP_chan) \
                         and ('LFP' in data_modalities) and len(chnames_LFP) > 1:
+
+                    # TODO: set folds here
+
                     # we will do two types of best LFP selection -- per body
                     # side and in total over all channels (across sides)
                     if feat_body_side == 'both' and 'XGB' in search_best_side:
@@ -2499,7 +2581,9 @@ if do_Classif:
                                 class_ind_to_check_lenc, printLog = 0,
                                 n_splits=n_splits, add_fitopts=add_fitopts,
                                 add_clf_creopts=add_clf_creopts_cur_side,
-                                ret_clf_obj=True, balancing=XGB_balancing, seed=0)
+                                fold_split = folds_trainfs_testfs,
+                                ret_clf_obj=True, balancing=XGB_balancing, seed=0,
+                                perm_test = 0)
 
                             rc = {'perf_dict':r0, 'importances':clf_XGB_.feature_importances_,
                                   'featis':feat_inds_cur_side}
@@ -2522,6 +2606,8 @@ if do_Classif:
 
                         X_cur = Xconcat_good_cur[ ::subskip_fit, feat_inds_except_curLFP ]
                         y_cur = class_labels_good_for_classif
+
+                        bininds_cur =bininds_for_fit[::subskip_fit]
 
                         if XGB_balancing == 'oversample':
                             oversample = RandomOverSampler(sampling_strategy='minority',
@@ -2563,7 +2649,10 @@ if do_Classif:
                             class_ind_to_check_lenc, printLog = 0,
                             n_splits=n_splits, add_fitopts=add_fitopts,
                             add_clf_creopts=add_clf_creopts_minus_curLFP,
-                            ret_clf_obj=True, balancing=XGB_balancing, seed=0)
+                            fold_split = folds_trainfs_testfs,
+                            ret_clf_obj=True,
+                            balancing=XGB_balancing, seed=0,
+                            perm_test = 0)
 
                         rc = {'perf_dict':r0, 'importances':clf_XGB_.feature_importances_, 'featis':feat_inds_except_curLFP}
                         results_cur['XGB_analysis_versions'][XGB_version_name] = rc
@@ -2616,7 +2705,9 @@ if do_Classif:
                             class_ind_to_check_lenc, printLog = 0,
                             n_splits=n_splits, add_fitopts=add_fitopts,
                             add_clf_creopts=add_clf_creopts_curLFP,
-                            ret_clf_obj=True, balancing=XGB_balancing, seed=0)
+                            fold_split = folds_trainfs_testfs,
+                            ret_clf_obj=True, balancing=XGB_balancing, seed=0,
+                            perm_test = 0)
 
                         rc = {'perf_dict':r0, 'importances':clf_XGB_.feature_importances_, 'featis':feat_inds_curLFP}
                         results_cur['XGB_analysis_versions'][XGB_version_name] = rc
@@ -2885,7 +2976,7 @@ if do_Classif:
                         'selected_feat_inds_pri':dict(enumerate(selected_feat_inds_pri)),
                         'feature_names_filtered_pri':dict(enumerate(feature_names_pri)),
                          'featnames_nice':featnames_nice,
-                          'bininds_good':bininds_noartif_nounlab,
+                          'bininds_good':bininds_for_fit,
                             'inds_not_neut': inds_not_neut,
                          'feat_info_pri':dict(enumerate(feat_info_pri)),
                         'rawtimes_pri':dict(enumerate(rawtimes_pri)),
@@ -3517,7 +3608,7 @@ if not single_fit_type_mode:
 
         if save_output:
             mask = np.zeros( len(Xconcat), dtype=bool )
-            mask[bininds_noartif_nounlab] = 1
+            mask[bininds_for_fit] = 1
             bininds_good_cur = np.where( mask[sl] )[0]
             #before I had 'bininds_noartif_nounlab' name in the file for what now I call 'selected_feat_inds'
             # here I am atually saving not all features names, but only the
@@ -3530,7 +3621,9 @@ if not single_fit_type_mode:
                     info = ML_info, feat_info = feat_info_pri[rawind],
                     lda_output_pg = mult_clf_results_pg_cur, Xtimes=Xtimes_pri[rawind], argv=sys.argv,
                     X_imputed=Xconcat_imputed[sl] ,  rawtimes=rawtimes_pri[rawind],
-                     bininds_noartif_nounlab = bininds_noartif_nounlab)
+                     bininds_noartif_naive = bininds_clean1,
+                     bininds_noartif_naive_and_manual = bininds_clean2)
+                     #bininds_noartif_nounlab = bininds_noartif_nounlab)
             print('Saving PCA to ',fname_PCA_full)
         else:
             print('Skipping saving because save_output=0')

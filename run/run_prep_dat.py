@@ -118,6 +118,8 @@ for opt,arg in pars.items():
         n_jobs = int(arg)
     elif opt == "exit_after":
         exit_after = arg
+    elif opt.startswith('code_ver'):
+        print(f'code ver = {arg}')
     elif opt == "src_grouping":
         src_grouping = int(arg)
     elif opt == "input_subdir":

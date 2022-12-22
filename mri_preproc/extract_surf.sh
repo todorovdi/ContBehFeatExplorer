@@ -2,7 +2,9 @@
 
 #export SUBJECTS_DIR=$HOME/mysubs
 #export SUBJECTS_DIR_DEF=$HOME/raw_dacq
-SUBJECTS_DIR_DEF=$HOME/data/MRI
+#SUBJECTS_DIR_DEF=$HOME/data/MRI
+MRI_DIR_DEF=$DATA_DUSS/MRI/nii
+SUBJECTS_DIR_DEF=$DATA_DUSS/MRI/subjects
 
 SUBJ_IDS=( S10 )
 SUBJ_IDS=( Dima_SERIES9 )
@@ -12,7 +14,7 @@ SUBJ_IDS=( Dima_SERIES9 )
 SUBJ_IDS=( S01 S02 )
 SUBJ_IDS=( S01 )
 SUBJ_IDS=( S07 )
-SUBJ_IDS=( S02 )
+#SUBJ_IDS=( S02 )
 nids=${#SUBJ_IDS[*]}
 for (( i=0; i<=$nids; i++ )); do
 	SUBJ_ID=${SUBJ_IDS[$i]}
@@ -21,20 +23,24 @@ for (( i=0; i<=$nids; i++ )); do
 	fi
 
 	subject_folder_out="$SUBJECTS_DIR"/"$SUBJ_ID"
-	my_NIFTI=$SUBJECTS_DIR_DEF/"$SUBJ_ID"_anat_t1.nii
-	my_NIFTI2=$SUBJECTS_DIR_DEF/"$SUBJ_ID"_anat_t2.nii
+	my_NIFTI=$MRI_DIR_DEF/"$SUBJ_ID"_anat_t1.nii
+	my_NIFTI2=$MRI_DIR_DEF/"$SUBJ_ID"_anat_t2.nii
 	echo "$my_NIFTI $subject_folder_out"
 
   #cmd1="$FREESURFER_HOME/bin/recon-all -i $my_NIFTI -s $subject_folder_out -all"
   cmd1="$FREESURFER_HOME/bin/recon-all -s $subject_folder_out -T2 $my_NIFTI2 -T2pial -autorecon3"
   #-sd $SUBJECTS_DIR
-  cmd2="mne watershed_bem -s $subject_folder_out"
+  cmd2="mne watershed_bem -s $subject_folder_out --overwrite"
+  cmd2="mne watershed_bem -s $SUBJ_ID -d $SUBJECTS_DIR --overwrite"
+  #cmd3="mne flahs_bem -s $subject_folder_out"
+  #cmd3="mne flash_bem -s $SUBJ_ID -d $SUBJECTS_DIR"
 
   #terminator -e "$cmd1; $cmd2" &
   #terminator -e "$cmd1; $cmd2"  # does not work 
   #$cmd1  && $cmd 2  # does not work
-  $cmd1
-  #$cmd2
+  #$cmd1
+  $cmd2
+  #$cmd3
 done
 
 #An example of running a subject through Freesurfer with a T2 image is:

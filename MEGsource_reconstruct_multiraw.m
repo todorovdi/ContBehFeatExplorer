@@ -39,6 +39,9 @@ if ~exist("roi")
   roi = {"parcel_aal_surf"};
 end
 
+% it would be ideal to load raw data but there are two problems: 
+% in fieldtrip when one does filtering it is not possible to care about annotations,
+% so it is better doing it in MNE
 if ~exist("input_rawname_type")
   input_rawname_type = ["resample", "notch", "highpass"]  %this is default
 end
@@ -208,7 +211,6 @@ for rawi = 1:length(rawnames)
 
 
         %deal with artifacts
-        %fname_srcrec_exclude = sprintf('/%s_%s_%s_ann_MEGartif.txt', subjstr,medstr,taskstr);
         fname_srcrec_exclude = sprintf('/%s_%s_%s_ann_srcrec_exclude.txt', subjstr,medstr,taskstr);
         filename      = fullfile(data_dir,fname_srcrec_exclude);
         FID = fopen(filename);

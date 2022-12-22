@@ -21,15 +21,157 @@ def getFileAge(fname_full, ret_hours=True):
         r = nh
     return nh
 
-def getRaw(rawname_naked, rawname = None ):
-    if os.environ.get('DATA_DUSS') is not None:
-        data_dir = os.path.expandvars('$DATA_DUSS')
+def recalcMEGArtifacts(rawname, raw,
+                        thr_mult, use_mean,
+                        flt_thr_mult, flt_use_mean,
+                        ICA_thr_mult = 2.3, ICA_use_mean = False,
+                       lowest_freq_to_keep=1.5,
+                       n_jobs=-1, raw_flt = None, raw_notched=None, savedir=None,
+                       ICA_force_recalc=0, n_ICA_comp=3, notch_freqsToKill=None,
+                      force_ICA_recalc = True, pdf=None ):
+    '''
+    takes raw (unresamled) un maybe filtered raw raw_flt (if not it does itself)
+    and computed artif -- normal and after filtering
+    '''
+    import matplotlib.pyplot as plt
+
+    if len(raw.info['bads'] ):
+        raw = raw.copy()
+        raw.drop_channels(raw.info['bads'])
+
+    # assuming bad channels were set already
+
+    #n_components_ICA = 0.95
+    n_components_ICA = 10  # if I keep it to 0.95, it takes a lot of time
+    # NOT filtered
+    icafname_full = pjoin(savedir, f'{rawname}_ICA_artif.fif.gz')
+    from mne.preprocessing import read_ica,ICA
+    if os.path.exists(icafname_full) and not force_ICA_recalc:
+        ica = read_ica(icafname_full)
     else:
-        data_dir = '/home/demitau/data'
+        ica = ICA(n_components = n_components_ICA, random_state=0).fit(raw)
+        ica.save(icafname_full, overwrite=True)
+        print(f'ICA saved to {icafname_full}')
+
+    icacomp = ica.get_sources(raw)
+    anns_icaMEG_artif, cvl_ica_per_side = utils.findRawArtifacts(icacomp ,
+        thr_mult = ICA_thr_mult,
+        thr_use_mean = ICA_use_mean, plot_name='ICA', sided=False,
+            n_ICA_comp = n_ICA_comp)
+
+    if pdf is not None:
+        pdf.savefig(plt.gcf())
+
+
+    if len(anns_icaMEG_artif) > 0:
+        print('Artif found in ICA {}, maxlen {:.3f} totlen {:.3f}'.
+                format(anns_icaMEG_artif, np.max(anns_icaMEG_artif.duration),
+                        np.sum(anns_icaMEG_artif.duration) ) )
+    else:
+        print('Artif found in ICA {} is NONE'.  format(anns_icaMEG_artif) )
+
+    if not os.path.exists(savedir ):
+        os.makedirs(savedir)
+    if savedir is not None:
+        fnf = os.path.join(savedir,
+            '{}_ann_MEGartif_ICA.txt'.format(rawname) )
+        anns_icaMEG_artif.save(fnf, overwrite=True )
+        print('Saved ',fnf)
+
+    ###########################################
+
+    if raw_flt is None:
+        raw_flt = raw.copy()
+        raw_flt.load_data()
+        raw_flt.filter(l_freq=lowest_freq_to_keep,
+                        h_freq=None, n_jobs=n_jobs) #, skip_by_annotation='BAD_MEG')
+
+
+    anns_MEG_artif, cvl_per_side = utils.findRawArtifacts(raw ,
+        thr_mult = thr_mult,
+        thr_use_mean = use_mean, plot_name='')
+
+    if pdf is not None:
+        pdf.savefig(plt.gcf())
+
+    if len(anns_MEG_artif) > 0:
+        print('Artif found in UNfilt {}, maxlen {:.3f} totlen {:.3f}'.
+                format(anns_MEG_artif, np.max(anns_MEG_artif.duration),
+                        np.sum(anns_MEG_artif.duration) ) )
+    else:
+        print('Artif found in UNfilt {} is NONE'.  format(anns_MEG_artif) )
+
+    if not os.path.exists(savedir ):
+        os.makedirs(savedir)
+    if savedir is not None:
+        fnf = os.path.join(savedir, '{}_ann_MEGartif.txt'.format(rawname) )
+        anns_MEG_artif.save(fnf, overwrite=True )
+        print('Saved ',fnf)
+
+
+    ######################################
+
+    if raw_notched is None:
+        raw_notched = raw.copy()
+        raw_notched.notch_filter(notch_freqsToKill, n_jobs=n_jobs)
+
+    # this has to be done after notching
+    from mne.preprocessing import annotate_muscle_zscore
+    threshold_muscle = 5  # z-score, threshold is data depenent
+    anns_muscle, scores_muscle = annotate_muscle_zscore(
+        raw_notched, ch_type="mag", threshold=threshold_muscle, min_length_good=0.2,
+        filter_freq=[110, 140])
+
+    if len( anns_muscle ) > 0:
+        print('Artif found muscles {}, maxlen {:.3f} totlen {:.3f}'.
+            format(anns_muscle, np.max(anns_muscle.duration),
+                    np.sum(anns_muscle.duration) ) )
+    else:
+        print('Artif found in muscles {} is NONE'.  format(anns_muscle) )
+
+    if savedir is not None:
+        anns_muscle.save(os.path.join(savedir, '{}_ann_MEGartif_muscle.txt'.format(rawname) ), overwrite=True )
+
+    import matplotlib.pyplot as plt
+    fig, ax = plt.subplots()
+    ax.plot(raw_notched.times, scores_muscle)
+    ax.axhline(y=threshold_muscle, color='r')
+    ax.set(xlabel='time, (s)', ylabel='zscore', title='Muscle activity')
+
+    if pdf is not None:
+        pdf.savefig(fig)
+
+    #################################
+
+    anns_MEG_artif_flt, cvl_per_side = utils.findRawArtifacts(raw_flt ,
+        thr_mult = flt_thr_mult,
+        thr_use_mean = flt_use_mean,
+        plot_name=f'low pass {lowest_freq_to_keep:.1f}')
+
+    if pdf is not None:
+        pdf.savefig(plt.gcf())
+
+
+    if len( anns_MEG_artif_flt ) > 0:
+        print('Artif found in filtered {}, maxlen {:.3f} totlen {:.3f}'.
+            format(anns_MEG_artif_flt, np.max(anns_MEG_artif_flt.duration),
+                    np.sum(anns_MEG_artif_flt.duration) ) )
+    else:
+        print('Artif found in filtered {} is NONE'.  format(anns_MEG_artif_flt) )
+
+    if savedir is not None:
+        anns_MEG_artif_flt.save(os.path.join(savedir, '{}_ann_MEGartif_flt.txt'.format(rawname) ), overwrite=True )
+    return anns_MEG_artif, anns_MEG_artif_flt, anns_icaMEG_artif, anns_muscle
+
+def getRaw(rawname_naked, rawname = None ):
+    #if os.environ.get('DATA_DUSS') is not None:
+    #    data_dir = os.path.expandvars('$DATA_DUSS')
+    #else:
+    #    data_dir = '/home/demitau/data'
 
     if rawname is None:
         rawname = rawname_naked + '_resample_raw.fif'
-    fname_full = os.path.join(data_dir, rawname)
+    fname_full = os.path.join(gv.data_dir, rawname)
     # read file -- resampled to 256 Hz,  Electa MEG, EMG, LFP, EOG channels
     raw = mne.io.read_raw_fif(fname_full, None)
 
@@ -67,11 +209,7 @@ def loadBadChannelList(rawname_,ch_names):
     import utils
     sind_str,medstate,task = utils.getParamsFromRawname(rawname_)
     # get info about bad MEG channels (from separate file)
-    with open('subj_info.json') as info_json:
-        #raise TypeError
-
-        #json.dumps({'value': numpy.int64(42)}, default=convert)
-        gen_subj_info = json.load(info_json)
+    from globvars import gen_subj_info
 
     #subj,medcond,task  = utils.getParamsFromRawname(rawname_)
     subjind = int(sind_str[1:])
@@ -1783,6 +1921,8 @@ def saveLFP(rawname_naked, f_highpass = 2, skip_if_exist = 1,
         lfp_fname_full = os.path.join(data_dir, '{}_LFP_1kHz.fif'.format(rawname_naked) )
     elif sfreq == 256:
         lfp_fname_full = os.path.join(data_dir, '{}_LFPonly.fif'.format(rawname_naked) )
+    elif sfreq == -1:
+        lfp_fname_full = os.path.join(data_dir, '{}_LFPonly_maxres.fif'.format(rawname_naked) )
     else:
         lfp_fname_full = os.path.join(data_dir, '{}_LFPonly_{}Hz.fif'.format(rawname_naked,sfreq) )
     if os.path.exists(lfp_fname_full) :
@@ -1820,6 +1960,8 @@ def saveLFP(rawname_naked, f_highpass = 2, skip_if_exist = 1,
     del raw
     import gc; gc.collect()
 
+    if sfreq < 0:
+        sfreq = subraw.info['sfreq']
 
     set_channel_types = True # needed of for real but not test datasets
     if set_channel_types:
@@ -1827,6 +1969,7 @@ def saveLFP(rawname_naked, f_highpass = 2, skip_if_exist = 1,
         for chname in subraw.ch_names:
             y[chname] = 'eeg'
         subraw.set_channel_types(y)
+
 
 
     #num_cores = mpr.cpu_count() - 1
@@ -1955,22 +2098,23 @@ def read_raw_fieldtrip(fname, info, data_name='data'):
     # load data and set ft_struct to the heading dictionary
     ft_struct = ft_struct[data_name]
 
-    info = _create_info(ft_struct, info)  # create info structure
-    trial_struct = ft_struct['trial']
-    if isinstance(trial_struct, list) and len(trial_struct) > 1:
-        data = np.hstack( trial_struct)
-    else:
-        data = np.array(ft_struct['trial'])  # create the main data array
+    if info is None:
+        info = _create_info(ft_struct, info)  # create info structure
+        trial_struct = ft_struct['trial']
+        if isinstance(trial_struct, list) and len(trial_struct) > 1:
+            data = np.hstack( trial_struct)
+        else:
+            data = np.array(ft_struct['trial'])  # create the main data array
 
-    if data.ndim > 2:
-        data = np.squeeze(data)
+        if data.ndim > 2:
+            data = np.squeeze(data)
 
-    if data.ndim == 1:
-        data = data[np.newaxis, ...]
+        if data.ndim == 1:
+            data = data[np.newaxis, ...]
 
-    if data.ndim != 2:
-        raise RuntimeError('The data you are trying to load does not seem to '
-                           'be raw data')
+        if data.ndim != 2:
+            raise RuntimeError('The data you are trying to load does not seem to '
+                            'be raw data')
 
     raw = mne.io.RawArray(data, info)  # create an MNE RawArray
     return raw
@@ -2012,11 +2156,12 @@ def getCompInfl(ica,sources, comp_inds = None):
         infl += [r ]
     return infl #np.vstack( infl )
 
-def readInfo(rawname, raw, sis=[1,2], check_info_diff = 1, bandpass_info=0 ):
+def readInfo(rawname, raw, sis=[1,2],
+             check_info_diff = 1, bandpass_info=0 ):
     import globvars as gv
     data_dir = gv.data_dir
 
-    import pymatreader
+    import pymatreader as pym
     infos = {}
     for si in sis:
         info_name = rawname + '{}_info.mat'.format(si)
@@ -2024,7 +2169,7 @@ def readInfo(rawname, raw, sis=[1,2], check_info_diff = 1, bandpass_info=0 ):
         if not os.path.exists(fn):
             print(f'{fn} does not exist')
             continue
-        rr  =pymatreader.read_mat(fn )
+        rr  = pym.read_mat(fn )
         print( rr['info']['chs'].keys() )
         print( len( rr['info']['chs']['loc'] ) )
         info_Jan = rr['info']
@@ -2073,44 +2218,45 @@ def readInfo(rawname, raw, sis=[1,2], check_info_diff = 1, bandpass_info=0 ):
     #     digs['ident'][digi]
     #     digs['coord_frame']
     #     digs['r']
-    mod_info['dig'] = digpts
+    with mod_info._unlock():
+        mod_info['dig'] = digpts
 
-    # if we load it to use in conjunction with already processed file, maybe we
-    # don't want it to be saved. Same with number of channels
-    if bandpass_info:
-        fields_outer = ['highpass', 'lowpass']
-        for field in fields_outer:
-            mod_info[field] = info_Jan[field]
+        # if we load it to use in conjunction with already processed file, maybe we
+        # don't want it to be saved. Same with number of channels
+        if bandpass_info:
+            fields_outer = ['highpass', 'lowpass']
+            for field in fields_outer:
+                mod_info[field] = info_Jan[field]
 
-    d = info_Jan['dev_head_t']
-    mod_info['dev_head_t'] =  mne.transforms.Transform(d['from'],d['to'], d['trans'])
+        d = info_Jan['dev_head_t']
+        mod_info['dev_head_t'] =  mne.transforms.Transform(d['from'],d['to'], d['trans'])
 
 
-    prj = infos[1]['projs']
+        prj = infos[1]['projs']
 
-    projs = []
-    for i in range(len(prj)):
-        p = {}
-        for k in prj:
-            p[k] = prj[k][i]
+        projs = []
+        for i in range(len(prj)):
+            p = {}
+            for k in prj:
+                p[k] = prj[k][i]
 
-    #     proj_cur = prj[i]
-        if len(p['data']['row_names']) == 0:
-            p['row_names'] = None
+        #     proj_cur = prj[i]
+            if len(p['data']['row_names']) == 0:
+                p['row_names'] = None
 
-        if p['data']['data'].ndim == 1:
-            p['data']['data'] =  p['data']['data'][None,:]
-        one = mne.Projection(kind=p['kind'], active=p['active'], desc=p['desc'],
-                        data=p['data'],explained_var=None)
+            if p['data']['data'].ndim == 1:
+                p['data']['data'] =  p['data']['data'][None,:]
+            one = mne.Projection(kind=p['kind'], active=p['active'], desc=p['desc'],
+                            data=p['data'],explained_var=None)
 
-    #     one = Projection(kind=p['kind'], active=p['active'], desc=p['desc'],
-    #                      data=dict(nrow=nvec, ncol=nchan, row_names=None,
-    #                                col_names=names, data=data),
-    #                      explained_var=explained_var)
+        #     one = Projection(kind=p['kind'], active=p['active'], desc=p['desc'],
+        #                      data=dict(nrow=nvec, ncol=nchan, row_names=None,
+        #                                col_names=names, data=data),
+        #                      explained_var=explained_var)
 
-        projs.append(one)
+            projs.append(one)
 
-    mod_info['projs'] = projs
+        mod_info['projs'] = projs
 
     mne.channels.fix_mag_coil_types(mod_info)
 
@@ -2121,17 +2267,17 @@ def extractEMGData(raw, rawname_=None, skip_if_exist = 1, tremfreq = 9, save_dir
     # tremfreq should be max tremfreq found in the analyzed data (max over all
     # subjects)
     import globvars as gv
-    raw.info['bads'] = []
+    emgonly = raw.copy()
+    emgonly.info['bads'] = []
 
-    chis = mne.pick_channels_regexp(raw.ch_names, 'EMG.*old')
+    chis = mne.pick_channels_regexp(emgonly.ch_names, 'EMG.*old')
     if len(chis) == 0:
         print('WARNING: there are not EMG.*old channels ,trying to select EMG.*')
-        chis = mne.pick_channels_regexp(raw.ch_names, 'EMG.*')
+        chis = mne.pick_channels_regexp(emgonly.ch_names, 'EMG.*')
         if len(chis) == 0:
             raise ValueError('ERROR: there are not EMG channels at all')
-    restr_names = np.array( raw.ch_names )[chis]
+    restr_names = np.array( emgonly.ch_names )[chis]
 
-    emgonly = raw.copy()
     emgonly.load_data()
     emgonly.pick_channels(restr_names.tolist())
     emgonly_unfilt = emgonly.copy()
@@ -2227,6 +2373,7 @@ def getECGindsICAcomp(icacomp, pct_thr = 2.2, ncomp_test_for_ecg = 6, ecg_ratio_
         mask = da > qq[1]
         bis = np.where(mask)[0]
 
+        pl = 1
         if i > 8:  # we might want to look more carefully at what happens for components with lower ratios
             pl = 0
         # here we call a relatively slow function that converts a list of indices to a
@@ -2308,10 +2455,13 @@ def concatRaws(raws,rescale=True,interval_for_stats = (0,300) ):
     #rectconvraw_perside[side] = tmp
 
 
-def getGenIntervalInfoFromRawname(rawname_, crop=None,
-                                collect_artif_info = True,
-                                  ann_MEGartif_prefix_to_use = '_ann_MEGartif_flt' ,
-                                  print_empty = False, artif_thr_pct = 10):
+def getIntervalInfoFromRawname(rawname_, crop=None,
+    collect_artif_info = True,
+        ann_MEGartif_prefix_to_use = [ '_ann_MEGartif_flt', '_ann_MEGartif' , '_ann_MEGartif_ICA' ] ,
+        print_empty = False, artif_thr_pct = 10, subdir = ''):
+    '''
+    returns ann_len_dict, ann_dict
+    '''
     # crop -- crop range in seconds
     import utils
     import globvars as gv
@@ -2329,8 +2479,8 @@ def getGenIntervalInfoFromRawname(rawname_, crop=None,
     else:
         main_side_let = move_side[0].upper()
     #print(rawname_,'Main trem side ' ,maintremside,main_side_let)
-    print('----{}\n{} is maintremside, tremfreq={} move side={}'.format(rawname_, maintremside,tremfreq,
-                                                                          move_side) )
+    print('----{}\n{} is maintremside, tremfreq={} move side={}'.\
+          format(rawname_, maintremside,tremfreq, move_side) )
     print(r'^ is tremor, * is main tremor side')
 
     #rawname = rawname_ + '_resample_raw.fif'
@@ -2377,22 +2527,56 @@ def getGenIntervalInfoFromRawname(rawname_, crop=None,
 
 
     #ann_dict = {'Jan':anns_cnv_Jan, 'prev_me':anns_cnv, 'new_me':anns_upd}
-    ann_dict = { 'new_me':anns_upd}
+    ann_dict = { 'behav':anns_upd}
 
     ###########
+    fnsuff2renameDict = {}
+    #########################
+    rd = {'BAD_MEGL':'BAD_MEGL', 'BAD_MEGR':'BAD_MEGR',
+                     'BAD_MEG':'BAD_MEG'}
+    fnsuff2renameDict['_ann_MEGartif_flt'] = rd
+    #########################
+    rd = {'BAD_MEGL':'BAD_rMEGL', 'BAD_MEGR':'BAD_rMEGR',
+                     'BAD_MEG':'BAD_rMEG'}
+    fnsuff2renameDict['_ann_MEGartif'] = rd
+    #########################
+    rd = {'BAD_MEGL':'BAD_icaMEGL', 'BAD_MEGR':'BAD_icaMEGR',
+                     'BAD_MEG':'BAD_icaMEG'}
+    fnsuff2renameDict['_ann_MEGartif_ICA'] = rd
+
 
     if collect_artif_info:
         suffixes = []
         data_modalities = ['LFP', 'msrc' ]
         if 'LFP' in data_modalities:
             suffixes += [ '_ann_LFPartif' ]
+
+        if isinstance(ann_MEGartif_prefix_to_use, str):
+            ann_MEGartif_prefix_to_use = [ann_MEGartif_prefix_to_use]
+
         if 'msrc' in data_modalities:
-            suffixes += [ ann_MEGartif_prefix_to_use ]
+            suffixes += [ ann_MEGartif_prefix_to_use[0] ]
         anns_artif, anns_artif_pri, times_, dataset_bounds_ = \
             utsne.concatAnns([rawname_],[times], suffixes,crop=(crop[0],crop[1]),
                         allow_short_intervals=True,
                             side_rev_pri = [0],
-                            wbd_pri = None, sfreq=int(raw.info['sfreq']))
+                            wbd_pri = None, sfreq=int(raw.info['sfreq']),
+                             subdir=subdir)
+
+        if len(ann_MEGartif_prefix_to_use) > 1:
+            for ann_MEGartif_addprefix in ann_MEGartif_prefix_to_use[1:]:
+                suffixes2 = [ann_MEGartif_addprefix]
+                anns_artif2, anns_artif_pri, times_, dataset_bounds_ = \
+                    utsne.concatAnns([rawname_],[times], suffixes2,crop=(crop[0],crop[1]),
+                                allow_short_intervals=True,
+                                    side_rev_pri = [0],
+                                    wbd_pri = None, sfreq=int(raw.info['sfreq']),
+                                     subdir=subdir)
+                # TODO: maybe concat here?
+                rd = fnsuff2renameDict[ann_MEGartif_addprefix]
+                anns_artif2 = utils.renameAnnDescr(anns_artif2,
+                    rd, match_full_strings = 1)
+                anns_artif += anns_artif2
 
         ann_dict['artif'] = anns_artif
     ############
@@ -2409,6 +2593,7 @@ def getGenIntervalInfoFromRawname(rawname_, crop=None,
             continue
         lens = utils.getIntervalsTotalLens(anns, True, times=raw.times,
                                            interval=crop)
+        ann_len_dict[ann_name] = lens
 
         lens_keys = list(sorted(lens.keys()) )
         for lk in lens_keys:
@@ -2425,7 +2610,7 @@ def getGenIntervalInfoFromRawname(rawname_, crop=None,
                     lk_toshow = '*' + lk_toshow
 
             if not (ann_name == 'artif' and lk.startswith('nolabel') ):
-                print('{:10}: {:6.2f}s = {:6.3f}% of total {:.2f}s'.
+                print('{:12}: {:6.2f}s = {:6.3f}% of total {:.2f}s'.
                     format(lk_toshow, lcur,  lcur/(endtime-begtime) * 100, endtime-begtime))
         #display(lens  )
         #lens_cnv_Jan = utils.getIntervalsTotalLens(anns_cnv_Jan, True, times=raw.times)
@@ -2450,46 +2635,75 @@ def getGenIntervalInfoFromRawname(rawname_, crop=None,
             #    print('{} has task {} which is opposite side to tremor {}'.format(
             #        ann_name, ots_task_str, mts_task_str) )
 
+
+
         if ann_name == 'artif':
+            del lens['nolabel_L']
+            del lens['nolabel_R']
+
+
+            artif_composite = {}
+
 
             for let in ['R','L','.']:
-                for pattern in [ f'.*(MEG{let}|LFP{let})', f'.*LFP{let}', f'.*MEG{let}']:
+                pattern_list =  [ f'.*LFP{let}' ]
+                if '_ann_MEGartif_flt' in ann_MEGartif_prefix_to_use:
+                    pattern_list += [ f'.*(fltMEG{let}|LFP{let})',  f'.*fltMEG{let}' ]
+                if '_ann_MEGartif_ICA' in ann_MEGartif_prefix_to_use:
+                    pattern_list += [ f'.*(icaMEG{let}|LFP{let})',  f'.*fltMEG{let}' ]
+                if '_ann_MEGartif' in ann_MEGartif_prefix_to_use:
+                    pattern_list += [ f'.*(rMEG{let}|LFP{let})',  f'.*rMEG{let}' ]
+                for pattern in pattern_list:
                     newlab = f'{pattern[2:]}, brain side = {let}'
                     artif_cur = utils.filterAnnDict(anns, sidelet=None,
                                                         artif_best_LFP_only=False,
                                                         pattern = pattern)
-                    artif_cur = utils.mergeAnns(artif_cur, times[-1],
-                                                sfreq = int(raw.info['sfreq']),
-                                                out_descr = newlab)
-                    lens_artif = utils.getIntervalsTotalLens(artif_cur, True, times=raw.times,
-                                                    interval=crop)
-                    if newlab not in lens_artif:
+
+                    bins = utils.fillBinsFromAnns(artif_cur, times[-1],
+                                                  raw.info['sfreq'] , [])
+                    lcur = sum(bins) / raw.info['sfreq']
+                    #artif_cur = utils.mergeAnns(artif_cur, times[-1],
+                    #                            sfreq = int(raw.info['sfreq']),
+                    #                            out_descr = newlab)
+                    #lens_artif = utils.getIntervalsTotalLens(artif_cur, True, times=raw.times,
+                    #                                interval=crop)
+                    #if newlab not in lens_artif:
+                    if lcur < 1e-10:
                         if print_empty:
                             print(pattern[2:],'NO ') #,lens_artif)
                     else:
-                        lcur = lens_artif[newlab]
+                        #lcur = lens_artif[newlab]
                         pct_val = lcur/(endtime-begtime) * 100
                         if artif_thr_pct is not None and pct_val >= artif_thr_pct:
-                            print('{:10}: {:6.2f}s = {:6.3f}% of total {:.2f}s'.
+                            print('{:30}: {:6.2f}s = {:6.1f}% of total {:.2f}s'.
                                 format(newlab, lcur,  lcur/(endtime-begtime) * 100,
                                 endtime-begtime))
 
+                    artif_composite[newlab] = lcur
+
 
             newlab = 'artif_all'
-            artif_cur = utils.mergeAnns(anns, times[-1],
-                                        sfreq = int(raw.info['sfreq']),
-                                        out_descr = newlab)
-            lens_artif = utils.getIntervalsTotalLens(artif_cur, True, times=raw.times,
-                                            interval=crop)
-            if newlab not in lens_artif:
-                print('NO ',lens_artif)
+            #artif_cur = utils.mergeAnns(anns, times[-1],
+            #                            sfreq = int(raw.info['sfreq']),
+            #                            out_descr = newlab)
+            #print(artif_cur)
+            #lens_artif = utils.getIntervalsTotalLens(artif_cur, True, times=raw.times,
+            #                                interval=crop)
+            bins = utils.fillBinsFromAnns(anns, times[-1], raw.info['sfreq'] , [])
+            lcur = sum(bins) / raw.info['sfreq']
+            if lcur < 1e-10:
+                if print_empty:
+                    print(pattern[2:],'NO ') #,lens_artif)
+                #lcur = lens_artif[newlab]
             else:
-                lcur = lens_artif[newlab]
                 pct_val = lcur/(endtime-begtime) * 100
-                print('{:10}: {:6.2f}s = {:6.3f}% of total {:.2f}s'.
+                print('{:31}: {:6.2f}s = {:6.1f}% of total {:.2f}s'.
                     format(newlab, lcur,  pct_val,
                         endtime-begtime))
 
+            artif_composite[newlab] = lcur
+
+            ann_len_dict['artif_composite'] = artif_composite
 
             # TODO filter LFP
             # TODO filter LFP by side
@@ -2499,7 +2713,7 @@ def getGenIntervalInfoFromRawname(rawname_, crop=None,
 
         print('\n')
 
-    return lens, ann_dict
+    return ann_len_dict, ann_dict
     # print('\nmy prev interval lengths')
     # lens_cnv = utils.getIntervalsTotalLens(anns_cnv, True, times=raw.times)
     # display(lens_cnv )
@@ -2583,3 +2797,168 @@ def valsPerIndset2PerInd(indsets,vals):
 #        or 42 if kind is ``FIFFV_POINT_EEG``.
 #    coord_frame : int
 #        The coordinate frame used, e.g. ``FIFFV_COORD_HEAD``.
+
+def rncnv_my2h(rn, df):
+    from globvars import code_dir
+    import json
+    with open( pjoin(code_dir,'subj_corresp.json'),'r') as f:
+        sc = json.load(f)
+    subj,mc,task = rn.split('_')
+    subjh = sc['my2hilbert'][subj]
+    import glob
+    import pandas as pd
+    from pathlib import Path
+
+    dfc = df[ df['filename'].str.startswith(f'{subj}_{mc}') ]
+    fns_full = glob.glob(  pjoin(gv.data_dir, f'raws_from_Hilbert/{subjh}_{mc.upper()}*') )
+    #print(subj,mc,subjh,fns_full)
+
+    r = {}
+    for fnf in fns_full:
+        fn = Path(fnf).name
+        #print(fn)
+
+        import warnings
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            raw = mne.io.read_raw(fnf,verbose=0,preload=0,on_split_missing='ignore')
+        dur = raw.times[-1]
+        dfc2 = dfc.query(f'duration >= {dur} - 1e-9 and duration <= {dur} + 1e-9')
+        #display(dfc)
+        dv = dfc['duration'].values
+        fnv = list( dfc['filename'].values )
+        if len(dfc2 ) != 1:
+            print(f'{subj,mc,subjh}:  exc {fn}, len = {len(dfc2 )},  {dur}, { list(zip(fnv,dv) ) }')
+            continue
+        r[ dfc2['filename'].values[0] ] = fn
+    return r
+    #subjh = sc['my2hilbert'][subj]
+
+
+'''
+def cnv(rawnames):
+    import pymatreader as pymr
+    #r = pymr.read_mat('cortical_grid.mat')
+    #template_grid_cm = r['cortical_grid'] * 100
+
+    times_pri = len(rawnames) * [0]
+    custom_raws_pri = len(rawnames) * [0]
+    coords_pri = len(rawnames) * [0]
+    for rawni,rawname_ in enumerate(rawnames):
+        sind_str,medcond,task = utils.getParamsFromRawname(rawname_)
+
+        # this one does not have to be from the subdir
+        #rawname = rawname_ + '_resample_notch_highpass_raw.fif'
+        rawname = rawname_ + '_LFPonly.fif'
+        fname_full = os.path.join(data_dir,rawname)
+
+        #rawname = rawname_ + '_resample_raw.fif'
+        #fname_full = os.path.join(data_dir,rawname)
+
+        ## read file -- resampled to 256 Hz,  Electa MEG, EMG, LFP, EOG channels
+        raw = mne.io.read_raw_fif(fname_full, None)
+
+        #reconst_name = rawname_ + '_resample_afterICA_raw.fif'
+        #reconst_fname_full = os.path.join(data_dir,reconst_name)
+        #reconst_raw = mne.io.read_raw_fif(reconst_fname_full, None)
+
+        times_pri[rawni] = raw.times
+
+        src_fname_noext = 'srcd_{}_{}'.format(rawname_, sources_type)
+
+        src_fname = src_fname_noext + '.mat'
+        src_fname_full = os.path.join(data_dir,input_subdir,src_fname)
+        print(src_fname_full)
+
+        src_ft = h5py.File(src_fname_full, 'r')
+        ff = src_ft
+
+
+        #timeinfo = os.stat(src_fname_full)
+        #print('Last mod of src was ', time.ctime(timeinfo.st_mtime) )
+        #timeinfo = os.stat(reconst_fname_full)
+        #print('Last raw was        ', time.ctime(timeinfo.st_mtime) )
+
+        f = ff[ ff['source_data'][0,0] ]
+
+        #########
+        srcCoords_fn = sind_str + '_modcoord_parcel_aal.mat'
+
+        crdf = pymr.read_mat(srcCoords_fn)
+
+        # here we do not have label 'unlabeled'
+        labels = crdf['labels']  #indices of sources - labels_corresp_coordance
+        #crdf = sio.loadmat(srcCoords_fn)
+        #lbls = crdf['labels'][0]
+        #labels = [  lbls[i][0] for i in range(len(lbls)) ]
+
+        coords = crdf['coords_Jan_actual']
+        srcgroups_ = crdf['point_ind_corresp']
+
+        coords_pri += [coords]
+
+        # here we shift by 1 to add label 'unlabeled' in the beginning
+        if np.min(srcgroups_) == 0:
+            srcgroups_ #+= 1  # we don't need to add one because we have Matlab notation starting from 1
+            labels = ['unlabeled'] + labels
+
+        print(labels)
+        #crdf['pointlabel']
+
+
+        #scrgroups_dict = {}
+        stcs = []
+        pos_ = f['source_data']['pos'][:,:].T
+        ##########
+
+        defSideFromLabel = True
+        for srcdi in range(ff['source_data'].shape[0] ):
+            bandname = bandnames[srcdi]
+            f = ff[ ff['source_data'][srcdi,0] ]
+
+            freqBand = f['bpfreq'][:].flatten()
+
+            t0 = f['source_data']['time'][0,0]
+            tstep = np.diff( f['source_data']['time'][:10,0] ) [0]
+
+            mom = f['source_data']['avg']['mom']
+            # extractring unsorted data
+            srcData_= mom[:,:].T
+
+            assert pos_.shape[0] == srcData_.shape[0]
+
+            numsrc_total = len(srcData_)
+            allinds = np.arange(numsrc_total)
+            pos = pos_[allinds]
+
+            labels_deford = np.array(labels)[srcgroups_[allinds ] ]  # because 0 is unlabeled
+            ldo = enumerate(labels_deford)
+            Lchnis = [labi for labi,lab in ldo if lab.endswith('_L') ]
+            Rchnis = [labi for labi,lab in ldo if not lab.endswith('_L') ]
+
+            ####  Create my
+            if sources_type == 'parcel_aal' and defSideFromLabel:
+                lhi = map(str, Lchnis )
+                rhi = map(str, Rchnis )
+
+                concat = Lchnis + Rchnis
+                vertices = [Lchnis, Rchnis]
+            else:  #define side from coordinate
+                leftInds_coord = np.where(pos[:,0]<= 0)[0]
+                rightInds_coord = np.where(pos[:,0] > 0)[0]
+                vertices = [leftInds_coord, rightInds_coord]
+
+                lhi = map(str, list( vertices[0] ) )
+                rhi = map(str, list( vertices[1] ) )
+
+                concat = np.concatenate((leftInds_coord, rightInds_coord))
+
+                #print(labels)
+
+            srcData = srcData_[ allinds [concat]  ]   # with special ordering
+
+            stc = mne.SourceEstimate(data = srcData, tmin = t0, tstep= tstep  ,
+                                    subject = sind_str , vertices=vertices)
+            stcs += [stc]
+
+'''

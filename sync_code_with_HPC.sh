@@ -40,36 +40,9 @@ LOCAL_DIR="/home/demitau/osccode/data_proc"
 # for dry run
 #FLAGS="-rtvzn --progress"; echo "DRY RUN!!"
 
-
 DIRECT_SSH=0
-if [ $DIRECT_SSH -ne 0 ]; then
-  echo "Using rsync -e ssh"
-  SSH_FLAG="-e ssh"
-  JUSUF_CODE="judac:data_proc_code"
-  JUSUF_BASE="judac:ju_oscbagdis"
-  #SLEEP="sleep 1s"
-  SLEEP="wait"
-  echo "not implemented; need to change _rsync_careful"; exit 1
-else
-  mountpath="$HOME/ju_oscbagdis"
-  numfiles=`ls $mountpath | wc -l`
-  MQR=`mountpoint -q "$mountpath"`
-  while [ $numfiles -eq 0 ] || ! mountpoint -q "$mountpath"; do
-    echo "not mounted! trying to remount; numfiles=$numfiles MQR=$MQR"
-    sudo umount -l $mountpath # would not work if I run on cron
-    sshfs judac:/p/project/icei-hbp-2020-0012/OSCBAGDIS $mountpath
-    #exit 1
-    sleep 3s
-    numfiles=`ls $mountpath | wc -l`
-    MQR=`mountpoint -q "$mountpath"`
-  done
+. remount_HPC.sh
 
-  echo "Using mounted sshfs"
-  SSH_FLAG=""
-  JUSUF_CODE="$HOME/ju_oscbagdis/data_proc_code"
-  JUSUF_BASE="$HOME/ju_oscbagdis"
-  SLEEP="wait"
-fi
   
 #$run --mode:$RUNTYPE --exclude="*HPC*.py"  "$LOCAL_DIR/*.py"  "$JUSUF_CODE/"
 #exit 1
@@ -89,6 +62,7 @@ if [[ $SYNC_MODE != "get_from" ]]; then
   echo "  sync matlab_compiled"
   $run --mode:$RUNTYPE "$LOCAL_DIR/matlab_compiled/" "$JUSUF_CODE/matlab_compiled" 
   $SLEEP
+  $run --mode:$RUNTYPE "$LOCAL_DIR/subj_corresp.json"  "$JUSUF_CODE/"
 fi
 # if only send we don't want to receive
 if [[ $SYNC_MODE != "send_to" ]]; then

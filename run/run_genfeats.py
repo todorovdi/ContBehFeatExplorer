@@ -694,6 +694,8 @@ def isIntDiv(n1,n2):
     return abs(n1/n2 - n1//n2) < 1e-10
 
 
+debug_plot_ctr = 0
+
 #assert windowsz == windowsz_
 #assert windowsz_hires == windowsz_hires_
 #wsz_ = np.max( [ np.max( [len(w) for w in ww] ) for ww in Ws ] ) # it should be the same but if I want to use later larger windows in low freq..
@@ -912,7 +914,7 @@ if exit_after == 'load':
     sys.exit(0)
 
 # rescales separately, just to make TFR more robust to numerical issues
-if scale_data_combine_type != 'no_scaling':
+if scale_data_combine_type not in ['no_scaling', 'no']:
 
     combine_type = scale_data_combine_type  #'medcond'
 
@@ -971,7 +973,6 @@ if scale_data_combine_type != 'no_scaling':
         from inspect import currentframe, getframeinfo
         frameinfo = getframeinfo(currentframe())
         #print(frameinfo.filename, frameinfo.lineno)
-        debug_plot_ctr = 0
         plt.figure()
         plt.plot( dat_pri[0][0])
         plt.title(f'Line {frameinfo.lineno} plot N={debug_plot_ctr}')
@@ -1278,6 +1279,7 @@ if exit_after == 'TFR_and_CSD':
     sys.exit(0)
 
 if gv.DEBUG_MODE:
+    from inspect import getframeinfo, currentframe
     frameinfo = getframeinfo(currentframe())
     debug_plot_ctr += 1
     plt.figure()

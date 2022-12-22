@@ -19,12 +19,15 @@ let g:pymode_run = 0
 
 let g:pymode_rope = 1
 let g:pymode_rope_refix = '<C-c>'
+      
+setlocal foldtext=repeat('\ ',indent(v:foldstart)).foldtext()
 
-augroup unset_folding_in_insert_mode
-    autocmd!
-    autocmd InsertEnter *.py setlocal foldmethod=marker
-    autocmd InsertLeave *.py setlocal foldmethod=expr
-augroup END
+"augroup unset_folding_in_insert_mode
+"    autocmd!
+"    autocmd InsertEnter *.py setlocal foldmethod=marker
+"    #autocmd InsertLeave *.py setlocal foldmethod=expr
+"    autocmd InsertLeave *.py setlocal foldmethod=indent
+"augroup END
 
 " e, new, vnew
 let g:pymode_rope_goto_definition_cmd = 'e'

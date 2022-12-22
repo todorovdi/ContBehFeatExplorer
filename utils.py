@@ -590,9 +590,17 @@ def filterFavChnames(chnames,subj):
 
 def getParamsFromRawname(rawname,allow_long_subjinds=True):
     if allow_long_subjinds:
-        r = re.match( "(S\d{2,3})_(.+)_(.+)*", rawname ).groups()
+        r = re.match( "(S\d{2,3})_(.+)_(.+)*", rawname )
+        if r is None:
+            print(rawname)
+            raise ValueError(rawname)
+        r = r.groups()
     else:
-        r = re.match( "(S\d{2})_(.+)_(.+)*", rawname ).groups()
+        r = re.match( "(S\d{2})_(.+)_(.+)*", rawname )
+        if r is None:
+            print(rawname)
+            raise ValueError(rawname)
+        r = r.groups()
     subjstr = r[0]
     medcond = r[1]
     task = r[2]
@@ -1401,6 +1409,7 @@ def fillBinsFromAnns(anns,  duration, sfreq=256,
     # duration should be float (i.e. time, not bin)
     # returns bin mask, where everything that belongs to at least one of the
     # annotations from the list (except descr_to_skip), is marked with 1
+    # anns is either annotations or list of annotations
     if isinstance(anns,mne.Annotations):
         anns = [anns]
 
@@ -1426,26 +1435,45 @@ def fillBinsFromAnns(anns,  duration, sfreq=256,
 def mergeAnns(anns, duration, sfreq=256, descr_to_skip=['notrem_L', 'notrem_R'],
              out_descr = 'merged'):
     '''
+    merges annotations _allowing intersections_
     merges all annotaions into one, skipping descr_to_skip
     here 'merge' means intersection
     duration should be float (i.e. time, not bin)
     '''
-    if isinstance(anns,mne.Annotations):
+    if isinstance(anns, mne.Annotations):
         anns = [anns]
     if len(anns) == 0:
         return mne.Annotations([],[],[])
 
+    #old = 1
+    #if old:
     bins = fillBinsFromAnns(anns, duration, sfreq, descr_to_skip)
     cvlskip,pairs = getIntervals(bininds=None,width=0,
-                                       percentthr=1,inc=1,minlen=2,cvl=bins,
-                   min_dist_between=1,include_short_spikes=1)
+                                    percentthr=1,inc=1,minlen=2,cvl=bins,
+                min_dist_between=1,include_short_spikes=1)
+
 
     ivals = []
     for s,e in pairs:
         ss,ee = s/sfreq,e/sfreq
         ivals += [(ss,ee,out_descr)]
+    r = intervals2anns(ivals)
+    #else:
+    #    tpls = []
+    #    if isinstance(anns,mne.Annotations):
+    #        anns = [anns]
+    #    for ann in anns:
+    #        assert isinstance(ann,mne.Annotations)
+    #        for an in ann:
+    #            an = dict(an)
+    #            if an['description'] in descr_to_skip:
+    #                continue
+    #            tpl = an['onset'],  an['duration'], out_descr #an['description']
+    #            tpls += [tpl]
+    #    onsets, durations, descrs = zip(*tpls)
+    #    r = mne.Annotations(onsets, durations, descrs)
 
-    return intervals2anns(ivals)
+    return r
 
 
 
@@ -1581,7 +1609,7 @@ def findAllTremor(thrSpec = None, thr=0.13, width=40, percentthr=0.8, inc=1, min
 
 def anns2intervals(anns, tuple_len=2):
     import mne
-    assert isinstance(anns,mne.Annotations)
+    assert isinstance(anns, mne.Annotations)
     ivals = []
     for an in anns:
         tpl_ = [an['onset'], an['onset']+an['duration']]
@@ -2233,7 +2261,7 @@ def removeAnnsByDescr(anns, anns_descr_to_remove, printLog=False):
 
     return anns_upd
 
-def renameAnnDescr(anns,n2n):
+def renameAnnDescr(anns, n2n, match_full_strings = 0, verbose=0):
     import mne
     assert isinstance(n2n,dict)
 
@@ -2246,12 +2274,17 @@ def renameAnnDescr(anns,n2n):
         newcd = cd
         was = 0
         for str0 in n2n:
-            if cd.find(str0) >= 0:
-                was += 1
-            newcd = newcd.replace(str0, n2n[str0])
+            if match_full_strings:
+                if cd == str0:
+                    was += 1
+                    newcd = n2n[str0]
+            else:
+                if cd.find(str0) >= 0:
+                    was += 1
+                newcd = newcd.replace(str0, n2n[str0])
             #if cd.find(ann_descr_bad) >= 0:
             #    wasbad = 1
-        if was:
+        if was and verbose > 0:
             print('{} --> {}'.format(cd,newcd) )
         dur = anns.duration[ind]
         onset = anns.onset[ind]
@@ -2566,7 +2599,10 @@ def intervals2anns(intlist, int_name=None, times=None):
         anns.append([b0t],[b1t-b0t], [int_name_cur ]  )
     return anns
 
-def findRawArtifacts(raw , thr_mult = 2.5, thr_use_mean=0, show_max_always=0, data_mod = 'MEG' ):
+def findRawArtifacts(raw , thr_mult = 2.5, thr_use_mean=0,
+                     show_max_always=0, data_mod = 'MEG',
+                     plot_name = '', sided= True,
+                     n_ICA_comp = None):
     '''
     I was initially using it for filtered ([1-100] Hz bandpassed) raw. But maybe it can be used before as well
     '''
@@ -2575,21 +2611,43 @@ def findRawArtifacts(raw , thr_mult = 2.5, thr_use_mean=0, show_max_always=0, da
 
     raw_only_mod = raw.copy()
     if data_mod == 'MEG':
-        raw_only_mod.pick_types(meg=True)
+        if n_ICA_comp is None:
+            raw_only_mod.pick_types(meg=True)
         artif_prefix = 'BAD_MEG'
     elif data_mod == 'LFP':
-        chns = np.array(raw.ch_names)[ mne.pick_channels_regexp(raw.ch_names,'LFP*') ]
-        raw_only_mod.pick_channels(chns)
+        if n_ICA_comp is None:
+            chns = np.array(raw.ch_names)[ mne.pick_channels_regexp(raw.ch_names,'LFP*') ]
+            raw_only_mod.pick_channels(chns)
         artif_prefix = 'BAD_LFP'
+
+    if n_ICA_comp is None:
+        raw_only_mod = raw
 
     assert len(raw_only_mod.info['bads']) == 0, 'There are bad channels!'
 
-    #chnames_perside_mod, chis_perside_mod = collectChnamesBySide(raw.info)
-    chnames_perside_mod, chis_perside_mod = collectChnamesBySide(raw_only_mod.info)
 
-    fig,axs = plt.subplots(2,1, figsize=(14,7), sharex='col')
 
-    sides = sorted(chnames_perside_mod.keys())
+    nr = 2
+    if n_ICA_comp is not None:
+        nr = n_ICA_comp
+    fig,axs = plt.subplots(nr,1, figsize=(14,7), sharex='col')
+
+    if sided:
+        #chnames_perside_mod, chis_perside_mod = collectChnamesBySide(raw.info)
+        chnames_perside_mod, chis_perside_mod = collectChnamesBySide(raw_only_mod.info)
+        sides = sorted(chnames_perside_mod.keys())
+    else:
+        if n_ICA_comp is not None:
+            #zz = [ (i, raw_only_mod[chn][0][0] ) for i,chn in\
+            #      enumerate(raw_only_mod.ch_names[:n_ICA_comp] )  ]
+            zz = list( enumerate(raw_only_mod.ch_names[:n_ICA_comp] ) )
+            chnames_perside_mod = dict(zz)
+            #chnames_perside_mod =  {sides[0]: raw.ch_names }
+            sides = list( chnames_perside_mod.keys() )
+        else:
+            sides = ['both']
+            chnames_perside_mod =  {sides[0]: raw.ch_names }
+
     anns = mne.Annotations([],[],[])
     cvl_per_side = {}
     for sidei,side in enumerate(sides ):
@@ -2597,18 +2655,26 @@ def findRawArtifacts(raw , thr_mult = 2.5, thr_use_mean=0, show_max_always=0, da
         moddat, times = raw_only_mod[chnames_curside]
         #moddat = raw_only_mod.get_data()
 
+        if n_ICA_comp is not None:
+            pos = True
+        else:
+            pos = False
         # first rescale using only 50% of the data. We take so little compute
         # the data range
-        me, mn,mx = utsne.robustMean(moddat, axis=1, per_dim =1, ret_aux=1, q = .25)
+        me, mn,mx = utsne.robustMean(moddat, axis=1, per_dim =1, ret_aux=1,
+                                     q = .25, pos = pos)
         if np.min(mx-mn) <= 1e-15:
             raise ValueError('mx == mn for side {}'.format(side) )
         moddat_scaled = ( moddat - me[:,None] ) / (mx-mn)[:,None]
 
         # then sum
         moddat_sum = np.sum(np.abs(moddat_scaled),axis=0)
-        # use 90% of the data
-        me_s, mn_s,mx_s = utsne.robustMean(moddat_sum, axis=None, per_dim =1, ret_aux=1, pos = 1, q=0.05)
+        # use 90% of the data, here pos should always be True, because it is
+        # rectified
+        me_s, mn_s,mx_s = utsne.robustMean(moddat_sum, axis=None, per_dim =1,
+                                           ret_aux=1, pos = 1, q=0.05)
 
+        # divide by max or by mean?
         if thr_use_mean:
             moddat_sum_mod = moddat_sum/ me_s
         else:
@@ -2622,29 +2688,42 @@ def findRawArtifacts(raw , thr_mult = 2.5, thr_use_mean=0, show_max_always=0, da
         print('{} artifact intervals found (bins) {}'.format(data_mod ,ivals_mod_artif) )
         #import ipdb; ipdb.set_trace()
 
+        mx_plot = np.max( moddat_sum_mod)
+        mn_plot = np.min( moddat_sum_mod)
+
         ax = axs[sidei]
         ax.plot(raw.times,moddat_sum_mod)
         #ax.axhline( me_s , c='r', ls=':', label='mean_s')
         #ax.axhline( me_s * thr_mult , c='r', ls='--', label = 'mean_s * thr_mult' )
-        ax.axhline( thr_mult , c='r', ls='--', label = 'mean_s * thr_mult' )
+        ax.axhline( thr_mult , c='r', ls='--', label = 'thr_mult' )
 
         if show_max_always or not thr_use_mean:
             #ax.axhline( mx_s , c='purple', ls=':', label='max_s')
             #ax.axhline( mx_s * thr_mult , c='purple', ls='--', label = 'mx_s * thr_mult')
             ax.axhline( mx_s / me_s * thr_mult , c='purple', ls='--', label = 'mx_s * thr_mult')
-        ax.set_title('{} {} artif'.format(data_mod,side) )
+        ax.set_title('{} {} {} artif'.format(plot_name, data_mod,side) )
 
         for ivl in ivals_mod_artif:
             b0,b1 = ivl
             #b0t,b1t = raw.times[b0], raw.times[b1]
             #anns.append([b0t],[b1t-b0t], ['BAD_MEG{}'.format( side[0].upper() ) ]  )
-            ax.axvline( raw.times[b0] , c='r', ls=':')
-            ax.axvline( raw.times[b1] , c='r', ls=':')
+            #ax.axvline( raw.times[b0] , c='r', ls=':')
+            #ax.axvline( raw.times[b1] , c='r', ls=':')
 
-        anns = intervals2anns(ivals_mod_artif,  '{}{}'.format(artif_prefix, side[0].upper() ), raw.times )
+            ax.fill_betweenx( [mn_plot,mx_plot],
+                raw.times[b0], raw.times[b1], color='red', alpha=0.3)
+
+        if sided:
+            descr =  '{}{}'.format(artif_prefix, side[0].upper() )
+        else:
+            descr =  '{}'.format(artif_prefix )
+        anns_cur_side = intervals2anns(ivals_mod_artif, descr , raw.times )
+        anns += anns_cur_side
 
         ax.set_xlim(raw.times[0], raw.times[-1]  )
         ax.legend(loc='upper right')
+
+        #ax.set_ylim(0,
 
     return anns, cvl_per_side
 
@@ -3336,7 +3415,7 @@ def getIntervalsTotalLens(ann, include_unlabeled = False, times=None, interval=N
 # output annotations intersecting windows
 def getWindowIndicesFromIntervals(wbd,ivalis,sfreq, ret_type='bins_list',
                                   wbd_type='contig', ret_indices_type = 'window_inds',
-                                  nbins_total=None, nwins_total=None):
+                                  nbins_total=None):
     '''
     wbd are bin indices bounds in original timebins array
     ivalis count from zero, time bounds

@@ -9,6 +9,10 @@ raws_compl2=(S06_off_move S06_on_move)
 raws=(${raws1[@]} ${raws2[@]})
 raws_compl=(${raws_compl1[@]} ${raws_compl2[@]})
 
+
+raws=(${raws1[@]})
+raws_compl=(${raws_compl1[@]})
+
 #raws_compl=(99_off_move)
 #raws=()
 #

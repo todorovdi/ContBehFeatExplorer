@@ -648,8 +648,9 @@ def robustMean(dat,axis=None, q=0.05, q_compl= None,
             return res
     #np.mean(  dat[dat<q
 
-def robustMeanPos(dat,axis=None, q=0.05, per_dim=False):
-    return robustMean(dat,axis=axis, per_dim=per_dim, q=0., q_compl=q)
+def robustMeanPos(dat,axis=None, q=0.05, per_dim=False, ret_aux = False, ret_std=False):
+    return robustMean(dat,axis=axis, per_dim=per_dim, q=0., q_compl=q,
+                      ret_aux = ret_aux, ret_std=ret_std)
     #if q < 1e-10:
     #    return np.mean(dat)
     #else:
@@ -1268,6 +1269,9 @@ def findByPrefix(data_dir, rawname, prefix, ftype='PCA',regex=None, ret_aux=0):
 
 def concatArtif(rawnames,Xtimes_pri, crop=(None,None), artif_mod = None,
                 allow_missing=False, side_rev_pri=None, sfreq=None, wbd_pri=None ):
+    '''
+        artif_mod here means artifact modalities (nod modification)
+    '''
     if artif_mod is None:
         artif_mod_str = [ '_ann_LFPartif', '_ann_MEGartif' ]
     else:
@@ -1279,6 +1283,8 @@ def concatArtif(rawnames,Xtimes_pri, crop=(None,None), artif_mod = None,
 
 def concatAnnsNaive(rawnames,true_times_pri, suffixes=['_anns']):
     '''
+    concatenating behav anns (not artif) in time,
+        using order given in rawnames
     true_times_pri shoud not have gaps! (no edge bins removal was applied)
     '''
     import globvars as gv
@@ -1363,9 +1369,12 @@ def revAnnSides(anns):
 def concatAnns(rawnames, Xtimes_pri, suffixes=['_anns'], crop=(None,None),
                allow_short_intervals = False, allow_missing=False, dt_sec=None,
                side_rev_pri=None, sfreq=None, wbd_pri=None,
-               remove_gaps_between_datasets = False, ret_wbd_merged=False):
+               remove_gaps_between_datasets = False, ret_wbd_merged=False,
+               subdir = ''):
     '''
-    Xtimes_pri can have gaps (usually by endge bins removal) and start not from zero
+    loads from file and concatenates all anns specified by suffixes
+
+    Xtimes_pri can have gaps (usually by edge bins removal) and start not from zero
      althogh much better use them without gaps and then use smarter window bounds
     output Xtimes will not have gaps (thus there are will be some shifts in ann times as well)
         and start from zero IF remove_gaps_between_datasets
@@ -1419,7 +1428,7 @@ def concatAnns(rawnames, Xtimes_pri, suffixes=['_anns'], crop=(None,None),
         anns = mne.Annotations([],[],[])
         for suffix in suffixes:
             anns_fn = rawname_ + suffix + '.txt'
-            anns_fn_full = os.path.join(data_dir, anns_fn)
+            anns_fn_full = os.path.join(data_dir, subdir, anns_fn)
             if os.path.exists(anns_fn_full):
                 #print('concatAnns: reading {}'.format(anns_fn) )
                 anns_cur = mne.read_annotations(anns_fn_full)
@@ -1444,11 +1453,10 @@ def concatAnns(rawnames, Xtimes_pri, suffixes=['_anns'], crop=(None,None),
     assert np.max(dt_pri) - np.min(dt_pri) < 1e-10
 
 
+    # now join in time
     cur_zeroth_bin = 0
     wbds = []
-
     anns = mne.Annotations([],[],[])
-
     dataset_bounds = []
     Xtimes_almost = []
     timeshift = 0    # in seconds
@@ -1925,10 +1933,59 @@ def averPerfDicts(perf_dicts):
             perf_aver[k] += vv
     return perf_aver, not_nan_fold_inds
 
+def getFolds(X,y,n_splits, group_labels=None, stratified=True,
+             holdout = True, seed=0 ):
+    from sklearn.model_selection import StratifiedKFold,KFold,GroupKFold
+    from sklearn.model_selection import train_test_split
+    assert len(X) == len(y)
+    if group_labels is None:
+        if stratified:
+            kf = StratifiedKFold(n_splits=n_splits, shuffle=True,
+                                 random_state=seed)
+        else:
+            kf = KFold(n_splits=n_splits, shuffle=True, random_state=seed)
+        split_res = kf.split(X,y)
+    else:
+        assert len(group_labels) == len(y), (len(group_labels), len(y) )
+        if stratified:
+            from sklearn.model_selection import StratifiedGroupKFold
+            kf = StratifiedGroupKFold(n_splits=n_splits, shuffle=True,
+                                      random_state=seed)
+        else:
+            kf = GroupKFold(n_splits=n_splits  )  # no shuffling is possible here
+
+        #ngl = len(set(group_labels) )
+        split_res = kf.split(X,y,groups=group_labels)  # trains on some groups then tests on other
+
+    split_res = list(split_res)  # to be able to save later
+
+    if holdout:
+        r = []
+        rfeatsel = []
+        for train_index, holdout_index in split_res:
+            indices = np.arange(len(train_index) )
+            ycur    = y[train_index]
+            subinds_cf_train,subinds_cf_test =\
+                train_test_split(indices, test_size = 1/n_splits,
+                                 stratify=ycur)
+            inds_train_featsel = train_index[subinds_cf_train]
+            inds_test_featsel = train_index[subinds_cf_test]
+            #getFolds(X[train_index], y[test_index], n_splits
+            rfeatsel +=  [( inds_train_featsel, inds_test_featsel) ]
+            r += [ (train_index, holdout_index,
+                    inds_train_featsel, inds_test_featsel) ]
+
+        split_res = split_res, rfeatsel, r
+
+    return split_res
+
 def getPredPowersCV(clf,X,class_labels,class_ind, printLog = False, n_splits=None,
                     ret_clf_obj=False, skip_noCV =False, add_fitopts={},
                    add_clf_creopts ={}, train_on_shuffled =True, seed=0,
-                    group_labels=None, stratified = True, balancing='weighting' ):
+                    group_labels=None, stratified = True,
+                    balancing='weighting',
+                    fold_split = None, perm_test = False,
+                    n_permutations = 100, n_jobs_perm_test = None ):
     # clf is assumed to be already fitted on entire training data here, it is
     # used only for no_CV computation
     # TODO: maybe I need to adapt for other classifiers
@@ -1951,22 +2008,14 @@ def getPredPowersCV(clf,X,class_labels,class_ind, printLog = False, n_splits=Non
     y = class_labels
     n_classes = len(set(y))
 
-    #for model_cur in cv_results['estimator']
+    from sklearn.model_selection import train_test_split
+
+    if fold_split is None:
+        fold_split = getFolds(X,y,n_splits, group_labels,  stratified,
+                              holdout=False,seed=seed)
+    # else we return pref_nocv
     if n_splits is not None:
         #if n_KFold_splits is not None:
-        from sklearn.model_selection import StratifiedKFold,KFold,GroupKFold
-        from sklearn.model_selection import train_test_split
-        if group_labels is None:
-            if stratified:
-                kf = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=seed)
-            else:
-                kf = KFold(n_splits=n_splits, shuffle=True, random_state=seed)
-            split_res = kf.split(X,y)
-        else:
-            assert len(group_labels) == len(class_labels), (len(group_labels), len(class_labels) )
-            #ngl = len(set(group_labels) )
-            kf = GroupKFold(n_splits=n_splits  )  # no shuffling is possible here
-            split_res = kf.split(X,y,groups=group_labels)  # trains on some groups then tests on other
 
         n_jobs_perrun = add_clf_creopts.get('n_jobs', 1)
 
@@ -1983,7 +2032,7 @@ def getPredPowersCV(clf,X,class_labels,class_ind, printLog = False, n_splits=Non
 
         test_indices = []
         split_ind = 0
-        for train_index, test_index in split_res:
+        for train_index, test_index in fold_split:
             #print(train_index )
             X_train, X_test = Xarr[train_index], Xarr[test_index]
             y_train, y_test = class_labels[train_index], class_labels[test_index]
@@ -2021,6 +2070,7 @@ def getPredPowersCV(clf,X,class_labels,class_ind, printLog = False, n_splits=Non
                    X_train,X_test,y_train,y_test,class_ind, \
                    n_classes, -1, balancing, printLog)
             args += [arg]
+
 
         retcur['test_indices_list'] =  [ [] ]*len(args)
         print(len(args))
@@ -2114,6 +2164,38 @@ def getPredPowersCV(clf,X,class_labels,class_ind, printLog = False, n_splits=Non
     #dummy_clf.score(X, y)
     r = getClfPredPower(dummy_clf,X,class_labels,class_ind)
     retcur['perf_dummy'] = r
+
+
+    if perm_test and n_permutations > 0:
+        from sklearn.model_selection import permutation_test_score
+
+        # if we want to parallelize (we want) then we cannot have
+        # parallel XGB and permuation test as well
+        if n_jobs_perm_test is None:
+            n_jobs_perm_test = min(n_permutations,
+                                   add_clf_creopts.get('n_jobs', 1) )
+        add_clf_creopts_perm = add_clf_creopts.copy()
+        add_clf_creopts_perm['n_jobs'] = 1
+        clf_perm = type(clf)(**add_clf_creopts)
+
+        # y = np.ones(20)
+        # y[:10] = 2
+        # X = np.random.uniform(size=(20,3))
+        # clf =
+        print(f'Starting permutation test, n_permutations={n_permutations}')
+        score_noperm, perm_scores, pvalue =\
+            permutation_test_score(clf_perm,
+            X, class_labels, groups=None,
+            n_permutations = n_permutations, n_jobs= n_jobs_perm_test,
+            random_state=seed, scoring='balanced_accuracy', cv=None,
+            fit_params=add_fitopts, verbose=1)
+        # good pvalue is small
+        pti = {}
+        pti['score_noperm'] = score_noperm
+        pti['perm_scores'] = perm_scores
+        pti['pvalue'] = pvalue
+        retcur['perm_test_info'] = pti
+
 
     #return tuple(ret)
     return retcur
@@ -3058,11 +3140,67 @@ def selBestLFP(output_cur, clf_type = 'XGB', chnames_LFP = None, s= '',
 
     return pdrop_per_kt, winning_chan_per_kt
 
-# not used
 
-def chooseBestLFPchan(pdrop, chnames_LFP, inv = False):
+def chooseBestLFPchan2(pdrops, artif_infos, inv = False):
+    # list of pdrop dicts, assuming the have same keys
+    # if I select best channel and it is with much more artifacts,
+    # better select another one
+
+    ind = 0
+    for pdrop in pdrops:
+        pdrop['_type'] = ind
+        ind += 1
+
+    # TODO: potentially pdrop values are vectors, not just floats
+    rows = []
+    for pdrop in pdrops:
+        for k,v in pdrop.items():
+            if k == '_type':
+                continue
+            #maxdrop = np.max(vs)
+            rows += [{'chn':k, 'val':v, '_type':pdrop['_type']}]
+    import pandas as pd
+    df = pd.DataFrame(rows)
+
+    row = df.groupby('chn').mean().reset_index().\
+        sort_values('val').iloc[len(pdrop)-1]
+    win_chn = row['chn']
+    return win_chn
+
+    #pds = []
+    #chnames_LFP = list ( pdrops[0].keys())
+
+    ##[ pdrop[k] for k in pdrop ]
+    #for pdrop in pdrops:
+    #    # I want ordered access across
+    #    for chn in chnames_LFP:
+    #        pds += [pdrop[chn]]
+    #    pds = np.vstack(pds)
+    #    if inv:
+    #        pds = -pds
+
+    #    # axis 0 -- index of channel
+    #    maxdrop_perchan = np.max(pds,axis=1)
+    #    maxdrop_perchan = np.maximum(maxdrop_perchan,0)
+
+    #    #minmax_perchan = np.minimum(maxdrop_perchan,0)
+
+    #    if pds.shape[1] > 1:
+    #        mindrop_perchan = np.min(pds,axis=1)
+    #        mindrop_perchan = np.minimum(mindrop_perchan,0)
+    #    else:
+    #        mindrop_perchan = 0
+    #    # dropping channel should maximally worsen and minimally improve (mindrop is neg)
+    #    inds = np.argsort(maxdrop_perchan + mindrop_perchan)
+    #    win_ind = inds[-1]
+    #return chnames_LFP[win_ind]
+
+def chooseBestLFPchan(pdrop, chnames_LFP=None, inv = False):
+    # pdrop is a dict with chns as keys
     #winnder_chans = {}
     pds = []
+    if chnames_LFP is None:
+        chnames_LFP = list ( pdrop.keys())
     # I want ordered access across
     for chn in chnames_LFP:
         pds += [pdrop[chn]]

@@ -24,22 +24,27 @@ from os.path import join as pjoin
 #medstates = ['on','off']
 rawnames = ['S01_off_move', 'S01_on_hold']
 
+# annotations types to be excluded, except beh_state_types_not_to_exclude
 #ann_types = ['beh_states', 'MEGartif', 'LFPartif']
 #ann_types = ['beh_states', 'MEGartif']
-ann_types = ['beh_states', 'MEGartif_flt']
+ann_types = ['beh_states', 'MEGartif_ICA', 'MEGartif_muscle']
+
+beh_state_types_not_to_exclude = ['notrem_{}']
 
 import sys
 import getopt
 
 min_duration_remaining = 30  # in sec
+exclude_artifacts_only = True
 
 print('sys.argv is ',sys.argv)
 effargv = sys.argv[1:]  # to skip first
 if sys.argv[0].find('ipykernel_launcher') >= 0:
     effargv = sys.argv[3:]  # to skip first three
 
+
 helpstr = 'Usage example\nrun_collect_artifacts.py --rawname <rawname_naked> '
-opts, args = getopt.getopt(effargv,"hr:", ["ann_types=","rawname=","min_dur="])
+opts, args = getopt.getopt(effargv,"hr:", ["ann_types=","rawname=","min_dur=" ])
 print(sys.argv, opts, args)
 
 for opt, arg in opts:
@@ -57,6 +62,8 @@ for opt, arg in opts:
         #rawname_ = arg
     elif opt == "--ann_types":
         ann_types = arg.split(',')
+    #elif opt == "--exclude_artifacts_only":
+    #    exclude_artifacts_only = int(arg)
     elif opt == "--min_dur":
         min_duration_remaining = float(arg)
     else:
@@ -67,7 +74,6 @@ print('ann_types', ann_types)
 
 raws_permod_both_sides = upre.loadRaws(rawnames,['EMG'], None, None, None)
 
-beh_state_types_not_to_exclude = ['notrem_{}']
 # if I use notrem from both sides, I am still merging all non-quiet periods
 # together from both sides. So the remaining will be essentially an
 # intersection of both untrem_L and untrem_R
@@ -88,6 +94,12 @@ for rawname_ in rawnames:
         anns_fnames += [fname]
     if 'MEGartif' in ann_types:
         fname = '{}_ann_MEGartif.txt'.format(rawname_)
+        anns_fnames += [fname]
+    if 'MEGartif_ICA' in ann_types:
+        fname = '{}_ann_MEGartif_ICA.txt'.format(rawname_)
+        anns_fnames += [fname]
+    if 'MEGartif_muscle' in ann_types:
+        fname = '{}_ann_MEGartif_muscle.txt'.format(rawname_)
         anns_fnames += [fname]
     if 'MEGartif_flt' in ann_types:
         fname = '{}_ann_MEGartif_flt.txt'.format(rawname_)
@@ -143,7 +155,8 @@ for rawname_ in rawnames:
 
     # skip the assertiong for testing data (it is shorter)
     if subj_cur != 'S99':
-        assert( duration -  np.sum(  merged_anns.duration ) > min_duration_remaining ), (duration,dur_merged,min_duration_remaining)
+        assert( duration -  np.sum(  merged_anns.duration ) > min_duration_remaining ), \
+            (duration,dur_merged,min_duration_remaining)
 
     fn = '{}_ann_srcrec_exclude.txt'.format(rawname_)
     fn_full = pjoin(gv.data_dir,fn)
