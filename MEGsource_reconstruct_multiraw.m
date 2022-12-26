@@ -2,6 +2,7 @@ data_dir = getenv("DATA_DUSS");
 %subjstr = "S01";
 %taskstr = "move";
 %medstr  = "off";
+ft_defaults
 
 if ~exist("subjstrs")
   subjstrs = ["S01", "S02", "S03", "S04", "S05", "S06", "S07", "S08", "S09", "S10" ];
@@ -91,7 +92,8 @@ end
 
 highpass_freq = 1.5;
 
-f_scalemat = load('head_scalemat');
+%legacy
+%f_scalemat = load('head_scalemat');
 
 
 atlas_type = "aal"
@@ -132,7 +134,8 @@ for rawi = 1:length(rawnames)
 %  subjstr = subjstrs(subji);
   fprintf(" current subjstr=%s\n",subjstr)
 
-  basename_head = sprintf('/headmodel_grid_%s.mat',subjstr);
+  %basename_head = sprintf('/headmodel_grid_%s.mat',subjstr);
+  basename_head = sprintf('/headmodel_grid_nosurf/headmodel_grid_%s.mat',subjstr);
   fname_head = strcat(data_dir, basename_head );
   hdmf = load(fname_head);   %hdmf.hdm, hdmf.mni_aligned_grid
 
@@ -246,11 +249,12 @@ for rawi = 1:length(rawnames)
           roicur = roi{roii};
 
           % scaling matrix, no longer used, kept for compatibility
-          if isKey(f_scalemat.scalemat,subjstr)
-            S = f_scalemat.scalemat(subjstr);
-          else
-            S = eye(3);
-          end
+          %if isKey(f_scalemat.scalemat,subjstr)
+          %  S = f_scalemat.scalemat(subjstr);
+          %else
+          %  S = eye(3);
+          %end
+          S = eye(3);
 
           % do we find roi in the atlas?
           roimask = contains(cellstr(tlarr), roicur );

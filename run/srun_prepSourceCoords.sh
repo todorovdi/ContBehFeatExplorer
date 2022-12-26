@@ -14,6 +14,8 @@ subjstrs=("S01" "S02" "S03" "S04" "S05" "S06" "S07" "S08" "S09" "S10")
 for t in ${subjstrs[@]}; do
   vardefstr="subjstr='$t'; skipPlot=1;"
   vardefstr="subjstr='$t'"
+  # TODO: maybe I need to sepcificy full path.
+  # .e.g using getenv('OSCBAGDIS_DATAPROC_CODE')
   if [ "$SRCS_TYPE" = "HirschPt" ]; then
     matlab -nodisplay -nosplash -r "$vardefstr; calcSrcCoords; quit"
   else

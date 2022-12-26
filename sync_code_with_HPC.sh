@@ -147,3 +147,4 @@ if [[ $SYNC_MODE != "send_to" ]]; then
 fi
 
 
+cat sync_dest_changes.log

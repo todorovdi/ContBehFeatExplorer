@@ -1,5 +1,7 @@
 #!/usr/bin/python3
 # it collects the data that will NOT be used for source reconstruction
+import sys, os
+sys.path.append( os.path.expandvars('$OSCBAGDIS_DATAPROC_CODE') )
 
 import os
 import mne
@@ -36,6 +38,7 @@ import getopt
 
 min_duration_remaining = 30  # in sec
 exclude_artifacts_only = True
+overwrite = True
 
 print('sys.argv is ',sys.argv)
 effargv = sys.argv[1:]  # to skip first
@@ -66,6 +69,8 @@ for opt, arg in opts:
     #    exclude_artifacts_only = int(arg)
     elif opt == "--min_dur":
         min_duration_remaining = float(arg)
+    elif opt == "--overwrite":
+        overwrite = int(arg)
     else:
         raise ValueError('Unknown option {} with arg {}'.format(opt,arg) )
 
@@ -161,4 +166,4 @@ for rawname_ in rawnames:
     fn = '{}_ann_srcrec_exclude.txt'.format(rawname_)
     fn_full = pjoin(gv.data_dir,fn)
     print('Saving ',fn_full)
-    merged_anns.save( fn_full  )
+    merged_anns.save( fn_full, overwrite=overwrite  )

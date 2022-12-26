@@ -25,12 +25,13 @@ def recalcMEGArtifacts(rawname, raw,
                         thr_mult, use_mean,
                         flt_thr_mult, flt_use_mean,
                         ICA_thr_mult = 2.3, ICA_use_mean = False,
-                       lowest_freq_to_keep=1.5,
+                       lowest_freq_to_keep=1.5, threshold_muscle = 5,
                        n_jobs=-1, raw_flt = None, raw_notched=None, savedir=None,
                        ICA_force_recalc=0, n_ICA_comp=3, notch_freqsToKill=None,
                       force_ICA_recalc = True, pdf=None ):
     '''
     takes raw (unresamled) un maybe filtered raw raw_flt (if not it does itself)
+    threshold_muscle is  z-score, threshold is data depenent
     and computed artif -- normal and after filtering
     '''
     import matplotlib.pyplot as plt
@@ -43,8 +44,8 @@ def recalcMEGArtifacts(rawname, raw,
 
     #n_components_ICA = 0.95
     n_components_ICA = 10  # if I keep it to 0.95, it takes a lot of time
-    # NOT filtered
-    icafname_full = pjoin(savedir, f'{rawname}_ICA_artif.fif.gz')
+    # on NOT filtered data
+    icafname_full = pjoin(savedir, f'{rawname}_artif_det-ica.fif.gz')
     from mne.preprocessing import read_ica,ICA
     if os.path.exists(icafname_full) and not force_ICA_recalc:
         ica = read_ica(icafname_full)
@@ -117,7 +118,6 @@ def recalcMEGArtifacts(rawname, raw,
 
     # this has to be done after notching
     from mne.preprocessing import annotate_muscle_zscore
-    threshold_muscle = 5  # z-score, threshold is data depenent
     anns_muscle, scores_muscle = annotate_muscle_zscore(
         raw_notched, ch_type="mag", threshold=threshold_muscle, min_length_good=0.2,
         filter_freq=[110, 140])
@@ -133,17 +133,24 @@ def recalcMEGArtifacts(rawname, raw,
         anns_muscle.save(os.path.join(savedir, '{}_ann_MEGartif_muscle.txt'.format(rawname) ), overwrite=True )
 
     import matplotlib.pyplot as plt
-    fig, ax = plt.subplots()
+    fig, ax = plt.subplots(figsize=(14,4) )
     ax.plot(raw_notched.times, scores_muscle)
     ax.axhline(y=threshold_muscle, color='r')
     ax.set(xlabel='time, (s)', ylabel='zscore', title='Muscle activity')
+    ax.set_xlim( 0, np.max(raw_notched.times ) )
+
+    for an in anns_muscle:
+        b0 = an['onset']
+        dur = an['duration']
+        ax.fill_betweenx( [np.min(scores_muscle), np.max(scores_muscle)],
+            b0, b0 + dur, color='red', alpha=0.3)
 
     if pdf is not None:
         pdf.savefig(fig)
 
     #################################
 
-    anns_MEG_artif_flt, cvl_per_side = utils.findRawArtifacts(raw_flt ,
+    anns_MEG_artif_flt, cvl_per_side = findRawArtifacts(raw_flt ,
         thr_mult = flt_thr_mult,
         thr_use_mean = flt_use_mean,
         plot_name=f'low pass {lowest_freq_to_keep:.1f}')
@@ -162,6 +169,138 @@ def recalcMEGArtifacts(rawname, raw,
     if savedir is not None:
         anns_MEG_artif_flt.save(os.path.join(savedir, '{}_ann_MEGartif_flt.txt'.format(rawname) ), overwrite=True )
     return anns_MEG_artif, anns_MEG_artif_flt, anns_icaMEG_artif, anns_muscle
+
+def findRawArtifacts(raw , thr_mult = 2.5, thr_use_mean=0,
+                     show_max_always=0, data_mod = 'MEG',
+                     plot_name = '', sided= True,
+                     n_ICA_comp = None):
+    '''
+    I was initially using it for filtered ([1-100] Hz bandpassed) raw. But maybe it can be used before as well
+    '''
+    import matplotlib.pyplot as plt
+    import utils_tSNE as utsne
+    import mne
+    from utils import collectChnamesBySide,getIntervals,intervals2anns
+
+    raw_only_mod = raw.copy()
+    if data_mod == 'MEG':
+        if n_ICA_comp is None:
+            raw_only_mod.pick_types(meg=True)
+        artif_prefix = 'BAD_MEG'
+    elif data_mod == 'LFP':
+        if n_ICA_comp is None:
+            chns = np.array(raw.ch_names)[ mne.pick_channels_regexp(raw.ch_names,'LFP*') ]
+            raw_only_mod.pick_channels(chns)
+        artif_prefix = 'BAD_LFP'
+
+    if n_ICA_comp is None:
+        raw_only_mod = raw
+
+    assert len(raw_only_mod.info['bads']) == 0, 'There are bad channels!'
+
+
+
+    nr = 2
+    if n_ICA_comp is not None:
+        nr = n_ICA_comp
+    fig,axs = plt.subplots(nr,1, figsize=(14,7), sharex='col')
+
+    if sided:
+        #chnames_perside_mod, chis_perside_mod = collectChnamesBySide(raw.info)
+        chnames_perside_mod, chis_perside_mod = collectChnamesBySide(raw_only_mod.info)
+        sides = sorted(chnames_perside_mod.keys())
+    else:
+        if n_ICA_comp is not None:
+            #zz = [ (i, raw_only_mod[chn][0][0] ) for i,chn in\
+            #      enumerate(raw_only_mod.ch_names[:n_ICA_comp] )  ]
+            zz = list( enumerate(raw_only_mod.ch_names[:n_ICA_comp] ) )
+            chnames_perside_mod = dict(zz)
+            #chnames_perside_mod =  {sides[0]: raw.ch_names }
+            sides = list( chnames_perside_mod.keys() )
+        else:
+            sides = ['both']
+            chnames_perside_mod =  {sides[0]: raw.ch_names }
+
+    anns = mne.Annotations([],[],[])
+    cvl_per_side = {}
+    for sidei,side in enumerate(sides ):
+        chnames_curside = chnames_perside_mod[side]
+        moddat, times = raw_only_mod[chnames_curside]
+        #moddat = raw_only_mod.get_data()
+
+        if n_ICA_comp is not None:
+            pos = True
+        else:
+            pos = False
+        # first rescale using only 50% of the data. We take so little compute
+        # the data range
+        me, mn,mx = utsne.robustMean(moddat, axis=1, per_dim =1, ret_aux=1,
+                                     q = .25, pos = pos)
+        if np.min(mx-mn) <= 1e-15:
+            raise ValueError('mx == mn for side {}'.format(side) )
+        moddat_scaled = ( moddat - me[:,None] ) / (mx-mn)[:,None]
+
+        # then sum of absolute values
+        moddat_sum = np.sum(np.abs(moddat_scaled),axis=0)
+        # use 90% of the data, here pos should always be True, because it is
+        # sum of abs values
+        me_s, mn_s,mx_s = utsne.robustMean(moddat_sum, axis=None, per_dim =1,
+                                           ret_aux=1, pos = 1, q=0.05)
+
+        # divide by max or by mean?
+        if thr_use_mean:
+            moddat_sum_mod = moddat_sum/ me_s
+            lbl = '/me_s'
+        else:
+            moddat_sum_mod = moddat_sum/ mx_s
+            lbl = '/mx_s'
+        mask= moddat_sum_mod > thr_mult
+        cvl,ivals_mod_artif = getIntervals(np.where(mask)[0] ,\
+            include_short_spikes=1, endbin=len(mask), minlen=2, thr=0.001, inc=1,\
+            extFactorL=0.1, extFactorR=0.1 )
+        cvl_per_side[side] = cvl
+
+        print('{} artifact intervals found (bins) {}'.format(data_mod ,ivals_mod_artif) )
+        #import ipdb; ipdb.set_trace()
+
+        mx_plot = np.max( moddat_sum_mod)
+        mn_plot = np.min( moddat_sum_mod)
+
+        ax = axs[sidei]
+        ax.plot(raw.times,moddat_sum_mod, label= 'moddat_sum_mod' + lbl)
+        #ax.axhline( me_s , c='r', ls=':', label='mean_s')
+        #ax.axhline( me_s * thr_mult , c='r', ls='--', label = 'mean_s * thr_mult' )
+        ax.axhline( thr_mult , c='r', ls='--', label = 'thr_mult' )
+
+        if show_max_always or not thr_use_mean:
+            #ax.axhline( mx_s , c='purple', ls=':', label='max_s')
+            #ax.axhline( mx_s * thr_mult , c='purple', ls='--', label = 'mx_s * thr_mult')
+            ax.axhline( mx_s / me_s * thr_mult , c='purple', ls='--', label = 'mx_s / me_s * thr_mult')
+        ax.set_title('{} {} {} artif'.format(plot_name, data_mod,side) )
+
+        for ivl in ivals_mod_artif:
+            b0,b1 = ivl
+            #b0t,b1t = raw.times[b0], raw.times[b1]
+            #anns.append([b0t],[b1t-b0t], ['BAD_MEG{}'.format( side[0].upper() ) ]  )
+            #ax.axvline( raw.times[b0] , c='r', ls=':')
+            #ax.axvline( raw.times[b1] , c='r', ls=':')
+
+            ax.fill_betweenx( [mn_plot,mx_plot],
+                raw.times[b0], raw.times[b1], color='red', alpha=0.3)
+
+        if sided:
+            descr =  '{}{}'.format(artif_prefix, side[0].upper() )
+        else:
+            descr =  '{}'.format(artif_prefix )
+        anns_cur_side = intervals2anns(ivals_mod_artif, descr , raw.times )
+        anns += anns_cur_side
+
+        ax.set_xlim(raw.times[0], raw.times[-1]  )
+        ax.legend(loc='upper right')
+
+        #ax.set_ylim(0,
+
+    return anns, cvl_per_side
 
 def getRaw(rawname_naked, rawname = None ):
     #if os.environ.get('DATA_DUSS') is not None:
@@ -2266,7 +2405,14 @@ def extractEMGData(raw, rawname_=None, skip_if_exist = 1, tremfreq = 9, save_dir
     # highpass and convolve
     # tremfreq should be max tremfreq found in the analyzed data (max over all
     # subjects)
-    import globvars as gv
+    if save_dir is None:
+        save_dir = gv.data_dir
+    if rawname_ is not None:
+        rectconv_fname_full = os.path.join(save_dir, '{}_emg_rectconv.fif'.format(rawname_) )
+        if (skip_if_exist and os.path.exists(rectconv_fname_full) ):
+            rectconvraw = mne.io.read_raw(rectconv_fname_full, verbose=0)
+            return rectconvraw
+
     emgonly = raw.copy()
     emgonly.info['bads'] = []
 
@@ -2309,9 +2455,6 @@ def extractEMGData(raw, rawname_=None, skip_if_exist = 1, tremfreq = 9, save_dir
     rectconvraw.apply_function( lambda x: x / 100 ) # 100 is just empirical so that I don't have to scale the plot
 
     if rawname_ is not None:
-        if save_dir is None:
-            save_dir = gv.data_dir
-        rectconv_fname_full = os.path.join(save_dir, '{}_emg_rectconv.fif'.format(rawname_) )
         if not (skip_if_exist and os.path.exists(rectconv_fname_full) ):
             print('EMG raw saved to ',rectconv_fname_full)
             rectconvraw.save(rectconv_fname_full, overwrite=1)

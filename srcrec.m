@@ -5,6 +5,8 @@ function output = srcrec(subjstr,datall,data_cleaned,hdmf,roi_type,bads,S,srs,ma
   % mask argument only used if roi_type is of special type 
   %cd 
 
+  data_dir = getenv("DATA_DUSS");
+
   do_load_only_ifnew   = 1;
   do_lookup_only_ifnew = 1;
   do_srcrec            = 1;
@@ -13,7 +15,7 @@ function output = srcrec(subjstr,datall,data_cleaned,hdmf,roi_type,bads,S,srs,ma
   %tend = 400;
 
   % merge all trials into one before computing covariance matrix
-  ntrials = size( data_cleaned.trial, 2 );  %number of segments after separations by artifact placements
+  ntrials = size( data_cleaned.trial, 2 )  %number of segments after separations by artifact placements
   if ntrials > 1
     data = [];
     data.hdr = data_cleaned.hdr;
@@ -56,8 +58,12 @@ function output = srcrec(subjstr,datall,data_cleaned,hdmf,roi_type,bads,S,srs,ma
     data.sampleinfo = [[1 nbinstot ] ];
 
     data_cleaned_concat = data;
+  else
+    fprintf("only one trial");
+    data_cleaned_concat = data_cleaned;
   end
   data_cleaned_concat
+  
   
   %data_cleaned_concat2 = ft_appenddata([], data_cleaned)  % does not merge trials :(
 
@@ -137,7 +143,8 @@ function output = srcrec(subjstr,datall,data_cleaned,hdmf,roi_type,bads,S,srs,ma
       srcpos = surroundPts;
 
     elseif strcmp(roi_type{1}, "parcel_aal_surf") == 1
-      fn = strcat( subjstr, '_modcoord_parcel_aal.mat');
+      
+      fn = strcat( data_dir , '/modcoord/', subjstr, '_modcoord_parcel_aal.mat');
       sprintf('Loading %s',fn)
       load(fn);
       srcpos = coords_Jan_actual;
@@ -190,7 +197,6 @@ function output = srcrec(subjstr,datall,data_cleaned,hdmf,roi_type,bads,S,srs,ma
     if do_srcrec
       load_prev_freqdata = 0;
 
-      data_dir = getenv("DATA_DUSS");
       fn = strcat(data_dir, '/tmp_freq_data.mat' ); 
       fprintf(fn);
 
@@ -278,16 +284,15 @@ function output = srcrec(subjstr,datall,data_cleaned,hdmf,roi_type,bads,S,srs,ma
       lambda = max(eigval) * 0.001;
 
 
+      % for lcmv
       cfg_srcrec=[];
       cfg_srcrec.method='lcmv';
-
       cfg_srcrec.headmodel=hdmf.hdm;
       %cfg_srcrec.grid=mni_aligned_grid;
       cfg_srcrec.sourcemodel = [];
       cfg_srcrec.sourcemodel.pos = srcpos;
       %cfg_srcrec.grid = [];
       %cfg_srcrec.grid.pos = srcpos;
-
       cfg_srcrec.supchan = bads;
 
       %cfg_srcrec.lcmv.lambda='5%';
@@ -297,6 +302,36 @@ function output = srcrec(subjstr,datall,data_cleaned,hdmf,roi_type,bads,S,srs,ma
       cfg_srcrec.lcmv.projectmom='yes';
       cfg_srcrec.reducerank=2;  % always like that for MEG
 
+      %%%% MNE, not fully implemented (not computed). Why -- see explanation later
+      %cfg_fwd = [];
+      %cfg_fwd.grad = avg.grad;
+      %cfg_fwd.channel = avg.label;
+      %cfg_fwd.grid = [];
+      %cfg_fwd.grid.pos = srcpos;
+      %cfg_fwd.headmodel = hdmf.hdm;
+      %leadfield = ft_prepare_leadfield(cfg_fwd);
+      %
+      %cfg_srcrec2=[];
+      %cfg_srcrec2.method='mne';
+      %cfg_srcrec2.headmodel=hdmf.hdm;
+      %cfg_srcrec2.grid = leadfield;
+      %%cfg_srcrec2.sourcemodel = [];
+      %%cfg_srcrec2.sourcemodel.pos = srcpos;
+      %%cfg_srcrec2.grid = [];
+      %%cfg_srcrec2.grid.pos = srcpos;
+      %cfg_srcrec2.supchan = bads;
+
+      %cfg_srcrec2.mne = [];
+      %cfg_srcrec2.mne.prewhiten = 'yes';
+      %cfg_srcrec2.mne.lambda= 3;
+      %cfg_srcrec2.mne.scalesourcecov= 'yes';
+
+      %cfg_srcrec2.reducerank=2;  % always like that for MEG
+
+      % for LCMV we don't run src rec immediately, we first compute spatial filter
+      % (on cleaned data) then apply it to full (uncleaned) data
+      % this is important becase we want to conserve the data dimensions
+      % I cannot do it with MNE, so I'd have to either remove the data (and later have problems with data annotations) or apply it to entire data (and have problems due to artifacts affecting estimations) or apply it to epoched data with artif rejection, but this changes entire pipeline logic
       if do_srcrec
         %source_data_cur = ft_sourceanalysis(cfg_srcrec,datall_cur);  
 

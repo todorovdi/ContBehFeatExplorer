@@ -2692,7 +2692,7 @@ def findRawArtifacts(raw , thr_mult = 2.5, thr_use_mean=0,
         mn_plot = np.min( moddat_sum_mod)
 
         ax = axs[sidei]
-        ax.plot(raw.times,moddat_sum_mod)
+        ax.plot(times, moddat_sum_mod)
         #ax.axhline( me_s , c='r', ls=':', label='mean_s')
         #ax.axhline( me_s * thr_mult , c='r', ls='--', label = 'mean_s * thr_mult' )
         ax.axhline( thr_mult , c='r', ls='--', label = 'thr_mult' )
@@ -2711,16 +2711,16 @@ def findRawArtifacts(raw , thr_mult = 2.5, thr_use_mean=0,
             #ax.axvline( raw.times[b1] , c='r', ls=':')
 
             ax.fill_betweenx( [mn_plot,mx_plot],
-                raw.times[b0], raw.times[b1], color='red', alpha=0.3)
+                times[b0], times[b1], color='red', alpha=0.3)
 
         if sided:
             descr =  '{}{}'.format(artif_prefix, side[0].upper() )
         else:
             descr =  '{}'.format(artif_prefix )
-        anns_cur_side = intervals2anns(ivals_mod_artif, descr , raw.times )
+        anns_cur_side = intervals2anns(ivals_mod_artif, descr , times )
         anns += anns_cur_side
 
-        ax.set_xlim(raw.times[0], raw.times[-1]  )
+        ax.set_xlim(times[0], times[-1]  )
         ax.legend(loc='upper right')
 
         #ax.set_ylim(0,

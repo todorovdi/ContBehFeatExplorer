@@ -36,7 +36,12 @@ fi
 
 if [ $MERGE_RAWS -eq 0 ]; then
   t=$raw
-  python3 run_collect_artifacts.py -r $t
+  python3 $OSCBAGDIS_DATAPROC_CODE/run/run_collect_artifacts.py -r $t
+  EC=$?
+  if [ $EC -ne 0 ]; then
+    echo "srun_Fieldtrip_srcrec.sh: run_collect_artifacts exit code $EC, exiting"
+    exit $EC
+  fi
 
   vardefstr=$MATLAB_SCRIPT_PARAMS'rawnames=["'$t'"];'
   echo $vardefstr
@@ -55,7 +60,12 @@ else
     if [ $i -lt $nraws-1 ]; then
       rns_str=$rns_str,
     fi
-    python3 run_collect_artifacts.py -r $t
+    python3 $OSCBAGDIS_DATAPROC_CODE/run/run_collect_artifacts.py -r $t
+    EC=$?
+    if [ $EC -ne 0 ]; then
+      echo "srun_Fieldtrip_srcrec.sh: run_collect_artifacts exit code $EC, exiting"
+      exit $EC
+    fi
   done
   rns_str=$rns_str'];'
 
