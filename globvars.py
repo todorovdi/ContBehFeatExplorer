@@ -62,6 +62,8 @@ gparams['intTypes'] = ['pre', 'post', 'initseg', 'endseg', 'middle_full', 'no_tr
 gparams['intType2col'] =  {'pre':'blue', 'post':'gold', 'middle_full':'red', 'no_tremor':'green',
             'unk_activity_full': 'cyan', 'initseg': 'teal', 'endseg':'blueviolet' }
 
+figsize_artif=(14,7)
+
 
 if os.environ.get('DATA_DUSS') is not None:
     data_dir = os.path.expandvars('$DATA_DUSS')
@@ -72,6 +74,12 @@ if os.environ.get('OUTPUT_OSCBAGDIS') is not None:
     dir_fig = os.path.expandvars('$OUTPUT_OSCBAGDIS')
 else:
     dir_fig = '.'
+
+
+with open( pjoin(code_dir,'last_code_ver_synced_with_HPC.txt'), 'r' ) as f:
+    code_ver = f.read()
+    if code_ver[-1] == '\n':
+        code_ver = code_ver[:-1]
 
 fig_dir = dir_fig
 param_dir = pjoin(code_dir,'params')

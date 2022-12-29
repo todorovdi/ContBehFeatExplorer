@@ -19,6 +19,7 @@ raws_all=(${raws_off[@]} ${raws_on[@]} ${raws_off_compl[@]} ${raws_on_compl[@]})
 raws_all=(${raws_on[@]} ${raws_off_compl[@]} ${raws_on_compl[@]} ${raws_off[@]})
 raws_all=(${raws_off_compl[@]})
 raws_all=(S02_off_move S03_off_move S04_off_move S05_off_move S07_off_move)
+raws_all=(${raws_off[@]} ${raws_on[@]} ${raws_off_compl[@]} ${raws_on_compl[@]})
 
 # TMP
 #raws_all=(${raws_off0[@]} ${raws_on0[@]} ${raws_off_compl0[@]} ${raws_on_compl0[@]})

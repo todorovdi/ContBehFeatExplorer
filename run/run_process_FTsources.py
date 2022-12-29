@@ -1,6 +1,8 @@
 #!/usr/bin/python3
 
-import os,sys
+import sys, os
+sys.path.append( os.path.expandvars('$OSCBAGDIS_DATAPROC_CODE') )
+
 import mne
 import utils  #my code
 import json
@@ -12,6 +14,7 @@ import scipy.io as sio
 import globvars as gv
 from globvars import gp
 import sys, getopt
+from os.path import join as pjoin
 
 from sklearn.decomposition import PCA
 from sklearn.decomposition import FastICA
@@ -70,7 +73,8 @@ save_info = 1
 save_data = 1
 
 nPCA_comp = 0.95
-algType = 'PCA+ICA' #'PCA' # 'mean'
+#algType = 'PCA+ICA' #'PCA' # 'mean'
+algType = 'all_sources'
 
 input_subdir = ""
 output_subdir = ""
@@ -96,12 +100,12 @@ for opt, arg in opts:
     elif opt == "--input_subdir":
         input_subdir = arg
         if len(input_subdir) > 0:
-            subdir = os.path.join(gv.data_dir,input_subdir)
+            subdir = pjoin(gv.data_dir,input_subdir)
             assert os.path.exists(subdir )
     elif opt == "--output_subdir":
         output_subdir = arg
         if len(output_subdir) > 0:
-            subdir = os.path.join(gv.data_dir,output_subdir)
+            subdir = pjoin(gv.data_dir,output_subdir)
             if not os.path.exists(subdir ):
                 print('Creating output subdir {}'.format(subdir) )
                 os.makedirs(subdir)
@@ -127,12 +131,13 @@ if groupings_to_use[0] == 'all_raw':
     assert algType == 'all_sources'
 
 import pymatreader as pymr
-r = pymr.read_mat('cortical_grid.mat')
+p = 'cortical_grid.mat'
+if not os.path.exists(p):
+    r = pymr.read_mat(pjoin(data_dir,p) )
+else:
+    r = pymr.read_mat(p )
 template_grid_cm = r['cortical_grid'] * 100
 
-srcCoords_fn = 'coordsJan.mat'
-coords_MNI_f = sio.loadmat(srcCoords_fn)
-coords_MNI = coords_MNI_f['coords']
 
 ######
 
@@ -148,16 +153,16 @@ for rawni,rawname_ in enumerate(rawnames):
     # this one does not have to be from the subdir
     #rawname = rawname_ + '_resample_notch_highpass_raw.fif'
     rawname = rawname_ + '_LFPonly.fif'
-    fname_full = os.path.join(data_dir,rawname)
+    fname_full = pjoin(data_dir,rawname)
 
     #rawname = rawname_ + '_resample_raw.fif'
-    #fname_full = os.path.join(data_dir,rawname)
+    #fname_full = pjoin(data_dir,rawname)
 
     ## read file -- resampled to 256 Hz,  Electa MEG, EMG, LFP, EOG channels
     raw = mne.io.read_raw_fif(fname_full, None)
 
     #reconst_name = rawname_ + '_resample_afterICA_raw.fif'
-    #reconst_fname_full = os.path.join(data_dir,reconst_name)
+    #reconst_fname_full = pjoin(data_dir,reconst_name)
     #reconst_raw = mne.io.read_raw_fif(reconst_fname_full, None)
 
     times_pri[rawni] = raw.times
@@ -165,8 +170,10 @@ for rawni,rawname_ in enumerate(rawnames):
     src_fname_noext = 'srcd_{}_{}'.format(rawname_, sources_type)
 
     src_fname = src_fname_noext + '.mat'
-    src_fname_full = os.path.join(data_dir,input_subdir,src_fname)
+    src_fname_full = pjoin(data_dir,input_subdir,src_fname)
     print(src_fname_full)
+    # if I try to use just pymatreader, I get an error:
+    # "Please use HDF reader for matlab v7.3 files"
     src_ft = h5py.File(src_fname_full, 'r')
     ff = src_ft
 
@@ -178,13 +185,20 @@ for rawni,rawname_ in enumerate(rawnames):
 
     f = ff[ ff['source_data'][0,0] ]
 
+    #sys.exit(0)
+
     #########
 
 
+    coords_MNI = None
     if sources_type == 'parcel_aal':
         srcCoords_fn = sind_str + '_modcoord_parcel_aal.mat'
 
-        crdf = pymr.read_mat(srcCoords_fn)
+        p = srcCoords_fn
+        if not os.path.exists(p):
+            crdf = pymr.read_mat(pjoin(data_dir,p) )
+        else:
+            crdf = pymr.read_mat(p)
 
         # here we do not have label 'unlabeled'
         labels = crdf['labels']  #indices of sources - labels_corresp_coordance
@@ -207,9 +221,13 @@ for rawni,rawname_ in enumerate(rawnames):
 
     elif sources_type == 'HirschPt2011':
         #<0 left
-        with open(os.path.join('.','coord_labels.json') ) as jf:
+        with open(pjoin('.','coord_labels.json') ) as jf:
             coord_labels = json.load(jf)
         #    gv.gparams['coord_labels'] = coord_labels
+
+        srcCoords_fn = 'coordsJan.mat'
+        coords_MNI_f = sio.loadmat(srcCoords_fn)
+        coords_MNI = coords_MNI_f['coords']
 
         srcCoords_fn = sind_str + '_modcoord.mat'
         labels = ['']* len(coords_MNI)
@@ -374,7 +392,7 @@ for rawni,rawname_ in enumerate(rawnames):
             assert min(srcgroups) == 0
             if sources_type == 'HirschPt2011':
                 assert max(srcgroups) == len(coords)-1, ( max(srcgroups)+1, len(coords) )
-            info['srcgroups'] = srcgroups
+            info['temp'] = { 'srcgroups': srcgroups }
             #scrgroups_dict[indset_name] = srcgroups
 
             custom_raw_cur = mne.io.RawArray(srcData, info)
@@ -411,7 +429,7 @@ for rawni,rawname_ in enumerate(rawnames):
     ##################
 
     if sources_type == 'HirschPt2011':
-        newsrc_fname_full = os.path.join( data_dir, output_subdir, 'cnt_' + src_fname_noext + '.fif' )
+        newsrc_fname_full = pjoin( data_dir, output_subdir, 'cnt_' + src_fname_noext + '.fif' )
         print( newsrc_fname_full )
 
         custom_raws['centers'].save(newsrc_fname_full, overwrite=1)
@@ -427,7 +445,7 @@ assert abs( np.linalg.norm(coords_resorted - pos, 2)  ) > 1e-20
 
 ########################### preparing groups ###################3
 
-srcgroups_all = custom_raws['surround'].info['srcgroups']
+srcgroups_all = custom_raws['surround'].info['temp']['srcgroups']
 label_groups_dict, srcgroups_dict  = utils.prepareSourceGroups(labels,srcgroups_all)
 
 ####################### Test
@@ -660,7 +678,7 @@ print('We got {} new channels '.format( len(newchnames)) )
 
 scrgroups_per_indset = {}
 for crt in custom_raws:
-    scrgroups_per_indset[crt] = custom_raws[crt].info['srcgroups']
+    scrgroups_per_indset[crt] = custom_raws[crt].info['temp']['srcgroups']
 
 sl = sorted([ gp.src_grouping_names_order.index(k) for k in srcgroups_dict.keys() ])
 assert len(sl) == 1  # just for now, I don't want to code extra in gen_features
@@ -671,7 +689,7 @@ if save_info:
     for rawname_ in rawnames:
         src_rec_info_fn = '{}_{}_grp{}_src_rec_info'.\
             format(rawname_,sources_type,  grp_id_str  )
-        src_rec_info_fn_full = os.path.join(gv.data_dir, output_subdir, src_rec_info_fn + '.npz')
+        src_rec_info_fn_full = pjoin(gv.data_dir, output_subdir, src_rec_info_fn + '.npz')
         print(src_rec_info_fn_full)
         np.savez(src_rec_info_fn_full,
                  srcgroups_dict=srcgroups_dict,
@@ -756,7 +774,7 @@ info = mne.create_info(
 for chi in range(len(info['chs']) ):
     info['chs'][chi]['loc'][:3] = avpos[chi]
 
-srcgroups_backup = custom_raws['surround'].info['srcgroups']
+srcgroups_backup = custom_raws['surround'].info['temp']['srcgroups']
 
 newraw = mne.io.RawArray(dd, info)
 
@@ -774,8 +792,8 @@ if save_data:
         src_fname_noext = 'srcd_{}_{}_grp{}'.format(rawname_, sources_type, grp_id_str)
 
         #  Save
-        #newsrc_fname_full = os.path.join( data_dir, 'av_' + src_fname_noext + '.fif' )
-        newsrc_fname_full = os.path.join( data_dir, output_subdir, 'pcica_' + src_fname_noext + '.fif' )
+        #newsrc_fname_full = pjoin( data_dir, 'av_' + src_fname_noext + '.fif' )
+        newsrc_fname_full = pjoin( data_dir, output_subdir, 'pcica_' + src_fname_noext + '.fif' )
         print( newsrc_fname_full )
 
         newraw_cur.save(newsrc_fname_full, overwrite=1)

@@ -20,6 +20,7 @@ import globvars as gv
 from globvars import gp
 import getopt
 from globvars import dir_fig, data_dir
+from utils_tSNE import concatAnns
 mpl.use('Agg')
 
 input_subdir = ''
@@ -55,7 +56,7 @@ allow_CUDA = False
 n_components_ICA = 0.95
 tSSS_duration = 10  # default is 10s
 frame_SSS = 'head'  # 'head'
-do_ICA_only = 0
+do_ICA_only = 1 # whether only only compute ICA (and save it) or also apply it
 plot_ICA_damage = 1
 
 # use_mean=1, so mark many things as MEG artifacts
@@ -79,8 +80,9 @@ ICA_exclude_EOG = 0
 ICA_exclude_ECG = 1
 #If no, use artif got from unfiltered (and unresampled). If yes, I may exclude
 #too little. But on the other hand I apply it to the filtered thing...
-use_MEGartif_flt_for_ICA = 1
-do_recalc_MEGartif_flt = 1
+MEGartif_suffixes_for_highpass = ['_ann_MEGartif' ,
+                '_ann_MEGartif_ICA', '_ann_MEGartif_muscle']
+MEGartif_suffixes_for_ICA_calc = MEGartif_suffixes_for_highpass
 
 freqResample = 256
 freqResample_high = 1024
@@ -92,6 +94,7 @@ skip_existing_EMG = 0
 
 badchans_SSS = 'recalc'  # or 'no', 'load'
 recalc_artif = True
+load_artif_detection_params = True
 force_overwrite_hires = False
 force_artif_ICA_recalc = True  # takes time
 
@@ -110,7 +113,8 @@ opts, args = getopt.getopt(effargv,"hr:",
         ["rawname=", "to_perform=" , "read_type=", "tSSS_duration=",
          "frame_SSS=", "do_ICA_only=", "badchans_SSS=", "freq_resample=",
          "freq_resample_high=", "lowest_freq_to_keep=", "recalc_LFPEMG=",
-         "output_subdir=", "exit_after=", "recalc_artif=" , "force_artif_ICA_recalc=" ])
+         "output_subdir=", "exit_after=", "recalc_artif=" , "force_artif_ICA_recalc=",
+        "load_artif_detection_params=" ])
 print('opts is ',opts)
 print('args is ',args)
 
@@ -134,6 +138,8 @@ for opt, arg in opts:
         output_subdir = arg
     elif opt == "--recalc_artif":
         recalc_artif = int(arg)
+    elif opt == "--load_artif_detection_params":
+        load_artif_detection_params = int(arg)
     elif opt == '--to_perform':
         to_perform = arg.split(',')
     elif opt == '--exit_after':
@@ -159,7 +165,7 @@ for opt, arg in opts:
     elif opt ==  '--freq_resample_high':
         freqResample_high = int(arg)
     elif opt == '--force_artif_ICA_recalc':
-         force_artif_ICA_recalc = int(arg)
+        force_artif_ICA_recalc = int(arg)
     elif opt ==  '--lowest_freq_to_keep':
         lowest_freq_to_keep = float(arg)
     else:
@@ -417,12 +423,17 @@ for rawname_ in rawnames:
     if recalc_artif:
         artif_detection_params = artif_detection_params_def
         # custom thresholds
-        fnf_ct = pjoin(gv.data_dir,'artif_detction_params.json')
-        if os.path.exists(fnf_ct):
+        fnf_ct = pjoin(gv.data_dir,'artif_detection_params.json')
+        if load_artif_detection_params:
+            assert os.path.exists(fnf_ct)
             with open( fnf_ct ,'r') as f:
-                artif_detection_params_allds = json.load(f)
+                adp_envelope = json.load(f)
+                artif_detection_params_allds = adp_envelope['artif_detection_params']
+            print(f'artif_detection_params: loaded {fnf_ct}')
             if fname_noext in artif_detection_params_allds:
                 artif_detection_params = artif_detection_params_allds[fname_noext]
+            else:
+                print(f'artif_detection_params: {fname_noext} is missing in the loaded params')
 
 
         r = upre.recalcMEGArtifacts(fname_noext,
@@ -448,12 +459,10 @@ for rawname_ in rawnames:
         # this is actually not necessary because MNE's notch filter cannot deal
         # with artifacts anyway. But I don't want to remove it so let it stay
         # here
-        from utils_tSNE import concatAnns
         anns_artif, anns_artif_pri, times2, dataset_bounds =\
             concatAnns([fname_noext], [raw.times],
-                    suffixes = ['_ann_MEGartif', '_ann_MEGartif_ICA',
-                            '_ann_MEGartif_muscle' ], allow_missing=True )
-        raw.set_annotations(anns_artif )
+                             suffixes = MEGartif_suffixes_for_highpass,
+                             allow_missing=False )
 
         raw_notched = raw.copy()
         raw_notched.notch_filter(freqsToKill, n_jobs=n_jobs)
@@ -462,13 +471,12 @@ for rawname_ in rawnames:
 
 
     if do_highpass:
-        import utils_tSNE as utsne
         # loads artif from not filtered raw, we don't want to work with LFP
         # here anymore, so only MEG
         anns_artif, anns_artif_pri, times2, dataset_bounds =\
-            utsne.concatAnns([fname_noext], [raw.times],
-                             suffixes = ['_ann_MEGartif', '_ann_MEGartif_ICA',
-                            '_ann_MEGartif_muscle' ], allow_missing=True )
+            concatAnns([fname_noext], [raw.times],
+                             suffixes = MEGartif_suffixes_for_highpass,
+                             allow_missing=False )
         raw.set_annotations(anns_artif )
         raw.filter(l_freq=lowest_freq_to_keep,
                         h_freq=highest_freq_to_keep, n_jobs=n_jobs,
@@ -612,12 +620,24 @@ for rawname_ in rawnames:
         # rest enters ICA and has higher change to be related to blinks / ECG
         # (assuming that more agressive methods can just reject ECG / blinks
         # completely)
-        if use_MEGartif_flt_for_ICA:
-            filt_raw2.set_annotations(anns_MEG_artif_flt)
-        else:
-            filt_raw2.set_annotations(anns_MEG_artif)
+        print('Loading annotations for ICA')
+        anns_MEG_artif_ICA_calc, anns_artif_pri, times2, dataset_bounds =\
+            concatAnns([fname_noext], [raw.times],
+                    suffixes = MEGartif_suffixes_for_ICA_calc,
+                       allow_missing=False )
+
+        #for suffix in MEGartif_suffixes_for_ICA_calc:
+        #    fnf_artif = pjoin(data_dir, f'{fname_noext}{suffix}.txt')
+        #    assert os.path.exists(fnf_artif)
+        #    aac = mne.read_annotations(fnf_artif)
+        #    anns_MEG_artif_ICA_calc += aac
+
+        filt_raw2.set_annotations(anns_MEG_artif_ICA_calc)
         filt_raw2.load_data()
-        if (not do_highpass) or ('tSSS' in to_perform and not do_highpass_after_SSS):
+        # if highpass was computed before then don't do it
+        if (not do_highpass) or ( ('tSSS' in to_perform) and \
+                                 (not do_highpass_after_SSS) ):
+            print('Filtering before ICA')
             filt_raw2.filter(l_freq=lowest_freq_to_keep,
                                 h_freq=highest_freq_to_keep,
                                 n_jobs=n_jobs, skip_by_annotation='BAD_MEG',
@@ -630,8 +650,10 @@ for rawname_ in rawnames:
         pdf.savefig(plt.gcf() )
         plt.close()
         #################################
+        print('Fitting ICA')
         ica = ICA(n_components = n_components_ICA, random_state=0).fit(filt_raw2)
         ica.exclude = []
+        print('Finding EOG and ECG components')
         if ICA_exclude_EOG:
             #eog_inds, scores = ica.find_bads_eog(raw)
             eog_epochs = mne.preprocessing.create_eog_epochs(filt_raw2)  # get single EOG trials
@@ -652,13 +674,14 @@ for rawname_ in rawnames:
 
         s = ','.join(map(str,ica.exclude) )
         exclStr = 'excl_' + s
-        print(exclStr)
+        print('ica.exclude = ', exclStr)
 
         #compinds =  range( ica.get_components().shape[1] )  #all components
         maxi = min( np.max(ica.exclude) + 1 + 5, ncomps   )
         #set( range(maxi  ) ) -
         compinds = np.arange(maxi)    #all components
         #nr = len(compinds); nc = 2
+
         if plot_ICA_prop:
             print('Start plotting ICA properties for {maxi} compinds')
             filt_raw_tmp = filt_raw2.copy()
@@ -673,6 +696,7 @@ for rawname_ in rawnames:
         plt.close('all')
 
         if plot_ICA_damage:
+            print('Start ICA damage')
             xlim = [filt_raw2.times[0],filt_raw2.times[-1]]
             utils.plotICAdamage(filt_raw2, fname_noext, ica, list(set(ica.exclude)), xlim)
 

@@ -3,11 +3,11 @@ nsubdirs=${#SUBDIRS[*]}
 
 COPY_ANNS=0
 COPY_RAW_MAT=0
-COPY_SRCD=0
-COPY_REC_INFO=0
-COPY_LFP=1
-DRY=""
-#DRY="n"
+COPY_SRCD=1
+COPY_REC_INFO=1
+COPY_LFP=0
+#DRY=""
+DRY="n"
 
 ALL_DATASETS_STR='S{01,02,03,04,05,06,07,08,09,10}_{on,off}_{hold,move,rest}'
 
@@ -22,6 +22,9 @@ OUT_DIR=data_oscbagdis/data_duss
 
 # NON-RECURSIVE copy
 if [ $COPY_ANNS -ne 0 ]; then
+  rsync -avzh$DRY --progress $ERRS -e ssh $DATA_DUSS/*.txt judac:$OUT_DIR
+fi
+if [ $COPY_ARTIF -ne 0 ]; then
   rsync -avzh$DRY --progress $ERRS -e ssh $DATA_DUSS/*.txt judac:$OUT_DIR
 fi
 if [ $COPY_RAW_MAT -ne 0 ]; then

@@ -32,21 +32,21 @@ SRC_REC_AFTER_highpass=1
 
 # first pass, only artif
 #HIRES_FILE_TYPE=hires-raw
-HIRES_FILE_TYPE=fieldtrip_raw
-  RECALC_ARTIF0=0
-  #RECALC_ARTIF0=1
-  RECALC_ARTIF1=1
-       HIGHPASS=0
-       ICA_only=0
-           tSSS=0
-            SSP=0
-
-   RECONSTRUCT_SOURCES=0
-SRC_REC_AFTER_highpass=0
-    SRC_REC_AFTER_tSSS=0
-     SRC_REC_AFTER_SSP=0
-     SRC_REC_AFTER_ICA=0
-        RUN_MATLAB_JOB=0
+#HIRES_FILE_TYPE=fieldtrip_raw
+#  RECALC_ARTIF0=0
+#  #RECALC_ARTIF0=1
+#  RECALC_ARTIF1=1
+#       HIGHPASS=0
+#       ICA_only=0
+#           tSSS=0
+#            SSP=0
+#
+#   RECONSTRUCT_SOURCES=0
+#SRC_REC_AFTER_highpass=0
+#    SRC_REC_AFTER_tSSS=0
+#     SRC_REC_AFTER_SSP=0
+#     SRC_REC_AFTER_ICA=0
+#        RUN_MATLAB_JOB=0
 #########################
 
 
@@ -71,7 +71,7 @@ ALG_TYPE='all_sources'
 RUNF=$OSCBAGDIS_DATAPROC_CODE/run/resave.py
 
 if [ $RECALC_ARTIF0 -ne 0 ]; then
-  python $INTERACTIVE $RUNF -r $raw --read_type $HIRES_FILE_TYPE --to_perform notch --exit_after MEG_artif_calc --recalc_artif 1 --recalc_LFPEMG 0 --force_artif_ICA_recalc 1
+  python $INTERACTIVE $RUNF -r $raw --read_type $HIRES_FILE_TYPE --to_perform notch --exit_after MEG_artif_calc --recalc_artif 1 --recalc_LFPEMG 0 --force_artif_ICA_recalc 1  load_artif_detection_params 0
   EC=$?
   if [ $EC -ne 0 ]; then
     echo "Exit code $EC, exiting"
@@ -80,7 +80,7 @@ if [ $RECALC_ARTIF0 -ne 0 ]; then
 fi
 
 if [ $RECALC_ARTIF1 -ne 0 ]; then
-  python $INTERACTIVE $RUNF -r $raw --read_type $HIRES_FILE_TYPE --to_perform notch --exit_after MEG_artif_calc --recalc_artif 1 --recalc_LFPEMG 0 --force_artif_ICA_recalc 0
+  python $INTERACTIVE $RUNF -r $raw --read_type $HIRES_FILE_TYPE --to_perform notch --exit_after MEG_artif_calc --recalc_artif 1 --recalc_LFPEMG 0 --force_artif_ICA_recalc 0   load_artif_detection_params 1 
   EC=$?
   if [ $EC -ne 0 ]; then
     echo "Exit code $EC, exiting"
