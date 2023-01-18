@@ -20,6 +20,8 @@ from globvars import gp
 
 from os.path import join as pjoin
 
+print(f'Starting {__file__}')
+
 
 #subjinds = [1,2,3]
 #tasks = ['hold' , 'move', 'rest']
@@ -40,6 +42,8 @@ min_duration_remaining = 30  # in sec
 exclude_artifacts_only = True
 overwrite = True
 
+output_subdir = ""
+
 print('sys.argv is ',sys.argv)
 effargv = sys.argv[1:]  # to skip first
 if sys.argv[0].find('ipykernel_launcher') >= 0:
@@ -47,7 +51,7 @@ if sys.argv[0].find('ipykernel_launcher') >= 0:
 
 
 helpstr = 'Usage example\nrun_collect_artifacts.py --rawname <rawname_naked> '
-opts, args = getopt.getopt(effargv,"hr:", ["ann_types=","rawname=","min_dur=" ])
+opts, args = getopt.getopt(effargv,"hr:", ["ann_types=","rawname=","min_dur=","output_subdir=" ])
 print(sys.argv, opts, args)
 
 for opt, arg in opts:
@@ -65,6 +69,8 @@ for opt, arg in opts:
         #rawname_ = arg
     elif opt == "--ann_types":
         ann_types = arg.split(',')
+    elif opt == "--output_subdir":
+        output_subdir = arg
     #elif opt == "--exclude_artifacts_only":
     #    exclude_artifacts_only = int(arg)
     elif opt == "--min_dur":
@@ -74,6 +80,11 @@ for opt, arg in opts:
     else:
         raise ValueError('Unknown option {} with arg {}'.format(opt,arg) )
 
+
+data_dir_output = pjoin(gv.data_dir, output_subdir)
+if not os.path.exists(data_dir_output):
+    print('Creating {}'.format(data_dir_output) )
+    os.makedirs(data_dir_output)
 
 print('ann_types', ann_types)
 
@@ -147,7 +158,7 @@ for rawname_ in rawnames:
             descr_to_skip += [ bst.format('L') ]
             descr_to_skip += [ bst.format('R') ]
     assert len(descr_to_skip) > 0
-    print('descr_to_skip = ',descr_to_skip)
+    print('descr_to_skip (the only ones that will not be included in the list for exclusion) = ',descr_to_skip)
 
 
     # merge all annotations, except non-tremor ones
@@ -164,6 +175,6 @@ for rawname_ in rawnames:
             (duration,dur_merged,min_duration_remaining)
 
     fn = '{}_ann_srcrec_exclude.txt'.format(rawname_)
-    fn_full = pjoin(gv.data_dir,fn)
+    fn_full = pjoin(data_dir_output,fn)
     print('Saving ',fn_full)
     merged_anns.save( fn_full, overwrite=overwrite  )

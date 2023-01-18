@@ -113,7 +113,7 @@ try:
         print(f'CUDA presence: {e}')
     CUDA_state = 'ok'
     print('GPU found, total GPU available = ',GPUs_list)
-except (ImportError,ValueError) as e:
+except (ImportError,ValueError,ModuleNotFoundError) as e:
     if not hostname.startswith('jsfc'):
         print(e)
     GPUs_list = []

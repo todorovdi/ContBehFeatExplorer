@@ -15,6 +15,7 @@ function output = srcrec(subjstr,datall,data_cleaned,hdmf,roi_type,bads,S,srs,ma
   %tend = 400;
 
   % merge all trials into one before computing covariance matrix
+  % here a trial is just a segment of data, different trials are not necessarily of fixed size
   ntrials = size( data_cleaned.trial, 2 )  %number of segments after separations by artifact placements
   if ntrials > 1
     data = [];

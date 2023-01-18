@@ -1,5 +1,7 @@
 #!/bin/bash
 # this tells to exit if any error occurs (by def bash does not do it)
+echo "  Current date is "
+date
 set -e
 RUNSTRINGS_FN=$1
 JOBID=$2
@@ -40,8 +42,13 @@ echo "final RSID is $RSID"
 RUNSTRING_CUR=${RUNSTRINGS[$RSID]}
 echo $RUNSTRING_CUR
 
+echo python_correct_ver=$python_correct_ver
 #py=ipython
-py=python
+#py=python
+py=$python_correct_ver
+echo "srun_exrc_runstr which python"
+which $py
+
 export PYTHONPATH=$OSCBAGDIS_DATAPROC_CODE:$PYTHONPATH
 $py -c "import os; print('cwd for $py=',os.getcwd() );"
 
@@ -49,6 +56,7 @@ $py -c "import os; print('cwd for $py=',os.getcwd() );"
 echo "CUDA_VISIBLE_DEVICES=$CUDA_VISIBLE_DEVICES , PMI_RANK=$PMI_RANK"
 if [ -n "$CUDA_VISIBLE_DEVICES" ]; then
   $py -c "import GPUtil; print('GPUs = ',GPUtil.getAvailable()); import pycuda.driver as cuda_driver; cuda_driver.init(); "
+  #$?
 fi
 
 #$py $CODE/run/$RUNSTRING_CUR --SLURM_job_id "$JOBID"_"$RUNSTRING_IND"  --calc_MI 0

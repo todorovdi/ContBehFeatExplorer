@@ -143,7 +143,7 @@ src_grouping = 0  # src_grouping is used to get info from the file
 newchn_grouping_ind = 9 # output group number
 
 scale_data_combine_type = 'medcond'
-baseline_int_type = 'notrem'
+#baseline_int_type = 'notrem'
 rbcorr_use_local_means = False
 rbcorr_use_zero_mean = True  # filtered signals should have zero mean
 
@@ -270,7 +270,7 @@ for opt,arg in pars.items():
         input_subdir = arg
         if len(input_subdir) > 0:
             subdir = pjoin(gv.data_dir,input_subdir)
-            assert os.path.exists(subdir )
+            assert os.path.exists(subdir ), subdir
     elif opt == "output_subdir":
         output_subdir = arg
         if len(output_subdir) > 0:

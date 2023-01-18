@@ -1873,16 +1873,22 @@ def getClfPredPower(clf,X,class_labels,class_ind, label_ids_order = None,
 
 def _getPredPower_singleFold(arg):
     from xgboost import XGBClassifier
-    from interpret.glassbox import ExplainableBoostingClassifier
     from numpy.linalg import LinAlgError
     (fold_type,clf,add_clf_creopts,add_fitopts,\
      X_train,X_test,y_train,y_test,class_ind,\
      n_classes, split_ind, balancing, printLog)  = arg
     model_cur = type(clf)(**add_clf_creopts)  # I need num LDA compnents I guess
     #print('balancing = ',balancing)
+
     try:
-        if balancing == 'weighting' and (isinstance(clf, XGBClassifier) or\
-            isinstance(clf,ExplainableBoostingClassifier) ):
+        import interpret
+        from interpret.glassbox import ExplainableBoostingClassifier
+        isinterpret = isinstance(clf,ExplainableBoostingClassifier)
+    except (ModuleNotFoundError,ImportError) as e:
+        isinterpret = False
+
+    try:
+        if balancing == 'weighting' and (isinstance(clf, XGBClassifier) or isinterpret):
             #print('WEIGHTS COMPUTED')
             from sklearn.utils.class_weight import compute_sample_weight
             class_weights = compute_sample_weight('balanced', y_train)
@@ -2175,14 +2181,16 @@ def getPredPowersCV(clf,X,class_labels,class_ind, printLog = False, n_splits=Non
             n_jobs_perm_test = min(n_permutations,
                                    add_clf_creopts.get('n_jobs', 1) )
         add_clf_creopts_perm = add_clf_creopts.copy()
-        add_clf_creopts_perm['n_jobs'] = 1
+        if n_jobs_perm_test > 1:
+            add_clf_creopts_perm['n_jobs'] = 1
         clf_perm = type(clf)(**add_clf_creopts)
 
         # y = np.ones(20)
         # y[:10] = 2
         # X = np.random.uniform(size=(20,3))
         # clf =
-        print(f'Starting permutation test, n_permutations={n_permutations}')
+        # TODO: maybe nonzero CV?
+        print(f'Starting permutation test, n_permutations={n_permutations}, njobs={n_jobs_perm_test}')
         score_noperm, perm_scores, pvalue =\
             permutation_test_score(clf_perm,
             X, class_labels, groups=None,

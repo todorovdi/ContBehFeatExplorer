@@ -52,15 +52,15 @@ DIRECT_SSH=0
 subdir=run
 if [[ $SYNC_MODE != "get_from" ]]; then
   echo "  sync souce code"
-  $run --mode:$RUNTYPE --exclude="*HPC*.py"  "$LOCAL_DIR/*.py"  "$JUSUF_CODE/"
+  $run --mode:$RUNTYPE --exclude="*HPC*.py" --exclude="_rsync*.py" "$LOCAL_DIR/*.py"  "$JUSUF_CODE/"
   $run --mode:$RUNTYPE --exclude="sync*HPC.sh"  "$LOCAL_DIR/*.sh"  "$JUSUF_CODE/"
   #$run --mode:$RUNTYPE "$LOCAL_DIR/*.m"  "$JUSUF_CODE/"  # we don't need *.m files on HPC
   $SLEEP
   echo "  sync run files (excluding sh, only py)"
   #rsync $FLAGS $SSH_FLAG --exclude="*HPC.sh" --exclude="sbatch*" --exclude=srun_pipeline.sh --exclude=srun_exec_runstr.sh $LOCAL_DIR/$subdir/*.{py,sh}  $JUSUF_CODE/$subdir/
   $run --mode:$RUNTYPE --exclude="indtool.py" --exclude="_utils_indtool.py" "$LOCAL_DIR/$subdir/*.py"   "$JUSUF_CODE/$subdir/"
-  echo "  sync matlab_compiled"
-  $run --mode:$RUNTYPE "$LOCAL_DIR/matlab_compiled/" "$JUSUF_CODE/matlab_compiled" 
+  #echo "  sync matlab_compiled"
+  #$run --mode:$RUNTYPE "$LOCAL_DIR/matlab_compiled/" "$JUSUF_CODE/matlab_compiled" 
   $SLEEP
   $run --mode:$RUNTYPE "$LOCAL_DIR/subj_corresp.json"  "$JUSUF_CODE/"
 fi
@@ -84,6 +84,7 @@ if [[ $SYNC_MODE != "get_from" ]]; then
   echo "  sync json"
   $run --mode:$RUNTYPE --exclude="*HPC" "$LOCAL_DIR/*.json"  "$JUSUF_CODE/"
   $SLEEP
+  # send params to HPC except those ending with HPC
   echo "  sync params"  # I want to care about *HPC_fast too
   $run --mode:$RUNTYPE --exclude="*HPC*.ini" "$LOCAL_DIR/params/*.ini" "$JUSUF_CODE/params/"
   $SLEEP
@@ -94,6 +95,7 @@ fi
 
 if [[ $SYNC_MODE != "send_to" ]]; then
   echo "  rev sync params"
+  # receive HPC params back here
   $run --mode:$RUNTYPE "$JUSUF_CODE/params/*HPC*.ini" "$LOCAL_DIR/params/" 
   echo "  rev sync helper_scripts"
   $run --mode:$RUNTYPE "$JUSUF_CODE/helper_scripts/*.sh" "$LOCAL_DIR/helper_scripts/" 

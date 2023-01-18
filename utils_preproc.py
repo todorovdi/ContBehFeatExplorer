@@ -1994,6 +1994,12 @@ def loadRaws(rawnames,mods_to_load, sources_type = None, src_type_to_use=None,
                 newsrc_fname_full = os.path.join( data_dir, input_subdir, 'pcica_' + src_fname_noext + '.fif' )
             else:
                 raise ValueError('Wrong src_type_to_use {}'.format(src_type_to_use) )
+
+            import datetime
+            mtime = os.stat(newsrc_fname_full).st_mtime
+            mtime = datetime.datetime.fromtimestamp(mtime)
+
+            print(f'Loading reconstructed sources from {newsrc_fname_full}, mtime = {mtime}')
             raw_srconly =  mne.io.read_raw_fif(newsrc_fname_full, verbose=verbose)
             raw_permod_both_sides_cur['src'] = raw_srconly
 

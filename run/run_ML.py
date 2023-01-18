@@ -95,6 +95,7 @@ brain_side_to_use = 'all_available' # 'both', 'left', 'right', 'contralat_to_mov
 # determines which timpoints will be sicarded based on LFP artifacts
 LFP_side_to_use = "baseline_int_side" #"body_move_side" both, body_move_side, body_trem_side
 use_featfname_old_regex = False
+SLURM_job_id = None
 
 prefix = ''
 
@@ -120,6 +121,7 @@ calc_VIF     = 1
 calc_Boruta = 1
 compute_ICA = 0
 use_ICA_for_classif = 0
+
 
 remove_crossLFP = 1
 
@@ -157,6 +159,7 @@ best_LFP_featstr = 'onlyH_act'
 bestLFP_disjoint = 'auto'
 best_LFP_exCB = None
 tune_search_best_LFP = True
+n_jobs_perm_test = None  # None means auto select
 
 save_output = 1
 rescale_feats = 1
@@ -330,6 +333,10 @@ for opt,arg in pars.items():
         n_feats_set_explicitly = True
     elif opt == "n_permutations_permtest":
         n_permutations_permtest = int(arg)
+    elif opt == "n_jobs_perm_test":
+        n_jobs_perm_test = int(arg)
+        if n_jobs_perm_test < 0:
+            n_jobs_perm_test = None
     elif opt == "scale_feat_combine_type":
         scale_feat_combine_type = arg
     elif opt == "allow_CUDA":
@@ -337,7 +344,10 @@ for opt,arg in pars.items():
     elif opt == "use_matching_folds_main_LFP":
         use_matching_folds_main_LFP = int(arg)
     elif opt == "ann_MEGartif_prefix_to_use":
-        ann_MEGartif_prefix_to_use = arg
+        if ',' in arg:
+            ann_MEGartif_prefix_to_use = arg.split(',')
+        else:
+            ann_MEGartif_prefix_to_use = [arg]
     elif opt == "selMinFeatSet_drop_perf_pct":
         selMinFeatSet_drop_perf_pct = float(arg)
     elif opt == "selMinFeatSet_conv_perf_pct":
@@ -441,7 +451,7 @@ for opt,arg in pars.items():
     elif opt == "input_subdir":
         input_subdir = arg
         if len(input_subdir) > 0:
-            subdir = pjoin(gv.data_dir,input_subdir)
+            subdir = pjoin(gv.data_dir, input_subdir)
             assert os.path.exists(subdir ), subdir
     elif opt == "output_subdir":
         output_subdir = arg
@@ -1303,12 +1313,12 @@ else:
 suffixes = []
 if artif_force_all_modalities:
     suffixes += [ '_ann_LFPartif' ]
-    suffixes += [ann_MEGartif_prefix_to_use ]
+    suffixes += ann_MEGartif_prefix_to_use
 else:
     if 'LFP' in data_modalities:
         suffixes += [ '_ann_LFPartif' ]
     if 'msrc' in data_modalities:
-        suffixes += [ ann_MEGartif_prefix_to_use ]
+        suffixes += ann_MEGartif_prefix_to_use
 anns_artif, anns_artif_pri, times_, dataset_bounds_ = \
     utsne.concatAnns(rawnames,rawtimes_pri, suffixes,crop=(crop_start,crop_end),
                  allow_short_intervals=True, side_rev_pri =
@@ -2173,34 +2183,44 @@ if do_Classif:
 
             # TODO: if there is subskip > 1, it should be done HERE ONLY
             if not use_main_LFP_chan or (not use_matching_folds_main_LFP):
+                fold_info = {}
+
                 folds_train_holdout, folds_trainfs_testfs,\
                     folds_train_holdout_trainfs_testfs =\
                     utsne.getFolds(X_for_heavy, class_labels_good_for_classif,
                         n_splits=n_splits, group_labels=None,
                         stratified=True, holdout=True,seed=0)
 
+                fold_info['folds_train_holdout'] = folds_train_holdout
+                fold_info['folds_trainfs_testfs'] = folds_trainfs_testfs
+                fold_info['folds_train_holdout_trainfs_testfs'] = folds_train_holdout_trainfs_testfs
+
                 from packaging.version import parse as vparse
                 import sklearn
                 group_fold_stratif = vparse(sklearn.__version__) > vparse('0.25')
 
-                n_splitsg = min(n_splits, len(set(group_labels)))
-                foldsg_train_holdout, foldsg_trainfs_testfs,\
-                    foldsg_train_holdout_trainfs_testfs =\
-                    utsne.getFolds(X_for_heavy, class_labels_good_for_classif,
-                        n_splits=n_splitsg, group_labels=group_labels,
-                        stratified=group_fold_stratif,
-                        holdout=True, seed=0)
+                for label_group_name,group_labels in group_labels_dict.items():
+                    if label_group_name not in label_groups_to_use:
+                        continue
+                    if len(group_labels) != len(X_for_heavy):
+                        continue
+                    n_splitsg = min(n_splits, len(set(group_labels)))
+                    if n_splitsg > 1:
+                        foldsg_train_holdout, foldsg_trainfs_testfs,\
+                            foldsg_train_holdout_trainfs_testfs =\
+                            utsne.getFolds(X_for_heavy, class_labels_good_for_classif,
+                                n_splits=n_splitsg, group_labels=group_labels,
+                                stratified=group_fold_stratif,
+                                holdout=True, seed=0)
 
-            fold_info = {}
-            fold_info['folds_train_holdout'] = folds_train_holdout
-            fold_info['folds_trainfs_testfs'] = folds_trainfs_testfs
-            fold_info['folds_train_holdout_trainfs_testfs'] = folds_train_holdout_trainfs_testfs
-            # with g
-            fold_info['foldsg_train_holdout'] = foldsg_train_holdout
-            fold_info['foldsg_trainfs_testfs'] = foldsg_trainfs_testfs
-            fold_info['foldsg_train_holdout_trainfs_testfs'] = foldsg_train_holdout_trainfs_testfs
-            results_cur['fold_info'] = fold_info
-            saveResToFolder(results_cur, 'fold_info')
+                        # with g
+                        fold_info[f'foldsg_train_holdout:{label_group_name}'] = foldsg_train_holdout
+                        fold_info[f'foldsg_trainfs_testfs:{label_group_name}'] = foldsg_trainfs_testfs
+                        fold_info[f'foldsg_train_holdout_trainfs_testfs:{label_group_name}'] =\
+                            foldsg_train_holdout_trainfs_testfs
+
+                results_cur['fold_info'] = fold_info
+                saveResToFolder(results_cur, 'fold_info')
 
             do_XGB_cur =  do_XGB and not (int_types_key in\
                 gp.int_type_datset_rel and skip_XGB_aux_intervals  )
@@ -2434,7 +2454,8 @@ if do_Classif:
                         ret_clf_obj=True, balancing=XGB_balancing, seed=0,
                         fold_split = folds_train_holdout,
                         perm_test = 1,
-                        n_permutations = n_permutations_permtest)
+                        n_permutations = n_permutations_permtest,
+                        n_jobs_perm_test= n_jobs_perm_test)
                     rc = {'perf_dict':r0, 'importances':clf_XGB.feature_importances_}
                     rc['add_clf_creopts'] = add_clf_creopts
                     rc['add_fitopts'] = add_fitopts

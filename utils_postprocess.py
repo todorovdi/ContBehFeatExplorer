@@ -1066,6 +1066,15 @@ def getBestLFPfromDict(best_LFP_dict,subj,metric='balanced_accuracy',
 
 
 def updateSrcGroups(ipmpp, roi_labels, srcgrp, use_both_sides = True, want_sided = True ):
+    '''
+    convert dict of intensities and srcgrp associate with
+    non-canonical roi_lables order to canoncial version that is plottable
+
+    ipmpp -- dict, area label -> intensity
+    roi_labels -- parcel ordering used to create srcgrp. Is usuall NON canonical
+
+    returns consistent srcgrp_new, brain_area_labels, intensities
+    '''
     from globvars import gp
     #medcond = 'on'
     #ipmpp = info['impr_per_medcond_per_pgn'][medcond]
@@ -1076,10 +1085,13 @@ def updateSrcGroups(ipmpp, roi_labels, srcgrp, use_both_sides = True, want_sided
     intensities = [np.nan] * len(brain_area_labels)
     srcgrp_new = np.nan * np.ones( len(srcgrp) )
     #print(len(ipmpp))
+    # here we iterate in a non-ordered manner but we set intensities using a
+    # fixed order
     for pgn in ipmpp:
         if (pgn in ['LFP']) or pgn.startswith('base_'):
             continue
 
+        # update parcel group name
         if pgn.endswith('_L') or pgn.endswith('_R'):
             if want_sided:
                 pgn_eff = pgn
@@ -1111,6 +1123,7 @@ def updateSrcGroups(ipmpp, roi_labels, srcgrp, use_both_sides = True, want_sided
         #parcel_inds += [ roi_labels.index(pl + '_R') for pl in parcel_labels ]
 
         ind = brain_area_labels.index(pgn_eff)
+        # brining non-canonical to canonical
         for pi in parcel_inds:
             srcgrp_new[srcgrp==pi]  = ind
             #print(srcgrp_new[srcgrp==pi])
@@ -1119,6 +1132,7 @@ def updateSrcGroups(ipmpp, roi_labels, srcgrp, use_both_sides = True, want_sided
 
         intensity_cur = ipmpp[pgn] #* intensity_mult
         #print(pgn,ind, intensity_cur)
+        # set intensity according to brain_area_labels ordering
         intensities[ind ]= intensity_cur #cmap(intensity_cur)  #* len(parcel_inds)
     assert np.any( ~np.isnan( srcgrp_new ) ), srcgrp[ np.isnan( srcgrp_new ) ]
     return srcgrp_new, brain_area_labels, intensities

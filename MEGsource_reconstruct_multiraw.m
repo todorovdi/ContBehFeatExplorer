@@ -1,3 +1,5 @@
+fprintf("     MATLAB: starting MEGsource_reconstruct_multiraw.m")
+
 data_dir = getenv("DATA_DUSS");
 %subjstr = "S01";
 %taskstr = "move";
@@ -35,6 +37,8 @@ end
 % double quotes are string array
 %input_rawname_type = ["resample", "afterICA"]
 %input_rawname_type = ["SSS", "notch", "highpass", "resample", "afterICA"]
+
+input_rawname_type
 
 if ~exist("roi")
   roi = {"parcel_aal_surf"};
@@ -287,7 +291,7 @@ for rawi = 1:length(rawnames)
           end
         end
       else
-        fprintf(" file not found! %s",fname)
+        fprintf(" file not found! %s\n",fname)
       end
 %    end
 %  end

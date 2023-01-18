@@ -1,5 +1,7 @@
 ####!/usr/bin/python3  #no, we need a pyenv realted python
 # resample data uing MNE
+print(f'Starting {__file__}')
+
 import sys, os
 sys.path.append( os.path.expandvars('$OSCBAGDIS_DATAPROC_CODE') )
 
@@ -56,7 +58,7 @@ allow_CUDA = False
 n_components_ICA = 0.95
 tSSS_duration = 10  # default is 10s
 frame_SSS = 'head'  # 'head'
-do_ICA_only = 1 # whether only only compute ICA (and save it) or also apply it
+do_ICA_only = 0 # whether only only compute ICA (and save it) or also apply it
 plot_ICA_damage = 1
 
 # use_mean=1, so mark many things as MEG artifacts
@@ -677,7 +679,9 @@ for rawname_ in rawnames:
         print('ica.exclude = ', exclStr)
 
         #compinds =  range( ica.get_components().shape[1] )  #all components
-        maxi = min( np.max(ica.exclude) + 1 + 5, ncomps   )
+        maxi = min( 6, ncomps )
+        if len(ica.exclude):
+            maxi = min( np.max(ica.exclude) + 1 + 5, ncomps )
         #set( range(maxi  ) ) -
         compinds = np.arange(maxi)    #all components
         #nr = len(compinds); nc = 2

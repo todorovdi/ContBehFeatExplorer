@@ -1,4 +1,5 @@
 #!/bin/bash
+echo Starting `basename "$0"`
 # takes one argument -- rawname
 # has to be ran from  run subdir
 
@@ -7,6 +8,7 @@
 #raw="S05_off_hold"
 #raw="S05_off_move"
 raw=$1
+
 
 RESAVE_BAD_CHANS_SSS=no
 SRC_REC_BAD_CHANS_SSS=no
@@ -32,7 +34,8 @@ MIN_DURATION_QUIET_ALLOWED=30
 # DEBUG
 RECALC_SRC_COORDS=1
 MIN_DURATION_QUIET_ALLOWED=5  # for shorter test datasets
-SRCREC_COVMAT_REST_ONLY=0
+#SRCREC_COVMAT_REST_ONLY=0
+SRCREC_COVMAT_REST_ONLY=1
 
 RECALC_SRC_COORDS=0
 ROI_TYPES='"'parcel_aal_surf'"'
@@ -43,7 +46,8 @@ MEG_artif_types='MEGartif,MEGartif_muscle,MEGartif_ICA'
 GROUPINGS="all_raw"
 ALG_TYPE='all_sources'
 
-RUNF=$OSCBAGDIS_DATAPROC_CODE/run/resave.py
+CODERUN=$OSCBAGDIS_DATAPROC_CODE/run
+RUNF=$CODERUN/resave.py
 
 if [ $RESAVE_MAT_FILE -ne 0 ]; then
   #DEBUG
@@ -99,7 +103,7 @@ MATLAB_SCRIPT_PARAMS_DEF=$MATLAB_SCRIPT_PARAMS_DEF'roi = {'$ROI_TYPES'};'
 if [ $RECONSTRUCT_SOURCES -ne 0 ]; then
   if [ $RECALC_SRC_COORDS -ne 0 ]; then
       #better run separately for all subjects at once, since it is fast 
-    . srun_prepSourceCoords.sh    
+    . $CODERUN/srun_prepSourceCoords.sh    
   fi
 
   if [ $SRCREC_COVMAT_REST_ONLY -ne 0 ]; then
@@ -107,7 +111,8 @@ if [ $RECONSTRUCT_SOURCES -ne 0 ]; then
   else
     s="--ann_types $MEG_artif_types"
   fi
-  python run_collect_artifacts.py -r $raw --min_dur $MIN_DURATION_QUIET_ALLOWED $s
+  # note that if we merge raws, it is ran again inside srun_fieldtrip_srcrc
+  ### python $CODERUN/run_collect_artifacts.py -r $raw --min_dur $MIN_DURATION_QUIET_ALLOWED $s
 
   # this way for single file only 
   if [ $SRC_REC_AFTER_highpass -ne 0 ]; then
@@ -118,10 +123,8 @@ if [ $RECONSTRUCT_SOURCES -ne 0 ]; then
       vardefstr=""
       #vardefstr='rawnames=["'$raw'"]; '"use_data_afterICA=0;"  
       #matlab -nodisplay -nosplash -r "$vardefstr; MEGsource_reconstruct_multiraw; quit()"
-      . run/srun_Fieldtrip_srcrec.sh $raw
+      . $CODERUN/srun_Fieldtrip_srcrec.sh $raw
     fi
-
-    #ipython $INTERACTIVE run_process_FTsources.py -- -r $raw --groupings $GROUPINGS --alg_type $ALG_TYPE
   fi
   if [ $SRC_REC_AFTER_tSSS -ne 0 ]; then
     if [ $RUN_MATLAB_JOB -ne 0 ]; then
@@ -132,7 +135,7 @@ if [ $RECONSTRUCT_SOURCES -ne 0 ]; then
       MATLAB_SCRIPT_PARAMS=$MATLAB_SCRIPT_PARAMS'input_subdir="'$INPUT_SUBDIR'";'
       MATLAB_SCRIPT_PARAMS=$MATLAB_SCRIPT_PARAMS'output_subdir="'$OUTPUT_SUBDIR'";'
       MATLAB_SCRIPT_PARAMS=$MATLAB_SCRIPT_PARAMS'input_rawname_type=["SSS",  "notch", "highpass"];'
-      . run/srun_Fieldtrip_srcrec.sh $raw
+      . $CODERUN/srun_Fieldtrip_srcrec.sh $raw
 
       #S='input_rawname_type=["SSS",  "notch", "highpass", "resample"]; input_subdir="SSS"; output_subdir="SSS"; '  
       #vardefstr='rawnames=["'$raw'"]; '$S"use_data_afterICA=0;"  
@@ -140,7 +143,7 @@ if [ $RECONSTRUCT_SOURCES -ne 0 ]; then
       #matlab -nodisplay -nosplash -r "$vardefstr; MEGsource_reconstruct_multiraw; quit()"
     fi
 
-    ipython $INTERACTIVE run/run_process_FTsources.py -- -r $raw --groupings $GROUPINGS --alg_type $ALG_TYPE --input_subdir SSS --output_subdir SSS
+    ipython $INTERACTIVE $CODERUN/run_process_FTsources.py -- -r $raw --groupings $GROUPINGS --alg_type $ALG_TYPE --input_subdir SSS --output_subdir SSS
   fi
   if [ $SRC_REC_AFTER_ICA -ne 0 ]; then
     if [ $RUN_MATLAB_JOB -ne 0 ]; then
@@ -149,10 +152,10 @@ if [ $RECONSTRUCT_SOURCES -ne 0 ]; then
       MATLAB_SCRIPT_PARAMS=$MATLAB_SCRIPT_PARAMS_DEF
       MATLAB_SCRIPT_PARAMS=$MATLAB_SCRIPT_PARAMS"use_data_afterICA=1;"
       MATLAB_SCRIPT_PARAMS=$MATLAB_SCRIPT_PARAMS'input_rawname_type = ["notch", "highpass"];'
-      . run/srun_Fieldtrip_srcrec.sh $raw
+      . $CODERUN/srun_Fieldtrip_srcrec.sh $raw
     fi
 
-    ipython $INTERACTIVE run/run_process_FTsources.py -- -r $raw --groupings $GROUPINGS --alg_type $ALG_TYPE --input_subdir afterICA --output_subdir afterICA
+    ipython $INTERACTIVE $CODERUN/run_process_FTsources.py -- -r $raw --groupings $GROUPINGS --alg_type $ALG_TYPE --input_subdir afterICA --output_subdir afterICA
   fi
 fi
 

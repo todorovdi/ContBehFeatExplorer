@@ -11,10 +11,10 @@
 
 ###SBATCH --time=23:00:00
 ## usually finished in around 30 min
-#SBATCH --time=01:00:00
+#SBATCH --time=03:00:00
 ##SBATCH --partition=gpus
 #SBATCH --partition=batch
-#SBATCH --mem=128G
+#SBATCH --mem=64G
 
 ##SBATCH --partition=batch
 ##SBATCH --mem=60G
@@ -34,8 +34,7 @@
 #SBATCH --mail-type=ALL
 #SBATCH --mail-user=todorovdi@gmail.com
 
-##SBATCH --array=0-54
-#SBATCH --array=0-11
+#SBATCH --array=0-21
 
 # *** start of job script ***
 ##source set_oscabagdis_env_vars.sh
@@ -67,7 +66,7 @@ export DATA_DUSS=$PROJECT_DIR/data_duss
 export OUTPUT_OSCBAGDIS=$PROJECT_DIR/output
 export OSCBAGDIS_DATAPROC_CODE=$PROJECT_DIR/data_proc_code
 
-#export PATH=$PATH:$HOME/.local/bin
+export PATH=$PATH:$HOME/.local/bin
 ##export PYTHONPATH=$OSCBAGDIS_DATAPROC_CODE
 #
 #module purge
@@ -87,5 +86,8 @@ pwd
 
 export PYTHONPATH=$PYTHONPATH:$PROJECT/OSCBAGDIS/LOCAL/lib/python3.9/site-packages
 
-RUNSTRINGS_FN="$CODE/run/_runstrings_genfeats.txt"
-$OSCBAGDIS_DATAPROC_CODE/run/srun_exec_runstr.sh $RUNSTRINGS_FN $SLURM_ARRAY_JOB_ID $EFF_ID $ID
+echo "Shell is $SHELL"
+
+RUNSTRINGS_FN="$CODE/run/_runstrings_resave.txt"
+# this one runs the runstring directly, not runs python with some argument
+$OSCBAGDIS_DATAPROC_CODE/run/srun_exec_runstr0.sh $RUNSTRINGS_FN $SLURM_ARRAY_JOB_ID $EFF_ID $ID

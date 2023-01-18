@@ -1,4 +1,5 @@
 #!/usr/bin/python3
+print(f'Starting {__file__}')
 
 import sys, os
 sys.path.append( os.path.expandvars('$OSCBAGDIS_DATAPROC_CODE') )
@@ -101,7 +102,7 @@ for opt, arg in opts:
         input_subdir = arg
         if len(input_subdir) > 0:
             subdir = pjoin(gv.data_dir,input_subdir)
-            assert os.path.exists(subdir )
+            assert os.path.exists(subdir ), subdir
     elif opt == "--output_subdir":
         output_subdir = arg
         if len(output_subdir) > 0:
@@ -191,12 +192,12 @@ for rawni,rawname_ in enumerate(rawnames):
 
 
     coords_MNI = None
-    if sources_type == 'parcel_aal':
+    if sources_type in [ 'parcel_aal', 'parcel_aal_surf' ]:
         srcCoords_fn = sind_str + '_modcoord_parcel_aal.mat'
 
         p = srcCoords_fn
         if not os.path.exists(p):
-            crdf = pymr.read_mat(pjoin(data_dir,p) )
+            crdf = pymr.read_mat(pjoin(data_dir,'modcoord',p) )
         else:
             crdf = pymr.read_mat(p)
 
@@ -269,7 +270,7 @@ for rawni,rawname_ in enumerate(rawnames):
 
     if sources_type == 'HirschPt2011':
         indsets = {'centers': slice(0,numcenters), 'surround': slice(numcenters,None)}
-    elif sources_type == 'parcel_aal':
+    elif sources_type in [ 'parcel_aal', 'parcel_aal_surf' ]:
         indsets = {'surround':slice(None,None)}
 
     pos_ = f['source_data']['pos'][:,:].T

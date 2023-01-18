@@ -1,4 +1,7 @@
 #!/bin/bash
+echo Starting `basename "$0"`
+# takes one argument -- rawname
+# has to be ran from  run subdir
 
 #$raws="S01_off_hold"
 #raw="S97_off_move"
@@ -16,9 +19,9 @@ HIRES_FILE_TYPE=fieldtrip_raw
 
   RECALC_ARTIF0=0
   RECALC_ARTIF1=0
-RESAVE_MAT_FILE=1
-       HIGHPASS=1
-       ICA_only=1
+RESAVE_MAT_FILE=0
+       HIGHPASS=0
+       ICA_only=0
            tSSS=0
             SSP=0
 
@@ -30,7 +33,8 @@ SRC_REC_AFTER_highpass=1
         RUN_MATLAB_JOB=1
 
 
-# first pass, only artif
+# first pass, only artif plots to adjust artif detection alg params
+# second pass, detect artif using updated params
 #HIRES_FILE_TYPE=hires-raw
 #HIRES_FILE_TYPE=fieldtrip_raw
 #  RECALC_ARTIF0=0
@@ -58,17 +62,22 @@ MIN_DURATION_QUIET_ALLOWED=30
 RECALC_SRC_COORDS=1
 MIN_DURATION_QUIET_ALLOWED=5  # for shorter test datasets
 SRCREC_COVMAT_REST_ONLY=0
+#SRCREC_COVMAT_REST_ONLY=1
 
 RECALC_SRC_COORDS=0
-ROI_TYPES='"'parcel_aal_surf'"'
+# for matlab
+ROI_TYPES='"'parcel_aal_surf'"' 
 #ROI_TYPES='"'HirschPt2011,2013'"'
+# for process_FTsources 
+ROI_TYPES2=parcel_aal_surf  
 MEG_artif_types='MEGartif,MEGartif_muscle,MEGartif_ICA'
 
 # for sources extraction
 GROUPINGS="all_raw"
 ALG_TYPE='all_sources'
 
-RUNF=$OSCBAGDIS_DATAPROC_CODE/run/resave.py
+RUNDIR=$OSCBAGDIS_DATAPROC_CODE/run
+RUNF=$RUNDIR/resave.py
 
 if [ $RECALC_ARTIF0 -ne 0 ]; then
   python $INTERACTIVE $RUNF -r $raw --read_type $HIRES_FILE_TYPE --to_perform notch --exit_after MEG_artif_calc --recalc_artif 1 --recalc_LFPEMG 0 --force_artif_ICA_recalc 1  load_artif_detection_params 0
@@ -145,6 +154,7 @@ fi
 #headmodel_grid_S01.mat       
 #headmodel_grid_S01_surf.mat
 
+#OUTPUT_SUBDIR=highpass_covmat_rest
 
 MATLAB_SCRIPT_PARAMS_DEF=""
 MATLAB_SCRIPT_PARAMS_DEF=$MATLAB_SCRIPT_PARAMS_DEF'roi = {'$ROI_TYPES'};'
@@ -156,17 +166,17 @@ if [ $RECONSTRUCT_SOURCES -ne 0 ]; then
     . srun_prepSourceCoords.sh    
   fi
 
-  if [ $SRCREC_COVMAT_REST_ONLY -ne 0 ]; then
-    s="--ann_types $MEG_artif_types,beh_states"
-  else
-    s="--ann_types $MEG_artif_types"
-  fi
-  python $OSCBAGDIS_DATAPROC_CODE/run/run_collect_artifacts.py -r $raw --min_dur $MIN_DURATION_QUIET_ALLOWED $s
-  EC=$?
-  if [ $EC -ne 0 ]; then
-    echo "run_resave_resample.sh: Exit code $EC, exiting"
-    exit $EC
-  fi
+  ## if [ $SRCREC_COVMAT_REST_ONLY -ne 0 ]; then
+  ##   s="--ann_types $MEG_artif_types,beh_states"
+  ## else
+  ##   s="--ann_types $MEG_artif_types"
+  ## fi
+  ## python $OSCBAGDIS_DATAPROC_CODE/run/run_collect_artifacts.py -r $raw --min_dur $MIN_DURATION_QUIET_ALLOWED $s
+  ## EC=$?
+  ## if [ $EC -ne 0 ]; then
+  ##   echo "run_resave_resample.sh: Exit code $EC, exiting"
+  ##   exit $EC
+  ## fi
 
   # this way for single file only 
   if [ $SRC_REC_AFTER_highpass -ne 0 ]; then
@@ -174,40 +184,47 @@ if [ $RECONSTRUCT_SOURCES -ne 0 ]; then
       MATLAB_SCRIPT_PARAMS=$MATLAB_SCRIPT_PARAMS_DEF
       MATLAB_SCRIPT_PARAMS=$MATLAB_SCRIPT_PARAMS'input_rawname_type = ["resample", "notch", "highpass"];'
       MATLAB_SCRIPT_PARAMS=$MATLAB_SCRIPT_PARAMS"use_data_afterICA=0;"
-      vardefstr=""
-      #vardefstr='rawnames=["'$raw'"]; '"use_data_afterICA=0;"  
-      #matlab -nodisplay -nosplash -r "$vardefstr; MEGsource_reconstruct_multiraw; quit()"
-      . run/srun_Fieldtrip_srcrec.sh $raw
+      if [ -z ${OUTPUT_SUBDIR+x} ]; then
+        echo "undef OUTPUT_SUBDIR"
+      else
+        MATLAB_SCRIPT_PARAMS=$MATLAB_SCRIPT_PARAMS'output_subdir="'$OUTPUT_SUBDIR'";'
+      fi
+      . $RUNDIR/srun_Fieldtrip_srcrec.sh $raw
       if [ $EC -ne 0 ]; then
         echo "Exit code $EC, exiting"
         exit $EC
       fi
     fi
 
-    #python $INTERACTIVE run_process_FTsources.py -r $raw --groupings $GROUPINGS --alg_type $ALG_TYPE
+    python $INTERACTIVE $RUNDIR/run_process_FTsources.py -r $raw --groupings $GROUPINGS --alg_type $ALG_TYPE --sources_type $ROI_TYPES2
   fi
   if [ $SRC_REC_AFTER_tSSS -ne 0 ]; then
     if [ $RUN_MATLAB_JOB -ne 0 ]; then
-      INPUT_SUBDIR=SSS
-      OUTPUT_SUBDIR=SSS
       MATLAB_SCRIPT_PARAMS=$MATLAB_SCRIPT_PARAMS_DEF
+
+      if [ -z ${OUTPUT_SUBDIR+x} ]; then
+        echo "undef OUTPUT_SUBDIR, setting to SSS"
+        OUTPUT_SUBDIR=SSS
+        MATLAB_SCRIPT_PARAMS=$MATLAB_SCRIPT_PARAMS'output_subdir="'$OUTPUT_SUBDIR'";'
+      fi
+
+      if [ -z ${INPUT_SUBDIR+x} ]; then
+        echo "undef INPUT_SUBDIR, setting to SSS"
+        INPUT_SUBDIR=SSS
+        MATLAB_SCRIPT_PARAMS=$MATLAB_SCRIPT_PARAMS'input_subdir="'$INPUT_SUBDIR'";'
+      fi
       MATLAB_SCRIPT_PARAMS=$MATLAB_SCRIPT_PARAMS"use_data_afterICA=0;"
-      MATLAB_SCRIPT_PARAMS=$MATLAB_SCRIPT_PARAMS'input_subdir="'$INPUT_SUBDIR'";'
-      MATLAB_SCRIPT_PARAMS=$MATLAB_SCRIPT_PARAMS'output_subdir="'$OUTPUT_SUBDIR'";'
       MATLAB_SCRIPT_PARAMS=$MATLAB_SCRIPT_PARAMS'input_rawname_type=["SSS",  "notch", "highpass", "resample"];'
-      . run/srun_Fieldtrip_srcrec.sh $raw
+      . $RUNDIR/srun_Fieldtrip_srcrec.sh $raw
       if [ $EC -ne 0 ]; then
         echo "Exit code $EC, exiting"
         exit $EC
       fi
 
       #S='input_rawname_type=["SSS",  "notch", "highpass", "resample"]; input_subdir="SSS"; output_subdir="SSS"; '  
-      #vardefstr='rawnames=["'$raw'"]; '$S"use_data_afterICA=0;"  
-      #echo "vardefstr=$vardefstr"
-      #matlab -nodisplay -nosplash -r "$vardefstr; MEGsource_reconstruct_multiraw; quit()"
     fi
 
-    python $INTERACTIVE run/run_process_FTsources.py -r $raw --groupings $GROUPINGS --alg_type $ALG_TYPE --input_subdir SSS --output_subdir SSS
+    python $INTERACTIVE $RUNDIR/run_process_FTsources.py -r $raw --groupings $GROUPINGS --alg_type $ALG_TYPE --input_subdir SSS --output_subdir SSS
     EC=$?
     if [ $EC -ne 0 ]; then
       echo "Exit code $EC, exiting"
@@ -216,19 +233,17 @@ if [ $RECONSTRUCT_SOURCES -ne 0 ]; then
   fi
   if [ $SRC_REC_AFTER_ICA -ne 0 ]; then
     if [ $RUN_MATLAB_JOB -ne 0 ]; then
-      #vardefstr='rawnames=["'$raw'"]; '"use_data_afterICA=1;"  
-      #matlab -nodisplay -nosplash -r "$vardefstr; MEGsource_reconstruct_multiraw; quit()"
       MATLAB_SCRIPT_PARAMS=$MATLAB_SCRIPT_PARAMS_DEF
       MATLAB_SCRIPT_PARAMS=$MATLAB_SCRIPT_PARAMS"use_data_afterICA=1;"
       MATLAB_SCRIPT_PARAMS=$MATLAB_SCRIPT_PARAMS'input_rawname_type = ["resample", "notch", "highpass"];'
-      . run/srun_Fieldtrip_srcrec.sh $raw
+      . $RUNDIR/srun_Fieldtrip_srcrec.sh $raw
       if [ $EC -ne 0 ]; then
         echo "Exit code $EC, exiting"
         exit $EC
       fi
     fi
 
-    python $INTERACTIVE run/run_process_FTsources.py -r $raw --groupings $GROUPINGS --alg_type $ALG_TYPE --input_subdir afterICA --output_subdir afterICA
+    python $INTERACTIVE $RUNDIR/run_process_FTsources.py -r $raw --groupings $GROUPINGS --alg_type $ALG_TYPE --input_subdir afterICA --output_subdir afterICA
     EC=$?
     if [ $EC -ne 0 ]; then
       echo "Exit code $EC, exiting"

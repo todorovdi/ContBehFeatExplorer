@@ -1170,6 +1170,22 @@ def plot3DValPerParcel(vals_per_source, val_LFP, vis_info, title,
                       cblabel='performance', fit_to_brain = True, fit_supp_to_brain = False,
                        views=['left','right'], clim = None, ww=None, hh=None,
                       use_mod_sourcegrid = True, colorbar = True, cmap='plasma' ):
+    '''
+    vals_per_source -- values per source according to what was in srcgroups
+    (so with potential duplication if for every source within same brain area
+    has same number)
+
+    show_supp -- show supplementary info -- creating
+    additional brain objects (one for each view) with sources drawn
+
+    if val_LFP (float) is not None, it tries to plot BG (so one more brain object to the right)
+
+    title will be the actual title, without any modification
+
+    vi['headsurf_tris']
+    vi['headsurf_verts']
+    vi['headsurfgrid_mod_verts']
+    '''
     import numpy as np
     from visbrain.objects import BrainObj, ColorbarObj, SceneObj, SourceObj, RoiObj
     # Scene creation
@@ -1200,7 +1216,7 @@ def plot3DValPerParcel(vals_per_source, val_LFP, vis_info, title,
 
     sind_str = ''
     vi = vis_info
-    tris = vi['headsurf_tris']
+    tris =   vi['headsurf_tris']
     verts =  vi['headsurf_verts']  #- 1.
     # Translucent inflated BrainObj with both hemispheres displayed
     #tc = True;
@@ -1374,29 +1390,39 @@ def plot3DValPerParcel(vals_per_source, val_LFP, vis_info, title,
 
 def plotBrainPerSubj(sind_strs, vis_info_per_subj, source_coords, subdir, clim,
                     countinfo=None,
-                     fix_vis_info = True,
-    plot_intremed = True,
-    figtitle_inc_durations = False,
-    figtitle_inc_LFP_plus_best = False,
-    use_mod_sourcegrid = 1,
-    show_supp = 0,
-    fit_to_brain_def = 0,
-    use_common_colorbar = 1,
-    colorbar_individ_show = 0,
-    df_per_mode = None,
-    base_key_name = 'base_low',
-    hhdef = 900,
-    wwdef = 300*4 + 200,
-    crop_out_def = (0,230,0,480),  #x,-y_top,-x_right,-y_bottom  # y counted top to bottom
-    radius_project = 1.3,
-    fit_to_brain = 0,
-    plotinfos_pre = None,
-    verbose=0,
-    save = True,
-    crop_out=None,
-    pctize_LFP = False,
-    modes = ['LFPand_only']  ):
+                    fix_vis_info = True,
+                    plot_intremed = True,
+                    figtitle_inc_durations = False,
+                    figtitle_inc_LFP_plus_best = False,
+                    use_mod_sourcegrid = 1,
+                    show_supp = 0,
+                    fit_to_brain_def = 0,
+                    use_common_colorbar = 1,
+                    colorbar_individ_show = 0,
+                    df_per_mode = None,
+                    base_key_name = 'base_low',
+                    hhdef = 900,
+                    wwdef = 300*4 + 200,
+                    crop_out_def = (0,230,0,480),  #x,-y_top,-x_right,-y_bottom  # y counted top to bottom
+                    radius_project = 1.3,
+                    fit_to_brain = 0,
+                    plotinfos_pre = None,
+                    verbose=0,
+                    save = True,
+                    crop_out=None,
+                    pctize_LFP = False,
+                    modes = ['LFPand_only']  ):
+    '''
+    format of plotinfos_pre:
+        plotinfo_cur['info_pgn_rel_LFP']
+        plotinfo_cur['info_pgn_abs']
 
+            format of info_pgn_rel_LFP field
+        info_rel_LFP['brain_area_labels'], info_rel_LFP['intensities']
+        info_rel_LFP['srcgrp_new']
+        info_rel_LFP['coords']
+        info_abs['impr_per_medcond_per_pgn']
+    '''
 
     import globvars as gv
     import utils
@@ -1508,17 +1534,14 @@ def plotBrainPerSubj(sind_strs, vis_info_per_subj, source_coords, subdir, clim,
 
                     title = f'{sind_str}_medcond={medcond.upper()}_mode={mode}_fit{fit_to_brain}'
                     LFP_val = info_rel_LFP.get(base_key_name, None)
-                    CB_vals = d.get("Cerebellum",None)
 
+                    # percent
                     if pctize_LFP:
                         LFP_val = LFP_val * 100
                     plotinfo_cur['LFP_val_mode=only'] = LFP_val
                     if countinfo is not None:
                         plotinfo_cur['countinfo'] = countinfo[f'{sind_str}_{medcond}']
 
-
-                    if CB_vals is None:
-                        CB_vals = d["Cerebellum_L"],d["Cerebellum_R"]
                     #LFP_val = info_rel_LFP['impr_per_medcond_per_pgn'][medcond].get(base_key_name, None)
                     #LFP_val = info_rel_LFP['impr_per_medcond_per_pgn'].get(base_key_name, None)
                     #continue
@@ -1527,6 +1550,10 @@ def plotBrainPerSubj(sind_strs, vis_info_per_subj, source_coords, subdir, clim,
                     #    LFP_val = info_abs['impr_per_medcond_per_pgn'][base_key_name]
 
 
+                    # just to see numbers in text
+                    CB_vals = d.get("Cerebellum",None)
+                    if CB_vals is None:
+                        CB_vals = d["Cerebellum_L"],d["Cerebellum_R"]
                     print(f'title={title}, CB intensity={CB_vals}, LFP={LFP_val}%, clim={clim}' )
 
 
