@@ -517,7 +517,7 @@ def filterFeats(feature_names_all, chnames_LFP, LFP_related_only, parcel_types,
     # both and all_available mean different things but in both cases
     # we don't want to remove anything
     if LFP_side_to_use not in ['all_available', 'both']:
-        assert LFP_side_to_use in [ 'left', 'right' ]
+        assert LFP_side_to_use in [ 'left', 'right' ], LFP_side_to_use
         sidelet = LFP_side_to_use[0].upper()
         opsidelet = utils.getOppositeSideStr(sidelet)
         # this is to prohibit for cross-side side couplings if we computed them
@@ -531,6 +531,8 @@ def filterFeats(feature_names_all, chnames_LFP, LFP_related_only, parcel_types,
             remaining = set( range(len(feature_names_all) ) ) - bad_inds
             print(( f'LFP_side_to_use: after removing {len(inds_bad_)} '
                   f'remain {len(remaining) }') )
+            if len(remaining) == 0:
+                print(f'LFP_side_to_use = {LFP_side_to_use} killed everyone!')
             if verbose>1:
                 print('LFP_side_to_use: removing ',
                     featnames[ list(inds_bad_) ] )

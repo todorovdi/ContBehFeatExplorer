@@ -289,10 +289,11 @@ elif force_consistent_main_sides :
 
 rec_info_pri = []
 for rawname_ in rawnames:
-    src_rec_info_fn_full = utils.genRecInfoFn(rawname_,sources_type,src_file_grouping_ind, input_subdir=input_subdir)
+    src_rec_info_fn_full = utils.genRecInfoFn(rawname_,sources_type,src_file_grouping_ind, input_subdir=input_subdir_srcrec)
     #src_rec_info_fn_full = pjoin(gv.data_dir, input_subdir, src_rec_info_fn)
     rec_info = np.load(src_rec_info_fn_full, allow_pickle=True)
-    rec_info_pri += [rec_info]
+    rec_info = dict(rec_info)
+    rec_info_pri += [ rec_info ]
 
 
 move_sides = []
@@ -363,7 +364,8 @@ if save_dat:
                  subfeature_order_lfp_hires_pri = subfeature_order_lfp_hires_pri[rawi],
                  aux_info = aux_info_perraw[rawn],
                  data_modalities=data_modalities,
-                 sfreq=sfreq, sfreq_hires = sfreq_hires,
+                 sfreq=sfreq, sfreq_hires = sfreq_hires, 
+                 rec_info = rec_info_pri[rawi],
                  cmd=(opts,args), pars=pars)
 
 n_channels_pri = [ datcur.shape[0] for datcur in dat_pri ];

@@ -1,5 +1,4 @@
 #!/bin/bash
-echo Starting `basename "$0"`
 # takes one argument -- rawname
 # has to be ran from  run subdir
 

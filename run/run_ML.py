@@ -9,6 +9,7 @@ import os
 import re
 import sys
 from os.path import join as pjoin
+from pathlib import Path
 
 import globvars as gv
 import matplotlib as mpl
@@ -23,6 +24,7 @@ import utils_tSNE as utsne
 import xgboost as xgb
 from dateutil import parser
 from featlist import collectFeatTypeInfo, filterFeats, getFeatIndsRelToOnlyOneLFPchan
+from utils import formatMultiRawnameStr
 from globvars import gp
 from imblearn.over_sampling import RandomOverSampler
 from sklearn import preprocessing
@@ -83,6 +85,7 @@ data_modalities = [ 'msrc', 'LFP']  # order is important!
 msrc_inds = np.arange(8,dtype=int)  #indices appearing in channel (sources) names, not channnel indices
 use_main_LFP_chan = False
 use_LFP_HFO = 1
+use_matching_folds_main_LFP = 1
 
 fbands_to_use = fband_names_fine_inc_HFO
 bands_type = 'fine'
@@ -159,6 +162,7 @@ best_LFP_featstr = 'onlyH_act'
 bestLFP_disjoint = 'auto'
 best_LFP_exCB = None
 tune_search_best_LFP = True
+tune_search_best_LFP_but = False
 n_jobs_perm_test = None  # None means auto select
 
 save_output = 1
@@ -186,6 +190,7 @@ XGB_tree_method = 'hist'  # or 'exact' or 'gpu_hist'
 XGB_max_depth  = 4 # def = 6
 XGB_min_child_weight = 3  # min num of samples making creating new node
 XGB_tune_param = True
+num_boost_rounds = 100
 load_XGB_params_auto = 1
 XGB_grid_dim = 2
 XGB_params_search_grid = {}
@@ -197,6 +202,7 @@ XGB_grid_test_only = 0
 XGB_balancing = 'oversample'
 # starting which date we consider loading, all older are considered too old
 load_XGB_params_date_thr = parser.parse("22 April 2022 16:00:15")
+load_feats_date_thr      = parser.parse("10.12.2022 16:00:15")
 
 XGB_param_list_search_seq = [ ['max_depth','min_child_weight'],
                         ['subsample', 'eta'] ]
@@ -291,8 +297,10 @@ opts, args = getopt.getopt(effargv,"hr:n:s:w:p:",
          "do_cleanup=", "VIF_thr=", "VIF_search_worst=", "compute_ICA=",
          "use_ICA_for_classif=", "load_XGB_params_auto=", "XGB_grid_dim=",
          "XGB_grid_test_only=", "load_XGB_params_date_thr=",
+         "load_feats_date_thr=",
+         "num_boost_rounds=",
          "XGB_balancing=", "load_EBM_params_auto=", "EBM_CV=",
-         "ann_MEGartif_prefix_to_use="])
+         "ann_MEGartif_prefix_to_use=", "n_jobs_perm_test="])
 print(sys.argv)
 print('Argv str = ',' '.join(sys.argv ) )
 print(opts)
@@ -339,10 +347,14 @@ for opt,arg in pars.items():
             n_jobs_perm_test = None
     elif opt == "scale_feat_combine_type":
         scale_feat_combine_type = arg
+    elif opt == "load_feats_date_thr":
+        load_feats_date_thr = parser.parse(arg)
     elif opt == "allow_CUDA":
         allow_CUDA = int(arg)
     elif opt == "use_matching_folds_main_LFP":
         use_matching_folds_main_LFP = int(arg)
+    elif opt == "num_boost_rounds":
+        num_boost_rounds = int(arg)
     elif opt == "ann_MEGartif_prefix_to_use":
         if ',' in arg:
             ann_MEGartif_prefix_to_use = arg.split(',')
@@ -365,7 +377,7 @@ for opt,arg in pars.items():
     elif opt == "bestLFP_disjoint":
         bestLFP_disjoint = arg # may be string, not always int
     elif opt == "tune_search_best_LFP":
-        tune_search_best_LFP = arg
+        tune_search_best_LFP = int(arg)
     elif opt == "label_groups_to_use":
         label_groups_to_use = arg.split(',')
     elif opt == "skip_XGB":
@@ -766,7 +778,7 @@ for rawn in rawnames:
 
 
         if len(fnfound) != 1:
-            print('For {} found not single fnames {}'.format(rawn,fnfound) )
+            print('For {} found NO matching fnames {} in {}'.format(rawn,fnfound, inp_sub) )
             print(f'regex = {regex}, input_subdir = {input_subdir}')
             raise ValueError('input files problem')
         fname_feat_full = pjoin( inp_sub, fnfound[0] )
@@ -774,10 +786,16 @@ for rawn in rawnames:
     fname_feat_full_pri += [fname_feat_full]
 
     modtime = datetime.datetime.fromtimestamp(os.path.getmtime(fname_feat_full)  )
+    if modtime < load_feats_date_thr:
+        raise ValueError('the newest found feat file is too old')
     print('Loading feats from {}, modtime {}'.format(fname_feat_full, modtime ))
     f = np.load(fname_feat_full, allow_pickle=True)
     feat_file_pri += [f]
 
+    rec_info = f['rec_info'][()]
+    src_rec_info_pri += [rec_info]
+    roi_labels = rec_info['label_groups_dict'][()]
+    srcgrouping_names_sorted = rec_info['srcgroups_key_order'][()]
     ################## extract stuff
 
 
@@ -808,6 +826,8 @@ for rawn in rawnames:
 
     pars_cur_featfile = f['pars'][()]
     feat_pars_pri += [ pars_cur_featfile ]
+    baseline_int_type_cff = pars_cur_featfile['baseline_int_type']
+    assert baseline_int_type_cff == baseline_int_type, (baseline_int_type_cff, baseline_int_type)
 
     # this is what is actually in features already, so it is needed only for
     # annotations. Body side is meant, not brain side
@@ -857,27 +877,12 @@ for rawn in rawnames:
     if use_main_LFP_chan:
         best_LFP_info_fname_full = pjoin(gv.data_dir, best_LFP_info_file)
 
-        from pathlib import Path
-        search_LFP_dir = Path(best_LFP_info_fname_full).parent
-        use_matching_folds_main_LFP = 1
-        if use_matching_folds_main_LFP:
-            # go to corresponding medcond dir, load folds
-            assert len(rawnames) == 2
-            rnstr = ','.join(rawnames)
-            p = pjoin(search_LFP_dir, rnstr)
-            fold_info = np.load('fold_info.npz')
-            folds_train_holdout = fold_info['folds_train_holdout']
-            folds_trainfs_testfs = fold_info['folds_trainfs_testfs']
-            folds_train_holdout_trainfs_testfs = fold_info['folds_train_holdout_trainfs_testfs']
-            # with g
-            foldsg_train_holdout = fold_info['foldsg_train_holdout']
-            foldsg_trainfs_testfs = fold_info['foldsg_trainfs_testfs']
-            foldsg_train_holdout_trainfs_testfs = fold_info['foldsg_train_holdout_trainfs_testfs']
 
 
         print(f'Best LFP fname = {best_LFP_info_fname_full}')
         with open(best_LFP_info_fname_full, 'r') as f:
             best_LFP_info = json.load(f)
+            assert len(best_LFP_info), 'best LFP file is emtpy'
 
         #def getBestLFP_clToMove(best_LFP_dict,subj,metric='balanced_accuracy',
         #                grp = 'merge_nothing', it = 'basic', prefix_type='modLFP_onlyH_act',
@@ -911,14 +916,42 @@ for rawn in rawnames:
         else:
             exCB = best_LFP_exCB
 
-        # TODO: return here filename as well
+        rncombinstr = formatMultiRawnameStr(rawnames, savefile_rawname_format,
+                custom_rawname_str = custom_rawname_str)
         # TODO: load this file and check that labels are the same
-        mainLFPchan = getBestLFPfromDict(best_LFP_info,subj,
+        mainLFPchan, fnf_searchLFPres =\
+                getBestLFPfromDict(best_LFP_info,subj,rncombinstr,
                 disjoint=disjoint,
                 brain_side = brain_side_to_use,
                 exCB = exCB,
                 grp=groupings_to_use[0],
                 it=int_types_to_use[0])
+
+        search_LFP_dir = Path(best_LFP_info_fname_full).parent
+        if use_matching_folds_main_LFP:
+            # go to corresponding medcond dir, load folds
+            #assert len(rawnames) == 2
+            #rnstr = ','.join(rawnames)
+            #p = pjoin(search_LFP_dir, rnstr)
+            #fold_info = np.load('fold_info.npz')
+
+            f_searchLFPres = np.load(fnf_searchLFPres)
+            # compare strings here
+            assert f_searchLFPres['pars']['rawnames'] == pars['rawnames']
+            # results_cur
+            fold_info = f_searchLFPres['fold_info'][()]
+
+            folds_train_holdout = fold_info['folds_train_holdout']
+            folds_trainfs_testfs = fold_info['folds_trainfs_testfs']
+            folds_train_holdout_trainfs_testfs = fold_info['folds_train_holdout_trainfs_testfs']
+            # with g
+            foldsg_train_holdout = fold_info['foldsg_train_holdout']
+            foldsg_trainfs_testfs = fold_info['foldsg_trainfs_testfs']
+            foldsg_train_holdout_trainfs_testfs = fold_info['foldsg_train_holdout_trainfs_testfs']
+            if not gv.DEBUG_MODE:
+                del f_searchLFPres
+
+
 
         # OLD
         ##onlyH modLFP LFPrel_noself_onlyCon LFPrel_noself_onlyRbcorr LFPrel_noself_onlyBpcorr
@@ -952,69 +985,97 @@ for rawn in rawnames:
     #    format(rawn,sources_type, src_file_grouping_ind)
     #src_rec_info_fn_full = pjoin(gv.data_dir, input_subdir, src_rec_info_fn + '.npz')
 
-    src_rec_info_fn_full = utils.genRecInfoFn(rawn,sources_type,
-                                         src_file_grouping_ind,
-                                         input_subdir)
+    #src_rec_info_fn_full = utils.genRecInfoFn(rawn,sources_type,
+    #                                     src_file_grouping_ind,
+    #                                     input_subdir)
 
-    rec_info = np.load(src_rec_info_fn_full, allow_pickle=True)
-    src_rec_info_pri += [rec_info]
-    roi_labels = rec_info['label_groups_dict'][()]
-    srcgrouping_names_sorted = rec_info['srcgroups_key_order'][()]
+    #rec_info = np.load(src_rec_info_fn_full, allow_pickle=True)
 
     ###########
 
     # TODO: I can just replace
     # brain_sie_to_use_cur = brain_side_to_use.replace('contralat_to_move',utils.getOppositeSideStr(mainmoveside_cur) )
-    if brain_side_to_use == 'contralat_to_move':
-        assert mainmoveside_cur is not None
-        brain_side_to_use_cur = utils.getOppositeSideStr(mainmoveside_cur)
-    elif brain_side_to_use == 'contralat_to_move_exCB':
-        assert mainmoveside_cur is not None
-        brain_side_to_use_cur = utils.getOppositeSideStr(mainmoveside_cur)
-        brain_side_to_use_cur += '_exCB'
-    elif brain_side_to_use == 'ipsilat_to_move':
-        assert mainmoveside_cur is not None
-        brain_side_to_use_cur = mainmoveside_cur
-    elif brain_side_to_use == 'ipsilat_to_move_exCB':
-        assert mainmoveside_cur is not None
-        brain_side_to_use_cur = mainmoveside_cur
-        brain_side_to_use_cur += '_exCB'
-    else:
-        brain_side_to_use_cur = brain_side_to_use
+    #if brain_side_to_use == 'contralat_to_move':
+    #    assert mainmoveside_cur is not None
+    #    brain_side_to_use_cur = utils.getOppositeSideStr(mainmoveside_cur)
+    #elif brain_side_to_use == 'contralat_to_move_exCB':
+    #    assert mainmoveside_cur is not None
+    #    brain_side_to_use_cur = utils.getOppositeSideStr(mainmoveside_cur)
+    #    brain_side_to_use_cur += '_exCB'
+    #elif brain_side_to_use == 'ipsilat_to_move':
+    #    assert mainmoveside_cur is not None
+    #    brain_side_to_use_cur = mainmoveside_cur
+    #elif brain_side_to_use == 'ipsilat_to_move_exCB':
+    #    assert mainmoveside_cur is not None
+    #    brain_side_to_use_cur = mainmoveside_cur
+    #    brain_side_to_use_cur += '_exCB'
+    #else:
+    #    brain_side_to_use_cur = brain_side_to_use
+
+    from utils import getOppositeSideStr
+
+    def parseSide(side, bint_side):
+        if side in ['contralat_to_move', 'body_move_side']:
+            assert mainmoveside_cur is not None
+            side_cur = getOppositeSideStr(mainmoveside_cur)
+        elif side == 'contralat_to_move_exCB':
+            assert mainmoveside_cur is not None
+            side_cur = getOppositeSideStr(mainmoveside_cur)
+            side_cur += '_exCB'
+        elif side == 'ipsilat_to_move':
+            assert mainmoveside_cur is not None
+            side_cur = mainmoveside_cur
+        elif side == 'ipsilat_to_move_exCB':
+            assert mainmoveside_cur is not None
+            side_cur = mainmoveside_cur
+            side_cur += '_exCB'
+        elif side == "baseline_int_side":
+            #baseline_int = upre.getBaselineInt(rawnames[0],
+            #    bint_side_pri[0], baseline_int_type)
+            side_cur = parseSide(bint_side, None) # it is already contralat
+        else:
+            side_cur = side
+        return side_cur
 
     ##############
 
-    if LFP_side_to_use == 'contralat_to_move':
-        assert mainmoveside_cur is not None
-        LFP_side_to_use_cur = utils.getOppositeSideStr(mainmoveside_cur)
-    elif LFP_side_to_use == 'contralat_to_move_exCB':
-        assert mainmoveside_cur is not None
-        LFP_side_to_use_cur = utils.getOppositeSideStr(mainmoveside_cur)
-        LFP_side_to_use_cur += '_exCB'
-    elif LFP_side_to_use == 'ipsilat_to_move':
-        assert mainmoveside_cur is not None
-        LFP_side_to_use_cur = mainmoveside_cur
-    elif LFP_side_to_use == 'ipsilat_to_move_exCB':
-        assert mainmoveside_cur is not None
-        LFP_side_to_use_cur = mainmoveside_cur
-        LFP_side_to_use_cur += '_exCB'
-    else:
-        LFP_side_to_use_cur = LFP_side_to_use
+    brain_side_to_use_cur = parseSide(brain_side_to_use, bint_side)
+    LFP_side_to_use_cur   = parseSide(LFP_side_to_use,   bint_side)
+    #if LFP_side_to_use == 'contralat_to_move':
+    #    assert mainmoveside_cur is not None
+    #    LFP_side_to_use_cur = utils.getOppositeSideStr(mainmoveside_cur)
+    #elif LFP_side_to_use == 'contralat_to_move_exCB':
+    #    assert mainmoveside_cur is not None
+    #    LFP_side_to_use_cur = utils.getOppositeSideStr(mainmoveside_cur)
+    #    LFP_side_to_use_cur += '_exCB'
+    #elif LFP_side_to_use == 'ipsilat_to_move':
+    #    assert mainmoveside_cur is not None
+    #    LFP_side_to_use_cur = mainmoveside_cur
+    #elif LFP_side_to_use == 'ipsilat_to_move_exCB':
+    #    assert mainmoveside_cur is not None
+    #    LFP_side_to_use_cur = mainmoveside_cur
+    #    LFP_side_to_use_cur += '_exCB'
+    #elif LFP_side_to_use == "baseline_int_side":
+    #    #baseline_int = upre.getBaselineInt(rawnames[0],
+    #    #    bint_side_pri[0], baseline_int_type)
+    #    LFP_side_to_use_cur = utils.getOppositeSideStr(bint_side) # ipsilater is wrong for LFP
+    #else:
+    #    LFP_side_to_use_cur = LFP_side_to_use
 
-    selected_feat_inds =  filterFeats(feature_names_all, chnames_LFP,
-                                      LFP_related_only, parcel_types,
-                                      remove_crossLFP, cross_couplings_only,
-                                      self_couplings_only, fbands_to_use,
-                                      features_to_use, fbands_per_mod, feat_types_all,
-                                      data_modalities, data_modalities_all,
-                                      msrc_inds, parcel_group_names,
-                                      roi_labels,srcgrouping_names_sorted,
-                                      src_file_grouping_ind, fbands_def,
-                                      fband_names_fine_inc_HFO, use_LFP_HFO,
-                                      use_main_LFP_chan, mainLFPchan,
-                                      mainLFPchan_new_name_templ,
-                                      brain_side_to_use_cur, LFP_side_to_use_cur,
-                                      verbose=1)
+    selected_feat_inds = filterFeats(feature_names_all, chnames_LFP,
+          LFP_related_only, parcel_types,
+          remove_crossLFP, cross_couplings_only,
+          self_couplings_only, fbands_to_use,
+          features_to_use, fbands_per_mod, feat_types_all,
+          data_modalities, data_modalities_all,
+          msrc_inds, parcel_group_names,
+          roi_labels,srcgrouping_names_sorted,
+          src_file_grouping_ind, fbands_def,
+          fband_names_fine_inc_HFO, use_LFP_HFO,
+          use_main_LFP_chan, mainLFPchan,
+          mainLFPchan_new_name_templ,
+          brain_side_to_use_cur, LFP_side_to_use_cur,
+          verbose=1)
 
     good_feats = feature_names_all[ selected_feat_inds]
 
@@ -1056,7 +1117,14 @@ for rawn in rawnames:
         chnames_LFP = [ mainLFPchan_new_name_templ.format(mainLFPchan_sidelet)  ]
         chnames_LFP_pri[-1] = chnames_LFP
 
-hand_sidelet_for_classif_labels = baseline_int_pri[0][-1].upper()
+############### enf of feature loading
+
+baseline_int_type_pri = [pcff['baseline_int_type']  for pcff in feat_pars_pri]
+
+
+#hand_sidelet_for_classif_labels = baseline_int_pri[0][-1].upper()
+hand_side_for_classif_labels = parseSide(bint_side_pri[0], None)
+hand_sidelet_for_classif_labels = getOppositeSideStr(hand_side_for_classif_labels)[0].upper()
 
 for chnames_LFP in chnames_LFP_pri:
     assert set(chnames_LFP) == set(chnames_LFP_pri[0]), chnames_LFP_pri
@@ -1128,7 +1196,6 @@ if rescale_feats:
     # pcff['body_side_for_baseline_int']
     bint_side_pri
     scale_data_combine_type_pri = [pcff['scale_data_combine_type'] for pcff in feat_pars_pri]
-    baseline_int_type_pri = [pcff['baseline_int_type']  for pcff in feat_pars_pri]
 
 
     if len(set(baseline_int_pri)) > 1:
@@ -1155,8 +1222,10 @@ if rescale_feats:
     #feat_body_side_let = feat_body_side[0].upper()
     #baseline_int_type = 'notrem_{}'.format(feat_body_side[0].upper() )
 
-    baseline_int = upre.getBaselineInt(rawnames[0],
+    baseline_int00 = upre.getBaselineInt(rawnames[0],
         bint_side_pri[0], baseline_int_type)
+    baseline_int = baseline_int_pri[0]
+    assert baseline_int00 == baseline_int
     main_side_let = baseline_int[-1]
 
     if show_plots and 'feat_stats' in plot_types:
@@ -1721,20 +1790,25 @@ if do_Classif:
                 mult_clf_results_pit[int_types_key] = None
                 continue
 
-            subjdir = ''
-            if custom_rawname_str is None:
-                subjs = list(set(subjs_pri))
-                if len(subjs) == 1:
-                    subjdir = subjs[0]
-                else:
-                    subjdir = ','.join(rawnames)
-            else:
-                subjdir = custom_rawname_str
+            #rncombinstr = ''
+            #if custom_rawname_str is None:
+            #    subjs = list(set(subjs_pri))
+            #    if len(subjs) == 1:
+            #        rncombinstr = subjs[0]
+            #    else:
+            #        rncombinstr = ','.join(rawnames)
+            #else:
+            #    rncombinstr = custom_rawname_str
+        
+
+            #formatMultiRawnameStr(rawnames, fn, rawname_format, regex_mode,
+            rncombinstr = formatMultiRawnameStr(rawnames, savefile_rawname_format,
+                    custom_rawname_str = custom_rawname_str)
 
             def saveResToFolder(resobj, key, subsubdir = '', fname=None):
                 #from pathlib import Path
                 pl = [ gv.data_dir, output_subdir,
-                    subjdir, prefix, int_types_key, grouping_key]
+                    rncombinstr, prefix, int_types_key, grouping_key]
                 if len(subsubdir):
                     pl += [subsubdir]
                 if fname is not None:
@@ -1854,6 +1928,9 @@ if do_Classif:
             results_cur['SLURM_job_id'] =  SLURM_job_id
             results_cur['feat_pars_pri'] = feat_pars_pri
 
+            results_cur['pars'] = savedict['pars']
+            saveResToFolder(results_cur, 'pars' )
+
             try:
                 # we really want this and not Xconcat good cur here
                 C = np.corrcoef(Xsubset_to_fit,rowvar=False)
@@ -1928,6 +2005,8 @@ if do_Classif:
             results_cur['revdict_lenc'] = revdict_lenc
             results_cur['revdict_nm'] = revdict_nm
             results_cur['revdict'] = revdict
+
+            saveResToFolder(results_cur, 'class_labels_good_for_classif' )
 
             if XGB_balancing != 'weighting':
                 class_weights = None
@@ -2332,7 +2411,7 @@ if do_Classif:
                             utsne.gridSearchSeq(X_orig,y_orig, add_clf_creopts_CV,
                                 XGB_params_search_grid,
                                 XGB_param_list_search_seq,
-                                num_boost_round=100,
+                                num_boost_round=num_boost_rounds,
                                 early_stopping_rounds=15,
                                 nfold=n_splits, seed=0,
                                 sel_num_boost_round=1,
@@ -2540,10 +2619,14 @@ if do_Classif:
                     sys.exit(0)
 
 
+                if len(chnames_LFP) == 1:
+                    print('Only one LFP channel, skipping search LFP')
                 if 'XGB' in search_best_LFP and (not use_main_LFP_chan) \
                         and ('LFP' in data_modalities) and len(chnames_LFP) > 1:
 
                     # TODO: set folds here
+
+                    print('------- starting search LFP for XGB ')
 
                     # we will do two types of best LFP selection -- per body
                     # side and in total over all channels (across sides)
@@ -2586,13 +2669,13 @@ if do_Classif:
                                     utsne.gridSearchSeq(X_orig,y_orig, add_clf_creopts_CV,
                                                     XGB_params_search_grid,
                                                     XGB_param_list_search_seq,
-                                                    num_boost_round=100,
+                                                    num_boost_round=num_boost_rounds,
                                         early_stopping_rounds=10, nfold=n_splits, seed=0,
                                         main_metric=tune_metric, savedir=tune_savedir)
-
-                                clf_XGB_ = XGBClassifier(**add_clf_creopts_cur_side)
                             else:
-                                clf_XGB_ = XGBClassifier(**add_clf_creopts_CV)
+                                add_clf_creopts_cur_side = add_clf_creopts_CV
+                            
+                            clf_XGB_ = XGBClassifier(**add_clf_creopts_cur_side)
 
                             if XGB_balancing == 'oversample':
                                 clf_XGB_.fit(X_cur_oversampled, y_cur_oversampled, **add_fitopts)
@@ -2641,14 +2724,14 @@ if do_Classif:
                         XGB_version_name = 'all_present_features_but_{}'.format(chn_LFP)
                         print(f'Starting XGB {XGB_version_name} on X.shape = {X_cur.shape}')
 
-                        if tune_search_best_LFP:
+                        if tune_search_best_LFP_but:
                             tune_savedir = pjoin(output_subdir_full,f'{XGB_version_name}/XGB_tune/')
                             add_clf_creopts_minus_curLFP, best_params_list, \
                                 cv_resutls_best_list, num_boost_round_best =\
                                 utsne.gridSearchSeq(X_orig,y_orig,  add_clf_creopts_CV,
                                                 XGB_params_search_grid,
                                                 XGB_param_list_search_seq,
-                                                num_boost_round=100,
+                                                num_boost_round=num_boost_rounds,
                                     early_stopping_rounds=10, nfold=n_splits, seed=0,
                                                     main_metric=tune_metric,
                                                     savedir = tune_savedir)
@@ -2658,9 +2741,10 @@ if do_Classif:
                             #if num_boost_round_best is not None:
                             #    add_fitopts_cur['n_estimators'] = num_boost_round_best
 
-                            clf_XGB_ = XGBClassifier(**add_clf_creopts_minus_curLFP)
                         else:
-                            clf_XGB_ = XGBClassifier(**add_clf_creopts_CV)
+                            add_clf_creopts_minus_curLFP = add_clf_creopts_CV
+                        
+                        clf_XGB_ = XGBClassifier(**add_clf_creopts_minus_curLFP)
 
                         if XGB_balancing == 'oversample':
                             clf_XGB_.fit(X_cur_oversampled, y_cur_oversampled, **add_fitopts)
@@ -2705,7 +2789,7 @@ if do_Classif:
                                 utsne.gridSearchSeq(X_orig,y_orig, add_clf_creopts_CV,
                                                 XGB_params_search_grid,
                                                 XGB_param_list_search_seq,
-                                                num_boost_round=100,
+                                                num_boost_round=num_boost_rounds,
                                     early_stopping_rounds=10, nfold=n_splits, seed=0,
                                                     main_metric=tune_metric,
                                                     savedir = tune_savedir)
@@ -2713,10 +2797,10 @@ if do_Classif:
                             #add_fitopts_cur = dict(add_fitopts.items())
                             #if num_boost_round_best is not None:
                             #    add_fitopts_cur['n_estimators'] = num_boost_round_best
-
-                            clf_XGB_ = XGBClassifier(**add_clf_creopts_curLFP)
                         else:
-                            clf_XGB_ = XGBClassifier(**add_clf_creopts_CV)
+                            add_clf_creopts_curLFP = add_clf_creopts_CV
+
+                        clf_XGB_ = XGBClassifier(**add_clf_creopts_curLFP)
 
                         if XGB_balancing == 'oversample':
                             clf_XGB_.fit(X_cur_oversampled, y_cur_oversampled, **add_fitopts)
@@ -3541,7 +3625,6 @@ if do_Classif:
                 print('Saving ext intermediate result to {}'.format(fname_ML_full_intermed) )
                 # updated results
                 results_cur['class_labels_good'] = class_labels_good
-                results_cur['pars'] = savedict['pars']
                 savedict['results_cur'] =results_cur
 
                 np.savez(fname_ML_full_intermed, **savedict )

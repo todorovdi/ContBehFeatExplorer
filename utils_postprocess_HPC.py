@@ -263,6 +263,7 @@ def collectPerformanceInfo3(rawnames, prefixes, interval_groupings= None, interv
                 res_cur['_fname_full'] = fname_full
                 res_cur['filename_full'] = fname_full
                 res_cur['mod_time'] = mod_time
+                res_cur['mod_time_datetime'] = datetime.fromtimestamp( mod_time ) 
                 res_cur['loaded'] = False
 
 
@@ -406,6 +407,30 @@ def checkTupleListTableCompleteness(arg, grouping_to_check=None, it_to_check=Non
         print(s)
 
     return complen == ll, prefixes_missing
+
+def listComputedData(subdir,prefixes,start_time, end_time,
+                                      use_main_LFP_chan=1,
+                light_only=1 ):
+
+    sources_type ='parcel_aal'
+    ndaysBefore = None
+    r = collectPerformanceInfo3(None,prefixes, nraws_used='[0-9]+',
+            sources_type = sources_type,
+            printFilenames=0,
+            ndays_before=ndaysBefore,
+            use_main_LFP_chan=use_main_LFP_chan,
+            subdir=subdir, remove_large_items = 1,
+            list_only=0, allow_multi_fn_same_prefix=0,
+            use_light_files = light_only, rawname_regex_full=0,
+            start_time=start_time, end_time=end_time,
+            load=False, verbose=0)
+    if r is None:
+        return None
+    output_per_raw_notload = r[0]
+
+    rawnames_found, groupings_found, its_found, prefixes_found =\
+        getOutputSetInfo( output_per_raw_notload )
+    return rawnames_found, groupings_found, its_found, prefixes_found
 
 
 def getOutputSetInfo( output_per_raw ):
@@ -762,8 +787,8 @@ def checkPrefixCollectionConsistencty(subdir,prefixes,start_time, end_time,
     #      'modSrc_self',
     #      'onlyH']
 
-    prefixes_a  = np.array( tpll_notload_reshaped[1] )
     rns_a       = np.array( tpll_notload_reshaped[0] )
+    prefixes_a  = np.array( tpll_notload_reshaped[1] )
     groupings_a = np.array( tpll_notload_reshaped[2] )
     its_a       = np.array( tpll_notload_reshaped[3] )
     prefixes_missing = {}
@@ -796,7 +821,6 @@ def loadCalcOutput(subdir, output_per_raw=None, save_collected=True, ignore_miss
     import json
     import matplotlib.pyplot as plt
     import numpy as np
-    import h5py
     import multiprocessing as mpr
     import matplotlib as mpl
     import time
@@ -1833,7 +1857,7 @@ def listRecent(days = 5, hours = None, lookup_dir = None,
     lf = os.listdir(lookup_dir)
     final_list = []
     if verbose:
-        print('INFO listRecent: Found {len(final_list)} in {lookup_dir}')
+        print(f'INFO listRecent: Found {len(final_list)} in {lookup_dir}')
     for f in lf:
         date_ok = True
         modified = os.stat( pjoin(lookup_dir,f) ).st_mtime
@@ -6074,7 +6098,8 @@ def getMocFromRow(row : dict, output_per_raw: dict) -> dict:
     grp,it = row['grouping'],row['interval_set']
     try:
         moc = output_per_raw[row['rawname']][row['prefix']][grp][it]
-    except KeyError:
+    except KeyError as e:
+        print(e)
         moc = None
     return moc
 
@@ -7581,5 +7606,516 @@ def recurseMultiLevelDict(d, prefix=None, sep='/'):
         else:
             yield sep.join(prefix + [key, value])
 
+def collectBestLFP(subdir = 'searchLFP_both_sides_oversample2_LFP256_allaritf' , 
+        start_time_str = "22 April 2022 17:11:15",
+        save_result = 1,  q_perm = 0.9, 
+        savefile_rawname_format ='subj',
+        output_per_raw = None):
+    import globvars as gv
+    import utils
+    import utils_tSNE as utsne
+    import utils_preproc as upre
 
-#print(list(recurse(dirDict)))
+    import os
+    import sys
+    import mne
+    import json
+    import matplotlib.pyplot as plt
+    import numpy as np
+    import multiprocessing as mpr
+    import matplotlib as mpl
+    import time
+    import gc;
+    import scipy.signal as sig
+    import pandas as pd 
+
+    import numpy as np
+    import utils_postprocess_HPC as postp
+    import pymatreader
+
+    data_dir = gv.data_dir
+    from os.path import join as pjoin
+
+    light_only = True
+
+    from dateutil import parser
+    #start_time = parser.parse("19 Aug 2021 03:05:15")
+    #start_time = parser.parse("14 April 2022 10:05:15")
+    #start_time = parser.parse("20 April 2022 10:05:15")
+    
+    start_time = parser.parse(start_time_str)  #2022, 4, 22, 17, 12, 27, 37491)
+    end_time = parser.parse("19 Aug 2041 21:21:45")
+    #end_time = parser.parse("19 Aug 2021 03:41:45") # this one is just to make things faster
+    ndaysBefore = None
+    #subdir = 'nointerp'
+    #subdir = 'nofeatsel'
+    #subdir = 'searchLFP'
+    #subdir = 'searchLFP_both_sides'
+    #subdir = 'searchLFP_both_sides_oversample2'
+    
+    lookup_dir = pjoin(gv.data_dir,subdir)
+    recent = postp.listRecent(days=ndaysBefore, lookup_dir= lookup_dir,
+                              start_time=start_time, end_time=end_time)
+    rncombinstrs = []
+    print(f'Found {len(recent)} recent files')
+    for lf in recent:
+        st = 0
+        if light_only:
+            if not lf.startswith('_!'):
+                continue
+            st = 2
+        if savefile_rawname_format == 'subj':
+            rncombinstrs += [lf[st+1:st+4]]
+        elif savefile_rawname_format in ['subj,medcond', 
+                'subj,medcond_glob']:
+            #print(lf[st+1:], lf[st+1:].split('_')[:2])
+            rncombinstrs += [ '_'.join(  lf[st+1:].split('_')[:2] ) ]
+        else:
+            raise ValueError('not implemented')
+    rncombinstrs = list(sorted(set(rncombinstrs)))
+    print('recent subjects infolved = ',rncombinstrs)
+
+    import utils_postprocess_HPC as postp
+    #Earliest file 19 Aug 2021 03:05:15, latest file 19 Aug 2021 21:21:45
+    prefixes = postp.listRecentPrefixes(days = ndaysBefore, light_only=light_only, 
+                                        lookup_dir= lookup_dir,
+                                       start_time=start_time, end_time=end_time)
+    print('recent prefixes = ',prefixes)
+
+
+
+    from utils_postprocess_HPC import listComputedData
+    r = listComputedData(subdir,prefixes,start_time, end_time, use_main_LFP_chan=0)
+    if r is None:
+        print("found nothing")
+        return None
+    print('listComputedData = ',r)
+
+    # here load data in memory
+    prefixes_to_load = prefixes
+    sources_type = 'parcel_aal'  # or ''
+    if output_per_raw is None: 
+        r = postp.collectPerformanceInfo3(rncombinstrs,prefixes_to_load, nraws_used='[0-9]+',   
+            start_time=start_time, end_time=end_time, use_main_LFP_chan=0,
+            ndays_before=None, sources_type = sources_type, printFilenames=1,
+            subdir=subdir, remove_large_items = 1,
+            list_only=0, allow_multi_fn_same_prefix=0,
+            use_light_files = light_only, rawname_regex_full=0)
+        #output_per_raw,Ximp_per_raw,gis_per_raw = r
+        output_per_raw,_,_ = r
+    print('len(output_per_raw) =', len(output_per_raw))
+    assert len(output_per_raw) > 0, "nothing got collected"
+    import gc; gc.collect()
+
+    # save
+
+    import utils_postprocess as pp
+    import json
+    outputs_grouped_tpll = pp.multiLevelDict2TupleList(output_per_raw,4,3)
+
+    cpd = 'sens,spec,F1'
+    metrics = ['balanced_accuracy', cpd, 'sens', 'spec']
+    from utils_tSNE import selBestLFP
+
+    def extractPerf(p,metric_cur):
+        if isinstance(p, float):
+            if np.isnan(p):
+                return p
+        if metric_cur == cpd:
+            v = np.array( [ p['sens'],p['spec'] ] )
+        else:
+            v = np.array( p[metric_cur] )
+        return (v*100).tolist()
+
+    best_LFP_dict = {}
+
+    row = []
+    rows_only = []
+    rows_but = []
+    for tpl in outputs_grouped_tpll:
+        rncombinstr, prefix, grp, int_type, mult_clf_output = tpl
+        blfp = mult_clf_output['best_LFP']
+        assert 'XGB' in blfp, 'There was a problem during collection: "best_LFP" does not contain XGB'
+        pd0 = blfp['XGB']['perf_drop']['only']
+        chnames_LFP = list( pd0.keys() )
+        if not chnames_LFP[0].startswith('LFP'):
+            pd0 = list(pd0.values())[0].keys()
+            chnames_LFP = list( pd0.keys() )
+
+        cdk = ','.join([prefix,grp,int_type])
+        if rncombinstr not in best_LFP_dict:
+            best_LFP_dict[rncombinstr]= {}
+        best_LFP_dict[rncombinstr][cdk] = {}
+
+        subj = rncombinstr.split('_')[0]
+        mainmoveside_cur = gv.gen_subj_info[ subj].get('move_side',None)
+        movesidelet = mainmoveside_cur[0].upper()
+
+        contralat_to_move_sidelet = utils.getOppositeSideStr( movesidelet )
+        _,chnames_LFP_contralat_to_move = utsne.selFeatsRegex(None,chnames_LFP,[f'LFP{contralat_to_move_sidelet}'])
+
+        d = {}
+        d['filename_full' ]  = mult_clf_output['filename_full' ]
+        for metric in metrics:
+            print(f'   metric = {metric}')
+            d[metric] ={}
+            d[metric + '_shuffled'] = {}
+
+            #if isinstance(rncombinstr,tuple):
+            #    rncombinstr = rncombinstr[0]
+            #kk, mult_clf_output = tpl
+            #print(kk)
+            #(prefix,grp,int_type) = kk
+            #for clf_type in ['LDA','XGB']:
+            #chnames_LFP_controlat_to_move
+            pdrop_cl,winning_chan_cl = selBestLFP(mult_clf_output, 'XGB', chnames_LFP=chnames_LFP_contralat_to_move,
+                                                  metric=metric, verbose=0)
+            d[metric]['best_LFP_contralat_to_move']      = winning_chan_cl
+
+            pdrop,winning_chan = selBestLFP(mult_clf_output, 'XGB', chnames_LFP=chnames_LFP, metric=metric, verbose=1)
+            best_LFP = winning_chan
+            #pdrop_ = dict( [(chn, (100*a).tolist()) for chn,a in list( pdrop.items() )] )
+            d[metric]['best_LFP']      = best_LFP
+            d[metric]['perf_drop_pct'] = pdrop
+
+            # save actual values as well
+            kn = f'all_present_features'
+            pd = mult_clf_output['XGB_analysis_versions'][kn]['perf_dict']
+            perf_aver = pd['perf_aver']
+            d[metric][kn] = extractPerf(perf_aver,metric)
+            perf_all_feats = d[metric][kn]
+
+            perf_shuffled = pd['fold_type_shuffled'][-1]
+            d[metric + '_shuffled'][kn ] = extractPerf(perf_shuffled,metric)
+
+            if metric == 'balanced_accuracy':
+                d[metric + '_perm_test_info'] = {}
+                d[metric + '_perm_test_info'][kn] = list( pd['perm_test_info'] )
+
+                d[metric + f'_perm_{q_perm:.1f}'] = {}
+                perf_perm = np.quantile( pd['perm_test_info']['perm_scores'] , q_perm )
+                d[metric + f'_perm_{q_perm:.1f}'][kn ] = perf_perm
+
+
+            for chn in chnames_LFP:
+                kn = f'all_present_features_only_{chn}'
+                pd = mult_clf_output['XGB_analysis_versions'][kn]['perf_dict']
+                perf_aver = pd['perf_aver']
+                d[metric][kn] = extractPerf(perf_aver,metric)
+
+                perf_shuffled = pd['fold_type_shuffled'][-1]
+                d[metric + '_shuffled'][kn ] = extractPerf(perf_shuffled,metric)
+
+                if metric == 'balanced_accuracy' and 'perm_test_info' in pd:
+                    d[metric + '_perm_test_info'][kn] = list( pd['perm_test_info'])
+
+                    perf_perm = np.quantile( pd['perm_test_info']['perm_scores'] , q_perm )
+                    d[metric + f'_perm_{q_perm:.1f}'][kn ] = perf_perm
+
+            for chn in chnames_LFP:
+                kn = f'all_present_features_but_{chn}'
+                pd = mult_clf_output['XGB_analysis_versions'][kn]['perf_dict']
+                perf_aver = pd['perf_aver']
+                d[metric][kn] = extractPerf(perf_aver,metric)
+
+                perf_shuffled = pd['fold_type_shuffled'][-1]
+                d[metric + '_shuffled'][kn ] = extractPerf(perf_shuffled,metric)
+
+                if metric == 'balanced_accuracy' and 'perm_test_info' in pd:
+                    d[metric + '_perm_test_info'][kn] = list( pd['perm_test_info'] )
+                    perf_perm = np.quantile( pd['perm_test_info']['perm_scores'] , q_perm )
+                    d[metric + f'_perm_{q_perm:.1f}'][kn ] = perf_perm
+
+                dif = np.max( np.abs( np.array(perf_all_feats) - np.array(d[metric][kn] ) ) )
+                if dif > 5:
+                    print(tpl[:-1],metric,'but',chn,dif)
+
+            d['total_num_feats'] = len( mult_clf_output['featnames_for_fit'] )
+            d['total_num_datapoints'] = len( mult_clf_output['class_labels_good_for_classif'] )
+            d['runCID'] = mult_clf_output['runCID']
+            mtime = mult_clf_output.get('mod_time',None)
+            mtime= datetime.fromtimestamp( mtime )
+            d['fname_mod_time'] = mtime.strftime("%d %b %Y %H:%M")
+
+            best_LFP_dict[rncombinstr][cdk] = d
+            #if rncombinstr in best_LFP_dict:
+            #
+            #else:
+            #    best_LFP_dict[rncombinstr] = d
+
+            print(rncombinstr,prefix,f'true best={best_LFP}, best_cl={winning_chan_cl}, in paper={gv.gen_subj_info[subj]["lfpchan_used_in_paper"] }')
+
+    fname_full = pjoin(gv.data_dir, subdir, f'best_LFP_info_both_sides_ext.json')
+    if save_result:
+        #fname = pjoin(gv.data_dir, subdir, f'best_LFP_info_both_sides.json')
+        with open(fname_full, 'w') as f:
+            json.dump(best_LFP_dict, f)
+        import subprocess as sp
+        r = sp.getoutput(f'python -m json.tool {fname_full}') 
+        with open(fname_full,'w') as f:
+            f.write(r)
+        print('Saved to ' ,fname_full)
+        #print(r)
+
+
+
+
+    assert len(best_LFP_dict), 'best_LFP_dict is empty'
+    return best_LFP_dict, output_per_raw
+    #json.dumps(best_LFP_dict)
+    #gv.code_dir
+
+
+
+
+    #print(list(recurse(dirDict)))
+
+def collectCalcResults(subdir, start_time, end_time = None):
+    import os, sys, mne, json, pymatreader, re, time, gc;
+    import globvars as gv
+    import utils
+    import utils_tSNE as utsne
+    import utils_preproc as upre
+    import matplotlib.pyplot as plt
+    import numpy as np
+    import multiprocessing as mpr
+    import matplotlib as mpl
+    import scipy.signal as sig
+    import pandas as pd 
+    import utils_postprocess_HPC as postp
+
+    data_dir = gv.data_dir
+    from os.path import join as pjoin
+
+    light_only = 1
+    #light_only = 0
+    ndaysBefore = None
+
+    from dateutil import parser
+    if end_time is None:
+        end_time = parser.parse("30 Oct 2049 21:21:45")
+
+    ndaysBefore = None
+    lookup_dir = pjoin(gv.data_dir,subdir)
+    print('list recent')
+    recent = postp.listRecent(days=ndaysBefore, lookup_dir= lookup_dir,
+                              start_time=start_time,
+                                       end_time=end_time)
+    print('len(recent)=',len(recent))
+    rawnames = []
+    rawname_regex = '([S0-9]+_[a-z]+)'
+    re1 = re.compile('_\!_'+rawname_regex+'_.*')
+    re2 = re.compile('_'+rawname_regex+'_.*')
+    print('collect rawnames')
+    for lf in recent:
+        st = 0
+        if light_only:
+            if not lf.startswith('_!'):
+                continue    
+        if light_only:
+            r = re.match(re1,lf)
+        else:
+            r = re.match(re2,lf)
+        if r is None:
+            print('None ',lf)
+            continue
+        cr = r.groups()[0]
+        if cr not in rawnames:
+            rawnames += [ cr ]
+    rawnames = list(sorted(set(rawnames)))
+
+    rawname_regex = '([S0-9]+_[a-z]+)'
+    #a0 = re.findall('_\!_'+rawname_regex+'_.*',lf)
+    #a1 = re.match('_\!_'+rawname_regex+'_.*',lf)
+    #print(a0,a1.groups())#
+
+    print('list recent prefixes')
+
+    prefixes = postp.listRecentPrefixes(days = ndaysBefore, light_only=light_only,                                     
+                                        custom_rawname_regex = rawname_regex, recent_files = recent)
+
+    from utils_postprocess_HPC import listComputedData
+    r = listComputedData(subdir,prefixes,start_time, end_time, use_main_LFP_chan=1)
+    print('listComputedData = ',r)
+    if r is None:
+        print("found nothing")
+        return None
+    print('listComputedData = ',r)
+
+    rawnames_found, groupings_found, its_found, prefixes_found = r
+
+
+    print(rawnames)
+    display(prefixes)
+
+    ######################   Consistency
+
+    #for grouping_to_check in ['merge_nothing']: #, 'merge_movements']:
+    for grouping_to_check,it_to_check in [ ('merge_all_not_trem','basic'), ('merge_movements','basic'),
+                                          ('merge_nothing','basic'), ('merge_nothing','trem_vs_quiet') ]:
+        print('   ',grouping_to_check,it_to_check)
+        r = checkPrefixCollectionConsistencty(subdir,prefixes,start_time, end_time,
+                                              grouping_to_check, it_to_check,
+                                              use_main_LFP_chan=1, light_only=1,
+                                             prefixes_ignore  = [], preloaded=None)
+        missing, preloaded = r
+        print('missing=', missing)
+    import gc; gc.collect()
+
+    ##################    Load
+
+    sources_type = 'parcel_aal'  # or ''
+    load = False # whether I want to do actual load or just collect filenames (for deferred loading)
+    #groupings_to_collect = ['merge_nothing']; interval_sets_to_collect = ['basic']
+    groupings_to_collect = None; groupings_to_collect = None
+    load = False
+    prefixes_to_collect = None # = prefixes
+    r = postp.collectPerformanceInfo3(None,prefixes_to_collect,
+                      interval_groupings=groupings_to_collect,
+                              interval_sets =  groupings_to_collect,
+                nraws_used='[0-9]+', sources_type = sources_type,
+               printFilenames=1,
+                ndays_before=ndaysBefore,
+                use_main_LFP_chan=1,
+                 subdir=subdir, remove_large_items = 1,
+                 list_only=0, allow_multi_fn_same_prefix=0,
+                 use_light_files = light_only, rawname_regex_full=0,
+                 start_time=start_time,
+                   end_time=end_time, load=load)
+
+    #nraws_used='(10,12,20,24)'
+    #output_per_raw,Ximp_per_raw,gis_per_raw = r
+    output_per_raw,_,_ = r
+    print('len(output_per_raw) =', len(output_per_raw))
+    import gc; gc.collect()
+
+    if load:
+        np.savez(pjoin(gv.data_dir,subdir,'gathered.npz'), output_per_raw=output_per_raw )
+    import gc; gc.collect()
+
+    #Audio(filename=sound_file, autoplay=True)
+    import utils_postprocess as pp
+    tpll = pp.multiLevelDict2TupleList(output_per_raw,4,3)
+
+    z0 = [tpl[:-1] for tpl in tpll]
+    #rns_ord, prefs_ord, grp_ord, it_ord = list (zip(*z0  ) )
+    tpll_reshaped = np.array( list (zip(*z0  ) ) )
+
+    ####################################
+
+    import utils_postprocess as pp
+    from datetime import datetime
+    from utils_postprocess_HPC import loadRunCorresp
+    CIDs,cretimes = [],[]
+    mod_times = []
+    nloaded = 0
+    for tpl in tpll:
+        moc = tpl[-1]
+        corresp,all_info = loadRunCorresp(moc)
+        if moc['loaded']:
+            if 'cmd' not in moc:
+                print(f'Cmd is not in {tpl[:-1]}')
+                break
+            runCID = dict( moc['cmd'][0] ).get('--runCID', None)
+            moc['runstrings_creation_time'] = all_info['date_created']
+            moc['runCID'] = runCID
+            CIDs += [runCID]
+            cretimes += [all_info['date_created']]
+
+            #mod_time = os.stat( moc['filename_full'] ).st_mtime
+            mod_time = moc['mod_time']
+            dt = datetime.fromtimestamp(mod_time)
+            moc['mod_time_dt'] = dt
+            nloaded += 1
+
+        mod_times += [moc['mod_time']] # timestamps only
+
+    bv,bcoord,_ = plt.hist(mod_times)
+    mn = datetime.fromtimestamp ( np.min(bcoord) )
+    mx = datetime.fromtimestamp ( np.max(bcoord) )
+    delta = mx-mn
+    print(f'Time spread = {delta}, time min = {mn}, time max = {mx}')
+
+    ################################   CID
+
+    if not nloaded:
+        print('Nothing is loaded :(')
+    CIDs = list( map(int,CIDs) )
+    CIDs_sorted = list( sorted( set( map(int,CIDs) ) ) )
+    if len(CIDs_sorted) > 1:
+        for CID in CIDs_sorted:
+            inds = np.where( np.array(CIDs) == CID )[0]
+            times = [tpll[i][-1]['mod_time'] for i in inds]
+            times = list( sorted(times) )
+            print('CID =  ',CID, 'len(inds)=',len(inds), times[0], times[-1] )
+        CID_most_recent = list( sorted( map(int,CIDs) ) )[-1]
+        print('most recent CID=', CID_most_recent )
+    else:
+        print("only one CID found")
+
+    #################################   Completeness of loaded
+
+    from utils_postprocess_HPC import checkTupleListTableCompleteness
+    print('Total')
+    b,missing = checkTupleListTableCompleteness(tpll_reshaped)
+
+    print('---- per grouping')
+    for grps_cur in groupings_found:
+        print(grps_cur)
+        outputs_filtered = postp.filterOutputs(output_per_raw, rns=rawnames,
+                            prefs=prefixes, grps =  [grps_cur] )
+        b,missing =  checkTupleListTableCompleteness(outputs_filtered)
+        print(missing)
+
+    return output_per_raw
+
+def extendDf(df, output_per_raw):
+        #%debug
+    from utils_postprocess_HPC import getTremorDetPerf
+    from utils_postprocess_HPC import  getMocFromRow
+
+    def addTremorPerf(row):
+        #print('a',row)
+        grp,it = row['grouping'],row['interval_set']
+        try:
+            moc = getMocFromRow(row, output_per_raw)
+            #moc = output_per_raw[row['rawname']][row['prefix']][grp][it]
+            r = getTremorDetPerf(moc,grp,it)
+        except KeyError:
+            r = np.nan
+        #row['tremor_det'] = r
+        return r
+
+    df['tremor_det_perf'] = df.apply(addTremorPerf,axis=1)
+    df.reset_index()
+
+    df['num'] = pd.to_numeric(df['num'])
+    df['num'] = df['num'].map(lambda x: int(x) if ( not (np.isnan(x) or (x is None) ) ) else 0    )
+    df['numpts'] = pd.to_numeric(df['numpts'])
+    df['sens'] = pd.to_numeric(df['sens'])
+    df['spec'] = pd.to_numeric(df['spec'])
+
+    ##### Add counts columns
+    def lbd(row):
+        moc = getMocFromRow(row, output_per_raw)
+        if moc is None:
+            return None, None
+        if 'counts' not in moc:
+            return -1,-1
+        cts = moc['counts']
+
+        tot = np.sum( list(cts.values()) )
+        cts2 = cts.copy()
+        s = ''
+        for k,v in cts.items():
+            k2 = k[:-2]
+            #k2 = k
+            stmp = f'{v / tot * 100:4.1f}%={v/32:5.1f}s'
+            cts2[k2] = stmp
+            s += f', {k2}: {stmp}'
+            total = tot / 32  # in sec
+        return cts, total
+
+    df[['points_per_beh_state', 'total_len_sec']] = df.apply(lbd,1,result_type='expand')
+
+    return df

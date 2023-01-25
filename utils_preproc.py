@@ -1423,7 +1423,9 @@ def gatherFeatStats(rawnames, X_pri, featnames_pri, wbd_pri,
             featnames = featnames_pri[ indset_cur[0] ]  # they are supposed to be constant within indset
             me_perchan  = np.zeros( len(featnames) )
             std_perchan = np.zeros( len(featnames) )
+            int_type_not_present = False
             # FIRST over features, THEN over datasets
+            show_warn_featns = []
             for feati,featn in enumerate(featnames):
                 stat_perchan[featn] = None
                 dats_forstat = []
@@ -1443,8 +1445,8 @@ def gatherFeatStats(rawnames, X_pri, featnames_pri, wbd_pri,
                     #print(rn, ib_mvt_perit.keys() )
 
                     if (int_type_cur != 'entire') and (int_type_cur not in ib_mvt_perit):
-                        if printLog and task == int_type_cur[:-2]:
-                            print('gatherFeatStats: interval {} is not present in {}'.format(int_type_cur,rn) )
+                        if task == int_type_cur[:-2]:
+                            int_type_not_present = True
                         continue
 
                     dat =  X_pri[rawi][:,feati]
@@ -1517,19 +1519,23 @@ def gatherFeatStats(rawnames, X_pri, featnames_pri, wbd_pri,
                             if not gv.DEBUG_MODE:
                                 raise ValueError('too small std' )
                 else:
-                    if printLog:
-                        show_warn = False
-                        for tk in list(set( [ utils.getParamsFromRawname(rawnames[rawi])[-1] for rawi in indset_cur ] )):
-                            if tk == int_type_cur[:-2]:
-                                show_warn = True
-                        if show_warn:
-                            rn_str = ','.join( [rawnames[rawi]  for rawi in indset_cur ] )
-                            print('gatherFeatStats: Nothing found of {} in raws {}'.format(int_type_cur,rn_str) )
+                    for tk in list(set( [ utils.getParamsFromRawname(rawnames[rawi])[-1] for rawi in indset_cur ] )):
+                        if tk == int_type_cur[:-2]:
+                            show_warn_featns += [featn ]
                     me,std = np.nan, np.nan
+
                 stat_perchan[featn] = (me,std)
                 me_perchan [feati] = me
                 std_perchan[feati] = std
                 #print('-------------LENS ', len(me_perchan), len(stat_perchan) )
+            ###### ENd of cycle over feats
+            if printLog and len(show_warn_featns) :
+                rn_str = ','.join( [rawnames[rawi]  for rawi in indset_cur ] )
+                featns_str = ','.join(show_warn_featns)
+                print('gatherFeatStats: Nothing found of {} for {} in raws {}'.format(int_type_cur,featns_str, rn_str) )
+
+            if printLog and int_type_not_present:
+                print('gatherFeatStats: interval {} is not present in {}'.format(int_type_cur,rn) )
 
             if np.all(np.isnan(me_perchan) ):
                 mean_per_int_type[int_type_cur] = None
@@ -1846,6 +1852,9 @@ def rescaleRaws(raws_permod_both_sides, mod='LFP',
 
 
 def getBaselineInt(subj_or_rawname, body_side_for_baseline_int, baseline_int_type='notrem'):
+    '''
+    based on gen subj info
+    '''
     if subj_or_rawname.find('_') >= 0:
         subj_cur,medcond_cur,task_cur  = utils.getParamsFromRawname(subj_or_rawname)
     else:
@@ -1917,7 +1926,7 @@ def getCleanIntervalBins(rawname_,sfreq, times, suffixes = ['_ann_LFPartif'],ver
 
 def loadRaws(rawnames,mods_to_load, sources_type = None, src_type_to_use=None,
              src_file_grouping_ind=None, use_saved = True, highpass_lfreq = None,
-             input_subdir="", n_jobs=1, filter_phase = 'minimum', verbose=None  ):
+             input_subdir="", input_subdir_srcrec = "", n_jobs=1, filter_phase = 'minimum', verbose=None  ):
     '''
     only loads data from different files, does not do any magic with sides
     use_saved means using previously done preproc
@@ -1929,6 +1938,7 @@ def loadRaws(rawnames,mods_to_load, sources_type = None, src_type_to_use=None,
     print('Loading following raw types ',mods_to_load)
 
     raws_permod_both_sides = {}
+    rawname2rec_info = {}
     for rawname_ in rawnames:
         raw_permod_both_sides_cur = {}
         print('!!!--Loading raws--!!! current rawname --- ',rawname_)
@@ -1985,13 +1995,19 @@ def loadRaws(rawnames,mods_to_load, sources_type = None, src_type_to_use=None,
             assert sources_type is not None
             assert src_type_to_use is not None
             assert src_file_grouping_ind is not None
+
+
+            src_rec_info_fn_full = utils.genRecInfoFn(rawname_,sources_type, src_file_grouping_ind, input_subdir_srcrec)
+            rec_info = np.load(src_rec_info_fn_full, allow_pickle=True)
+
+
             src_fname_noext = 'srcd_{}_{}_grp{}'.format(rawname_,sources_type,src_file_grouping_ind)
             if src_type_to_use == 'center':
-                newsrc_fname_full = os.path.join( data_dir, input_subdir, 'cnt_' + src_fname_noext + '.fif' )
+                newsrc_fname_full = os.path.join( data_dir, input_subdir_srcrec, 'cnt_' + src_fname_noext + '.fif' )
             elif src_type_to_use == 'mean_td':
-                newsrc_fname_full = os.path.join( data_dir, input_subdir, 'av_' + src_fname_noext + '.fif' )
+                newsrc_fname_full = os.path.join( data_dir, input_subdir_srcrec, 'av_' + src_fname_noext + '.fif' )
             elif src_type_to_use == 'parcel_ICA':
-                newsrc_fname_full = os.path.join( data_dir, input_subdir, 'pcica_' + src_fname_noext + '.fif' )
+                newsrc_fname_full = os.path.join( data_dir, input_subdir_srcrec, 'pcica_' + src_fname_noext + '.fif' )
             else:
                 raise ValueError('Wrong src_type_to_use {}'.format(src_type_to_use) )
 
@@ -2002,6 +2018,10 @@ def loadRaws(rawnames,mods_to_load, sources_type = None, src_type_to_use=None,
             print(f'Loading reconstructed sources from {newsrc_fname_full}, mtime = {mtime}')
             raw_srconly =  mne.io.read_raw_fif(newsrc_fname_full, verbose=verbose)
             raw_permod_both_sides_cur['src'] = raw_srconly
+        else:
+            rec_info = None
+        
+        rawname2rec_info[rawname_] = rec_info
 
         if 'EMG' in mods_to_load:
             if use_saved:
@@ -2050,6 +2070,7 @@ def loadRaws(rawnames,mods_to_load, sources_type = None, src_type_to_use=None,
 
         raws_permod_both_sides[rawname_] = raw_permod_both_sides_cur
     return raws_permod_both_sides
+    #return raws_permod_both_sides, rawname2rec_info
 
 
 def saveLFP(rawname_naked, f_highpass = 2, skip_if_exist = 1,

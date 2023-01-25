@@ -1,7 +1,4 @@
 #!/bin/bash
-echo Starting `basename "$0"`
-# takes one argument -- rawname
-# has to be ran from  run subdir
 
 #$raws="S01_off_hold"
 #raw="S97_off_move"
@@ -19,18 +16,18 @@ HIRES_FILE_TYPE=fieldtrip_raw
 
   RECALC_ARTIF0=0
   RECALC_ARTIF1=0
-RESAVE_MAT_FILE=0
-       HIGHPASS=0
-       ICA_only=0
+RESAVE_MAT_FILE=1
+       HIGHPASS=1
+       ICA_only=1
            tSSS=0
             SSP=0
 
-   RECONSTRUCT_SOURCES=1
-SRC_REC_AFTER_highpass=1
+   RECONSTRUCT_SOURCES=0
+SRC_REC_AFTER_highpass=0
     SRC_REC_AFTER_tSSS=0
      SRC_REC_AFTER_SSP=0
      SRC_REC_AFTER_ICA=0
-        RUN_MATLAB_JOB=1
+        RUN_MATLAB_JOB=0
 
 
 # first pass, only artif plots to adjust artif detection alg params

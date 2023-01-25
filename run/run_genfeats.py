@@ -561,6 +561,7 @@ else:
     subfeature_order_lfp_hires_pri  = [0]*len(rawnames)
     extdat_pri                      = [0]*len(rawnames)
     ivalis_pri                      = [0]*len(rawnames)
+    rec_info_pri                    = [0]*len(rawnames)
     anndict_per_intcat_per_rawn    = {}
     fname_dat_full_pri = [0]*len(rawnames)
 
@@ -577,6 +578,7 @@ else:
         # offends MNE
         sfreq =         int( f['sfreq'] )
         sfreq_hires =   int( f['sfreq_hires'] )
+        rec_info_pri[rawi] = f['rec_info'][()]
 
         ivalis_pri[rawi] = f['ivalis'][()]
 
@@ -638,31 +640,31 @@ if (not recalc_stats_multi_band) and ( 'rbcorr' in features_to_use or 'bpcorr' i
     print('Load multi band stats from ',fname_stats_full)
     assert os.path.exists(fname_stats_full)
 
-rec_info_pri = []
-for rawname_ in rawnames:
-    src_rec_info_fn_full = utils.genRecInfoFn(rawname_,sources_type,
-                                         src_file_grouping_ind,
-                                         input_subdir)
-    #src_rec_info_fn_full = pjoin(gv.data_dir, input_subdir,
-    #                                    src_rec_info_fn)
-    print('Load rec_info from ',src_rec_info_fn_full)
-
-    if input_subdir != output_subdir:
-        #src_rec_info_fn_full2 = pjoin(gv.data_dir, output_subdir,
-        #                                    src_rec_info_fn)
-        src_rec_info_fn_full2 = utils.genRecInfoFn(rawname_,sources_type,
-                                         src_file_grouping_ind,
-                                         output_subdir)
-
-        import shutil
-        shutil.copyfile(src_rec_info_fn_full,src_rec_info_fn_full2)
-        print("run_genfeats, copy src_rec_info {} to {}".format( src_rec_info_fn_full,src_rec_info_fn_full2)  )
-    rec_info = np.load(src_rec_info_fn_full, allow_pickle=True)
-    rec_info_pri += [rec_info]
+#rec_info_pri = []
+#for rawname_ in rawnames:
+#    src_rec_info_fn_full = utils.genRecInfoFn(rawname_,sources_type,
+#                                         src_file_grouping_ind,
+#                                         input_subdir)
+#    #src_rec_info_fn_full = pjoin(gv.data_dir, input_subdir,
+#    #                                    src_rec_info_fn)
+#    print('Load rec_info from ',src_rec_info_fn_full)
+#
+#    if input_subdir != output_subdir:
+#        #src_rec_info_fn_full2 = pjoin(gv.data_dir, output_subdir,
+#        #                                    src_rec_info_fn)
+#        src_rec_info_fn_full2 = utils.genRecInfoFn(rawname_,sources_type,
+#                                         src_file_grouping_ind,
+#                                         output_subdir)
+#
+#        import shutil
+#        shutil.copyfile(src_rec_info_fn_full,src_rec_info_fn_full2)
+#        print("run_genfeats, copy src_rec_info {} to {}".format( src_rec_info_fn_full,src_rec_info_fn_full2)  )
+#    rec_info = np.load(src_rec_info_fn_full, allow_pickle=True)
+#    rec_info_pri += [rec_info]
 
 ################
 rec_info = rec_info_pri[0]
-roi_labels = rec_info['label_groups_dict'][()]      # dict of (orderd) lists with keys from srcgroups_key_order
+roi_labels = rec_info['label_groups_dict']     # dict of (orderd) lists with keys from srcgroups_key_order
 srcgrouping_names_sorted = rec_info['srcgroups_key_order'][()]  # this is usually just one item
 
 # it does not really make sense if I don't work with them together anyway
@@ -2241,6 +2243,7 @@ if save_feat:
                   pars=pars,
                  anndict_per_intcat=anndict_per_intcat_per_rawn[rawname_],
                  cmd=np.array([opts,args],dtype=object ),
+                 rec_info = rec_info_pri[rawind],
                  cmd_opts=opts,cmd_args=args)
         #ip = feat_inds_cur[0],feat_inds_cur[-1]
         print('{} Features shape {} saved to\n  {}'.format(rawind,X_cur.shape,fname_feat_full) )

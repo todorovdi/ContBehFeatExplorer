@@ -3554,7 +3554,7 @@ def setArtifNaN(X, ivalis_artif_tb_indarrays_merged, feat_names, ignore_shape_wa
     num = 0
     for interval_name in ivalis_artif_tb_indarrays_merged:
         r = parseIntervalName(interval_name)
-        assert r['interval_type'] == 'artif'
+        assert r['interval_type'] == 'artif', r['interval_type']
         #templ = '^BAD_(.+)'
         #matchres = re.match(templ,interval_name).groups()
         #assert matchres is not None and len(matchres) > 0
@@ -3621,6 +3621,13 @@ def parseIntervalName(interval_name):
         else:
             r['artifact_chname'] = None
 
+    matchres = re.match('^BAD_muscle',interval_name)
+    if matchres is not None:
+        r['interval_type'] = 'artif'
+        r['artifact_modality'] = 'MEG'
+        r['artifact_brain_side'] = 'B'
+        r['artifact_chname'] = None
+
     #templ = r'^BAD_(LFP.*)'
     #matchres = re.match(templ,interval_name)
     #if matchres is not None:
@@ -3664,6 +3671,7 @@ def parseIntervalName(interval_name):
                 r['beh_state_type'] = itp
                 r['body_side'] = side
                 r['brain_side'] = getOppositeSideStr(side )
+    assert len(r),  r
 
     return r
 
@@ -4486,20 +4494,9 @@ def genFeatFn(rawname_,st, nch, nfeats, skip, windowsz,
                 src_file_grouping_ind, src_grouping, crp_str)
     return fn
 
-
-def genMLresFn(rawnames, sources_type, src_file_grouping_ind, src_grouping,
-            prefix, n_channels, nfeats_used,
-                pcadim, skip, windowsz,use_main_LFP_chan,
-               grouping_key,int_types_key, nr=None, regex_mode=False,
-               smart_rawn_grouping = False, rawname_format= 'subj',
-               custom_rawname_str=None):
-    #rawname_format = 'subj,medcond,task'
-
-    if nr is None:
-        nr = len(rawnames)
-
+def formatMultiRawnameStr(rawnames, rawname_format, regex_mode = False,
+        custom_rawname_str = None, smart_rawn_grouping = False):
     ml = np.max( [len(rn) for rn in rawnames ] )
-
     if custom_rawname_str is None:
         if ml>4 and not regex_mode:
             import utils_preproc as upre
@@ -4554,6 +4551,23 @@ def genMLresFn(rawnames, sources_type, src_file_grouping_ind, src_grouping,
         sind_join_str = ','.join(str_list_sorted )
     else:
         sind_join_str = custom_rawname_str
+
+    return sind_join_str
+
+def genMLresFn(rawnames, sources_type, src_file_grouping_ind, src_grouping,
+            prefix, n_channels, nfeats_used,
+                pcadim, skip, windowsz,use_main_LFP_chan,
+               grouping_key,int_types_key, nr=None, regex_mode=False,
+               smart_rawn_grouping = False, rawname_format= 'subj',
+               custom_rawname_str=None):
+    #rawname_format = 'subj,medcond,task'
+
+    if nr is None:
+        nr = len(rawnames)
+
+                
+    sind_join_str = formatMultiRawnameStr(rawnames, rawname_format, regex_mode,
+        custom_rawname_str, smart_rawn_grouping)
 
     assert len(sind_join_str) > 0
     out_name_templ = '_{}_grp{}-{}_{}ML_nr{}_{}chs_nfeats{}_pcadim{}_skip{}_wsz{}'

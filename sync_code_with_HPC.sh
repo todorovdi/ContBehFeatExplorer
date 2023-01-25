@@ -105,16 +105,23 @@ fi
 
 
 if [[ $SYNC_MODE != "get_from" ]]; then
-  # save current code version and make it transferable to HPC (we don't have git there)
-  v=`git tag | tail -1` 
-  h=`git rev-parse --short HEAD`
-  echo "$v, hash=$h" > last_code_ver_synced_with_HPC.txt
-  wait
+  if git rev-parse --git-dir > /dev/null 2>&1; then
+    GITHERE=1
 
-  echo "  sync req and code ver"
+    # save current code version and make it transferable to HPC (we don't have git there)
+    v=`git tag | tail -1` 
+    h=`git rev-parse --short HEAD`
+    echo "$v, hash=$h" > last_code_ver_synced_with_HPC.txt
+    wait
+
+    echo "  sync code ver"
+    #$SLEEP
+    $run --mode:$RUNTYPE "$LOCAL_DIR/last_code_ver_synced_with_HPC.txt" "$JUSUF_CODE/"
+  else
+    echo "No git here"
+  fi
+  echo "  sync req"
   $run --mode:$RUNTYPE "$LOCAL_DIR/requirements.txt" "$JUSUF_CODE/"
-  #$SLEEP
-  $run --mode:$RUNTYPE "$LOCAL_DIR/last_code_ver_synced_with_HPC.txt" "$JUSUF_CODE/"
 fi
 
 

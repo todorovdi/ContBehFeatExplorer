@@ -82,10 +82,47 @@ module load CUDA
 
 echo "DATA_DUSS=$DATA_DUSS"
 
-source $CODE/__workstart.sh
+uname -a
+
+
+echo "------- Using copied from bashrc"
+__conda_setup="$('/p/project/icei-hbp-2020-0012/OSCBAGDIS/miniconda39/bin/conda' 'shell.bash' 'hook' 2> /dev/null)"
+if [ $? -eq 0 ]; then
+    eval "$__conda_setup"
+else
+    if [ -f "/p/project/icei-hbp-2020-0012/OSCBAGDIS/miniconda39/etc/profile.d/conda.sh" ]; then
+        . "/p/project/icei-hbp-2020-0012/OSCBAGDIS/miniconda39/etc/profile.d/conda.sh"
+    else
+        export PATH="/p/project/icei-hbp-2020-0012/OSCBAGDIS/miniconda39/bin:$PATH"
+    fi
+fi
+unset __conda_setup
+
+#echo "------- Running __workstart"
+#source $CODE/__workstart.sh
+
+unset PYTHONPATH
+conda activate cobd
+#export PYTHONPATH="$OSCBAGDIS_DATAPROC_CODE:$PYTHONPATH"
+export PYTHONPATH="$OSCBAGDIS_DATAPROC_CODE"
+export python_correct_ver=python
+
+
+#CONDA=$PROJECT/OSCBAGDIS/miniconda3/bin/conda 
+##sh0=$(basename ${SHELL})
+#sh="${sh##*/}"
+#echo $sh "${BASH_VERSION}"
+#$CONDA init $sh
+##source $PROJECT/OSCBAGDIS/miniconda3/etc/profile.d/conda.sh
+#$CONDA activate cobd
+#which python
+
+
 pwd
 
-export PYTHONPATH=$PYTHONPATH:$PROJECT/OSCBAGDIS/LOCAL/lib/python3.9/site-packages
+#export PYTHONPATH=$PYTHONPATH:$PROJECT/OSCBAGDIS/LOCAL/lib/python3.9/site-packages
+
+echo "Shell is $SHELL"
 
 RUNSTRINGS_FN="$CODE/run/_runstrings_genfeats.txt"
 $OSCBAGDIS_DATAPROC_CODE/run/srun_exec_runstr.sh $RUNSTRINGS_FN $SLURM_ARRAY_JOB_ID $EFF_ID $ID

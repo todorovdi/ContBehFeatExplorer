@@ -1012,7 +1012,7 @@ def groupOutputs(output_per_raw, prefixes = None, label_groupings=None,
 
 
 #def getBestLFP_clToMove(best_LFP_dict,subj,metric='balanced_accuracy',
-def getBestLFPfromDict(best_LFP_dict,subj,metric='balanced_accuracy',
+def getBestLFPfromDict(best_LFP_dict,subj,rncombinstr,metric='balanced_accuracy',
                         grp = 'merge_nothing', it = 'basic',
                         prefix_type='modLFP_onlyH_act',
                         brain_side='contralat_to_move',
@@ -1032,7 +1032,7 @@ def getBestLFPfromDict(best_LFP_dict,subj,metric='balanced_accuracy',
     elif brain_side.startswith('both'):
         side = 'both'
     else:
-        raise ValueError(f'wrong side {brain_side}')
+        raise ValueError(f'wrong brain_side {brain_side}')
 
     if brain_side.startswith('both'):
         assert not exCB   # just because of runstrings I used to produce best LFP json
@@ -1055,14 +1055,15 @@ def getBestLFPfromDict(best_LFP_dict,subj,metric='balanced_accuracy',
         best_kind = 'best_LFP'
 
     g = f'{prefix_type}_{side_det_str},{grp},{it}'
-    best = best_LFP_dict[subj][g][metric][best_kind]
+    res = best_LFP_dict[rncombinstr][g]
+    best = res[metric][best_kind]
 
     if drop_type != 'both':
         best = best[drop_type]
 
     if side != 'both':
         assert best[3] == side[0].upper(), (best,side)  # otherwise we'll get 0 features
-    return best
+    return best, res['filename_full']
 
 
 def updateSrcGroups(ipmpp, roi_labels, srcgrp, use_both_sides = True, want_sided = True ):

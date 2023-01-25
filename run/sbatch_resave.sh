@@ -66,7 +66,7 @@ export DATA_DUSS=$PROJECT_DIR/data_duss
 export OUTPUT_OSCBAGDIS=$PROJECT_DIR/output
 export OSCBAGDIS_DATAPROC_CODE=$PROJECT_DIR/data_proc_code
 
-export PATH=$PATH:$HOME/.local/bin
+#export PATH=$PATH:$HOME/.local/bin
 ##export PYTHONPATH=$OSCBAGDIS_DATAPROC_CODE
 #
 #module purge

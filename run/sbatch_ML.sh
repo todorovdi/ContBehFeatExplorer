@@ -9,6 +9,8 @@
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=128
 #SBATCH --mem=80G
+#SBATCH --time=4:00:00
+#SBATCH --partition=batch
 
 ## max array size = 256  (as shown by scontrol show config)
 ## 22 decent dataset 
@@ -39,9 +41,6 @@
 #srun --exclusive -n 128 ./mpi-prog1 &
 #srun --exclusive -n 128 ./mpi-prog2 &
 #wait
-##RUNSTRINGS_FN="_runstrings.txt"
-##mapfile -t RUNSTRINGS < $RUNSTRINGS_FN
-##num_runstrings=${#RUNSTRINGS[*]}
 
 jutil env activate -p icei-hbp-2020-0012
 
@@ -71,16 +70,48 @@ module load Python
 
 echo "DATA_DUSS=$DATA_DUSS"
 
-source $CODE/__workstart.sh
-pwd
-
-export PYTHONPATH=$PYTHONPATH:$PROJECT/OSCBAGDIS/LOCAL/lib/python3.9/site-packages
+echo "------- Using copied from bashrc"
+__conda_setup="$('/p/project/icei-hbp-2020-0012/OSCBAGDIS/miniconda39/bin/conda' 'shell.bash' 'hook' 2> /dev/null)"
+if [ $? -eq 0 ]; then
+    eval "$__conda_setup"
+else
+    if [ -f "/p/project/icei-hbp-2020-0012/OSCBAGDIS/miniconda39/etc/profile.d/conda.sh" ]; then
+        . "/p/project/icei-hbp-2020-0012/OSCBAGDIS/miniconda39/etc/profile.d/conda.sh"
+    else
+        export PATH="/p/project/icei-hbp-2020-0012/OSCBAGDIS/miniconda39/bin:$PATH"
+    fi
+fi
+unset __conda_setup
+unset PYTHONPATH
+conda activate cobd
+export PYTHONPATH="$OSCBAGDIS_DATAPROC_CODE"
+export python_correct_ver=python
 
 EXIT_IF_ANY_FAILS=0
 NFAILS=0
 NRUNS=0
 
-RUNSTRINGS_FN="$CODE/run/_runstrings_ML.txt"
+if [ $# -ne 0 ]; then
+  RSFN=$1
+else
+  RSFN="_runstrings_ML.txt"
+fi
+RUNSTRINGS_FN="$CODE/run/$RSFN"
+echo "RUNSTRINGS_FN=$RUNSTRINGS_FN"
+
+
+if [ $# -ge 2 ]; then
+  mode=$2
+  if [[ "$mode" != "multi" ]] && [[ "mode" != "single" ]]; then
+    echo "Wrong mode $mode"
+    exit 1
+  fi
+else
+  # multi runstring run
+  mode="multi"
+fi
+echo "(multi runstrings) mode=$mode"
+
 
 SHIFT_ID=0
 #EFF_ID=$((ID+SHIFT_ID))
@@ -124,7 +155,10 @@ while [ $NUMRS -gt $SHIFT_ID ]; do
   echo "FINISHED job array number: ${ID} (effctive_id = $EFF_ID) on $HOSTNAME,  $SLURM_JOB_ID, $SLURM_ARRAY_JOB_ID"
   NRUNS=$((NRUNS + 1))
   ##########################  ONLY FOR RUNNING OF INDIVID JOBS
-  #break
+  if [[ "$mode" == "single" ]]; then
+    echo "$Exiting due to mode = $mode"
+    break
+  fi
   ##########################
   echo "----------------"
   echo "----------------"

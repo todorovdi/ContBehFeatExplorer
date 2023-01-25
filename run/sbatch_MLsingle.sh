@@ -18,7 +18,6 @@
 #SBATCH --array=0-88
 
 ##SBATCH --mem=80G
-##SBATCH --partition=batch
 ##SBATCH --time=4:00:00
 ##SBATCH --mem=80G
 
@@ -28,8 +27,8 @@
 ## sacctmgr list associations
 ## sacctmgr show qos
 
-#SBATCH --output ../slurmout/ML_%A_%a.out
-#SBATCH --error ../slurmout/ML_%A_%a.out
+#SBATCH --output /p/project/icei-hbp-2020-0012/slurmout/ML_%A_%a.out
+#SBATCH --error /p/project/icei-hbp-2020-0012/slurmout/ML_%A_%a.out
 # if keyword omitted: Default is slurm-%j.out in
 # the submission directory (%j is replaced by
 # the job ID).
@@ -42,10 +41,6 @@
 
 # *** start of job script ***
 ##source set_oscabagdis_env_vars.sh
-
-##RUNSTRINGS_FN="_runstrings.txt"
-##mapfile -t RUNSTRINGS < $RUNSTRINGS_FN
-##num_runstrings=${#RUNSTRINGS[*]}
 
 ## export OMP_NUM_THREADS=${SLURM_CPUS_PER_TASK}
 ### srun is for MPI programs
@@ -84,10 +79,22 @@ module load Python
 
 echo "DATA_DUSS=$DATA_DUSS"
 
-source $CODE/__workstart.sh
-pwd
-
-export PYTHONPATH=$PYTHONPATH:$PROJECT/OSCBAGDIS/LOCAL/lib/python3.9/site-packages
+echo "------- Using copied from bashrc"
+__conda_setup="$('/p/project/icei-hbp-2020-0012/OSCBAGDIS/miniconda39/bin/conda' 'shell.bash' 'hook' 2> /dev/null)"
+if [ $? -eq 0 ]; then
+    eval "$__conda_setup"
+else
+    if [ -f "/p/project/icei-hbp-2020-0012/OSCBAGDIS/miniconda39/etc/profile.d/conda.sh" ]; then
+        . "/p/project/icei-hbp-2020-0012/OSCBAGDIS/miniconda39/etc/profile.d/conda.sh"
+    else
+        export PATH="/p/project/icei-hbp-2020-0012/OSCBAGDIS/miniconda39/bin:$PATH"
+    fi
+fi
+unset __conda_setup
+unset PYTHONPATH
+conda activate cobd
+export PYTHONPATH="$OSCBAGDIS_DATAPROC_CODE"
+export python_correct_ver=python
 
 EXIT_IF_ANY_FAILS=0
 NFAILS=0
