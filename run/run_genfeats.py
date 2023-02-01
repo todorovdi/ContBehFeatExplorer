@@ -578,7 +578,7 @@ else:
         # offends MNE
         sfreq =         int( f['sfreq'] )
         sfreq_hires =   int( f['sfreq_hires'] )
-        rec_info_pri[rawi] = f['rec_info'][()]
+        rec_info_pri[rawi] = dict( f['rec_info'][()] )
 
         ivalis_pri[rawi] = f['ivalis'][()]
 

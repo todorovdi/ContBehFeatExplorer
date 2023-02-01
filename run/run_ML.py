@@ -32,6 +32,8 @@ from sklearn.decomposition import PCA
 from sklearn.discriminant_analysis import LinearDiscriminantAnalysis
 from sklearn.impute import SimpleImputer
 from xgboost import XGBClassifier
+from utils_tSNE import concatAnns
+from utils_postprocess import getBestLFPfromDict
 
 
 def print(*args, **kw):
@@ -106,8 +108,8 @@ prefix = ''
 #artif_handling_before_fit = 'impute' #or 'reject' or 'do_nothing'
 artif_handling_before_fit  = 'reject'
 feat_stats_artif_handling  = 'reject'
-artif_force_all_modalities = 0
-do_outliers_discard = 1
+artif_force_all_modalities = 0  # it actually works as force all artifacts
+discard_outliers = 1
 do_cleanup = 1  # removing varialbes (to save memory), unset if doing interactive debug
 
 def_sources_type = 'parcel_aal'
@@ -159,7 +161,7 @@ featsel_only_best_LFP = 1
 best_LFP_info_file = 'best_LFP_info.json'
 best_LFP_data_mods = ['LFP']
 best_LFP_featstr = 'onlyH_act'
-bestLFP_disjoint = 'auto'
+best_LFP_disjoint = 'auto'
 best_LFP_exCB = None
 tune_search_best_LFP = True
 tune_search_best_LFP_but = False
@@ -253,9 +255,20 @@ perf_inds_to_print = [0, 1, 2, 10, -1]
 strong_correl_level = 0.9
 
 savefile_rawname_format = 'subj'
+savefile_rawname_format_best_LFP = 'subj,medcond'
 custom_rawname_str = None
+custom_rawname_str_best_LFP = None
 
 exit_after = 'end'  #load, rescale, artif_processed
+
+def makedirs_rnd(subdir, exist_ok=True):
+    if not os.path.exists(subdir ):
+        import time
+        t = np.random.uniform(0,20)
+        time.sleep(t)
+    if not os.path.exists(subdir ):
+        print('    creating subdir {}'.format(subdir) )
+        os.makedirs(subdir, exist_ok=exist_ok)
 
 
 helpstr = 'Usage example\nrun_ML.py --rawnames <rawname_naked1,rawnames_naked2> '
@@ -271,7 +284,7 @@ opts, args = getopt.getopt(effargv,"hr:n:s:w:p:",
          'sources_type=', 'bands_type=', 'crop=', 'parcel_types=',
          "src_grouping=", "src_grouping_fn=", 'groupings_to_use=',
          'int_types_to_use=', 'skip_XGB=', 'skip_LDA=',
-         'LFP_related_only=',
+         'LFP_related_only=', "best_LFP_data_mods=",
          'parcel_group_names=', "subskip_fit=", "search_best_LFP=",
          "save_output=", 'rescale_feats=', "cross_couplings_only=", "LFPchan=",
          "heavy_fit_red_featset=", "n_splits=", "input_subdir=",
@@ -282,10 +295,11 @@ opts, args = getopt.getopt(effargv,"hr:n:s:w:p:",
          "calc_MI=", "calc_VIF=", "calc_Boruta=",
          "n_samples_SHAP=", "calc_selMinFeatSet=",
           "selMinFeatSet_drop_perf_pct=", "selMinFeatSet_conv_perf_pct=",
-          "savefile_rawname_format=",
+          "savefile_rawname_format=", "savefile_rawname_format_best_LFP=", 
          "selMinFeatSet_after_featsel=", "n_jobs=", "label_groups_to_use=",
          "SLURM_job_id=", "runCID=", "featsel_only_best_LFP=",
-         "best_LFP_info_file=",  "bestLFP_disjoint=", "tune_search_best_LFP=",
+         "best_LFP_info_file=",  "best_LFP_disjoint=", "tune_search_best_LFP=",
+         "best_LFP_featstr=",
          "XGB_max_depth=", "XGB_min_child_weight=", "XGB_tune_param=",
          "EBM_tune_param=", "EBM_tune_max_evals=",
          "runstring_ind=",
@@ -298,8 +312,10 @@ opts, args = getopt.getopt(effargv,"hr:n:s:w:p:",
          "use_ICA_for_classif=", "load_XGB_params_auto=", "XGB_grid_dim=",
          "XGB_grid_test_only=", "load_XGB_params_date_thr=",
          "load_feats_date_thr=",
-         "num_boost_rounds=",
+         "num_boost_rounds=", "discard_outliers=",
+         "use_matching_folds_main_LFP=",
          "XGB_balancing=", "load_EBM_params_auto=", "EBM_CV=",
+         "artif_force_all_modalities=",
          "ann_MEGartif_prefix_to_use=", "n_jobs_perm_test="])
 print(sys.argv)
 print('Argv str = ',' '.join(sys.argv ) )
@@ -327,7 +343,7 @@ pars = params_read
 
 for opt,arg in pars.items():
     if arg.startswith('--'):
-        raise ValueError('WRONG VALUE STRING!, argument starts with --')
+        raise ValueError(f'WRONG VALUE STRING!, argument starts with --: {opt} = {arg}')
     if opt == "n_channels":
         n_channels = int(arg)
     elif opt == "SLURM_job_id":
@@ -349,6 +365,8 @@ for opt,arg in pars.items():
         scale_feat_combine_type = arg
     elif opt == "load_feats_date_thr":
         load_feats_date_thr = parser.parse(arg)
+    elif opt == "discard_outliers":
+        discard_outliers = int(arg)
     elif opt == "allow_CUDA":
         allow_CUDA = int(arg)
     elif opt == "use_matching_folds_main_LFP":
@@ -374,8 +392,10 @@ for opt,arg in pars.items():
         featsel_only_best_LFP = int(arg)
     elif opt == "best_LFP_info_file":
         best_LFP_info_file = arg
-    elif opt == "bestLFP_disjoint":
-        bestLFP_disjoint = arg # may be string, not always int
+    elif opt == "best_LFP_disjoint":
+        best_LFP_disjoint = arg # may be string, not always int
+    elif opt == "best_LFP_featstr":
+        best_LFP_featstr = arg
     elif opt == "tune_search_best_LFP":
         tune_search_best_LFP = int(arg)
     elif opt == "label_groups_to_use":
@@ -441,6 +461,8 @@ for opt,arg in pars.items():
         calc_VIF = int(arg)
     elif opt == "savefile_rawname_format":
         savefile_rawname_format = arg
+    elif opt == "savefile_rawname_format_best_LFP":
+        savefile_rawname_format_best_LFP = arg
     elif opt == "calc_Boruta":
         calc_Boruta = int(arg)
     elif opt == "compute_ICA":
@@ -471,7 +493,7 @@ for opt,arg in pars.items():
             subdir = pjoin(gv.data_dir,output_subdir)
             if not os.path.exists(subdir ):
                 print('Creating output subdir {}'.format(subdir) )
-                os.makedirs(subdir)
+                makedirs_rnd(subdir)
     elif opt == "featsel_methods":
         featsel_methods = arg.split(',')
         for fsh in featsel_methods:
@@ -501,6 +523,9 @@ for opt,arg in pars.items():
         search_best_LFP = arg.split(',')
         if max([len(a) for a in  search_best_LFP] ) == 0:
             search_best_LFP = []
+    elif opt == "best_LFP_data_mods":
+        best_LFP_data_mods = arg.split(',')
+        assert isinstance(best_LFP_data_mods, list)
     elif opt == "calc_selMinFeatSet":
         calc_selMinFeatSet = int(arg)
     elif opt == "src_grouping":
@@ -616,6 +641,10 @@ for opt,arg in pars.items():
 
 output_subdir_full = pjoin(gv.data_dir, output_subdir)
 
+if custom_rawname_str is not None and len(custom_rawname_str) == 0:
+    # some functions really want None
+    custom_rawname_str = None
+
 if use_ICA_for_classif and not compute_ICA:
     raise ValueError('nonsense')
 
@@ -728,6 +757,8 @@ feat_pars_pri = []
 bindict_per_rawn = {}
 bindict_hires_per_rawn = {}
 anndict_per_intcat_per_rawn    = {}
+
+fnf_searchLFPres_pri = []
 
 # Load everything
 for rawn in rawnames:
@@ -874,6 +905,8 @@ for rawn in rawnames:
     tasks += [task]
 
     mainLFPchan = None
+    LFP_side_to_use_searchLFP = None
+    fnf_searchLFPres = None
     if use_main_LFP_chan:
         best_LFP_info_fname_full = pjoin(gv.data_dir, best_LFP_info_file)
 
@@ -887,11 +920,10 @@ for rawn in rawnames:
         #def getBestLFP_clToMove(best_LFP_dict,subj,metric='balanced_accuracy',
         #                grp = 'merge_nothing', it = 'basic', prefix_type='modLFP_onlyH_act',
         #                disjoint=True, exCB=True, drop_type='only'):
-        from utils_postprocess import getBestLFPfromDict
-        if bestLFP_disjoint == 'auto':
+        if best_LFP_disjoint == 'auto':
             disjoint = -subskip_fit
         else:
-            disjoint = int(bestLFP_disjoint)
+            disjoint = int(best_LFP_disjoint)
         assert len(groupings_to_use) == 1, 'unclear which grouping to use'
         assert len(int_types_to_use) == 1, 'unclear which interval type to use'
         #NOTE: maybe I want to keep the fixed rule of selecting the LFP
@@ -900,11 +932,11 @@ for rawn in rawnames:
         # if I use other groupings or disjointness it is already big deal,
         # I don't want to mix them
         if tuple(best_LFP_data_mods) == tuple(['LFP']):
-            bestLFP_prefix_type = f'modLFP_{best_LFP_featstr}'
+            best_LFP_prefix_type = f'modLFP_{best_LFP_featstr}'
         elif set(best_LFP_data_mods) == set(['LFP','msrc']):
-            bestLFP_prefix_type = best_LFP_featstr
+            best_LFP_prefix_type = best_LFP_featstr
         else:
-            raise ValueError('wrong bestLFP_prefix_type = {bestLFP_prefix_type}')
+            raise ValueError('wrong best_LFP_prefix_type = {best_LFP_prefix_type}')
         if best_LFP_exCB is None:
             if brain_side_to_use.startswith('both'):
                 exCB = False
@@ -916,38 +948,77 @@ for rawn in rawnames:
         else:
             exCB = best_LFP_exCB
 
-        rncombinstr = formatMultiRawnameStr(rawnames, savefile_rawname_format,
-                custom_rawname_str = custom_rawname_str)
+
+        # take rawnames that are related to current subject AND current medcond
+        rawnames_cursubj =  [rn for rn in rawnames if '_'.join(rn.split('_')[:2]) \
+                             == '_'.join(rawn.split('_')[:2])]
+        #formatMultiRawnameStr(rawnames_cursubj, 'subj,medcond_glob')
+        rncombinstr = formatMultiRawnameStr(rawnames_cursubj, savefile_rawname_format_best_LFP,
+                custom_rawname_str = custom_rawname_str_best_LFP)
+
         # TODO: load this file and check that labels are the same
-        mainLFPchan, fnf_searchLFPres =\
-                getBestLFPfromDict(best_LFP_info,subj,rncombinstr,
+        mainLFPchan, fnf_searchLFPres, best_LFP_sel_params =\
+                getBestLFPfromDict(best_LFP_info,subj,
+                        rncombinstr,
                 disjoint=disjoint,
                 brain_side = brain_side_to_use,
                 exCB = exCB,
                 grp=groupings_to_use[0],
                 it=int_types_to_use[0])
 
+        fnf_searchLFPres_pri += [fnf_searchLFPres]
+
         search_LFP_dir = Path(best_LFP_info_fname_full).parent
+
+
+        mod_time_searchLFP_res = datetime.datetime.fromtimestamp(os.stat(fnf_searchLFPres).st_mtime)
+        f_searchLFPres = np.load(fnf_searchLFPres, allow_pickle=True)
+        # compare strings here
+        pars_searchLFP = f_searchLFPres['pars'][()]
+        if len(rawnames) <= 2:
+            assert pars_searchLFP['rawnames'] == pars['rawnames']
+        else:
+            if pars_searchLFP['rawnames'] != pars['rawnames'] :
+                print( f'There is no equality: {pars_searchLFP["rawnames"]} != {pars["rawnames"]}' )
+        # results_cur
+
+
+        #bint_side_searchLFP = pars_searchLFP['body_side_for_baseline_int']
+        LFP_side_to_use_searchLFP = pars_searchLFP['LFP_side_to_use']
+
+        # normally it should depend on feature file only anyway
+        #if bint_side == 'copy_from_search_LFP':
+        #    print(f'Warning: Setting bint_side to bint_side_searchLFP={bint_side_searchLFP}')
+        #    bint_side = bint_side_searchLFP
+        #else:
+        #    assert bint_side_searchLFP == bint_side, (bint_side_searchLFP, bint_side)
+
+        if LFP_side_to_use == 'copy_from_search_LFP':
+            print(f'Warning: Setting bint_side to LFP_side_to_use_searchLFP={LFP_side_to_use_searchLFP}')
+            LFP_side_to_use = LFP_side_to_use_searchLFP
+        else:
+            assert LFP_side_to_use_searchLFP == LFP_side_to_use, (LFP_side_to_use_searchLFP, LFP_side_to_use)
+
         if use_matching_folds_main_LFP:
             # go to corresponding medcond dir, load folds
             #assert len(rawnames) == 2
             #rnstr = ','.join(rawnames)
             #p = pjoin(search_LFP_dir, rnstr)
             #fold_info = np.load('fold_info.npz')
+ 
+            rc_searchLFP = f_searchLFPres['results_cur'][()]
+            bininds_clean2_searchLFP = rc_searchLFP['bininds_noartif_naive_and_manual']
+            clgfc = rc_searchLFP[ 'class_labels_good_for_classif' ] 
 
-            f_searchLFPres = np.load(fnf_searchLFPres)
-            # compare strings here
-            assert f_searchLFPres['pars']['rawnames'] == pars['rawnames']
-            # results_cur
-            fold_info = f_searchLFPres['fold_info'][()]
 
+            fold_info = rc_searchLFP['fold_info']
             folds_train_holdout = fold_info['folds_train_holdout']
             folds_trainfs_testfs = fold_info['folds_trainfs_testfs']
             folds_train_holdout_trainfs_testfs = fold_info['folds_train_holdout_trainfs_testfs']
             # with g
-            foldsg_train_holdout = fold_info['foldsg_train_holdout']
-            foldsg_trainfs_testfs = fold_info['foldsg_trainfs_testfs']
-            foldsg_train_holdout_trainfs_testfs = fold_info['foldsg_train_holdout_trainfs_testfs']
+            #foldsg_train_holdout = fold_info['foldsg_train_holdout']
+            #foldsg_trainfs_testfs = fold_info['foldsg_trainfs_testfs']
+            #foldsg_train_holdout_trainfs_testfs = fold_info['foldsg_train_holdout_trainfs_testfs']
             if not gv.DEBUG_MODE:
                 del f_searchLFPres
 
@@ -1040,7 +1111,9 @@ for rawn in rawnames:
     ##############
 
     brain_side_to_use_cur = parseSide(brain_side_to_use, bint_side)
+    # LFP_side_to_use is set in params
     LFP_side_to_use_cur   = parseSide(LFP_side_to_use,   bint_side)
+
     #if LFP_side_to_use == 'contralat_to_move':
     #    assert mainmoveside_cur is not None
     #    LFP_side_to_use_cur = utils.getOppositeSideStr(mainmoveside_cur)
@@ -1118,6 +1191,9 @@ for rawn in rawnames:
         chnames_LFP_pri[-1] = chnames_LFP
 
 ############### enf of feature loading
+# allow 0
+if use_matching_folds_main_LFP:
+    assert len(set(fnf_searchLFPres_pri) ) <= 1, 'otherwise artif sync would fail'
 
 baseline_int_type_pri = [pcff['baseline_int_type']  for pcff in feat_pars_pri]
 
@@ -1175,7 +1251,7 @@ if show_plots:
     subdir_fig = pjoin(gv.dir_fig,output_subdir)
     if not os.path.exists(subdir_fig ):
         print('Creating output subdir {}'.format(subdir_fig) )
-        os.makedirs(subdir_fig)
+        makedirs_rnd(subdir_fig)
 
     out_name_plot = rn_str + out_name + \
         'mainLFP{}_HFO{}_{}_{}'.\
@@ -1340,11 +1416,13 @@ nbins_total =  sum( [ len(times) for times in rawtimes_pri ] )
 
 # here I need to use side_switched because I need to concatenate anns (I were
 # not doing it in the previous processing stages)
-anns, anns_pri, times_concat, dataset_bounds, wbd_merged = utsne.concatAnns(rawnames,
-                                                          rawtimes_pri, crop=(crop_start,crop_end),
-                                                          side_rev_pri = side_switch_happened_pri,
-                                                         wbd_pri = wbd_pri, sfreq=sfreq, ret_wbd_merged=1)
-print('times_concat end {} wbd end {}'.format(times_concat[-1] * sfreq, wbd_merged[1,-1] ) )
+anns, anns_pri, times_concat, dataset_bounds, wbd_merged = \
+        concatAnns(rawnames, rawtimes_pri, 
+            crop=(crop_start,crop_end),
+            side_rev_pri = side_switch_happened_pri,
+            wbd_pri = wbd_pri, sfreq=sfreq, ret_wbd_merged=1)
+print('times_concat end {} wbd end {}'.\
+        format(times_concat[-1] * sfreq, wbd_merged[1,-1] ) )
 assert len(df) == wbd_merged.shape[1]
 #df['times_concat'] = times_concat
 df['wblb_merged'] = wbd_merged[0]
@@ -1365,7 +1443,7 @@ ivalis_tb_indarrays_merged = \
 
 #######################   naive artifacts
 # here we only select indices in fact, not touch Xconcat itself
-if do_outliers_discard:
+if discard_outliers:
     artif_naive_bininds, qvmult, discard_ratio = \
         utsne.findOutlierLimitDiscard(Xconcat,discard=discard_outliers_q,qshift=1e-2)
     bininds_clean1 = np.setdiff1d( np.arange(Xconcat.shape[0]),
@@ -1375,6 +1453,9 @@ if do_outliers_discard:
         format(qvmult, len(artif_naive_bininds), Xconcat.shape[0],
             len(artif_naive_bininds)/sfreq,  100 * discard_ratio ) )
 else:
+    qvmult = None
+    artif_naive_bininds = None
+    discard_ratio = None
     bininds_clean1 = np.arange(Xconcat.shape[0])    #everything
 
 ###########################   artifacts, collected by hand
@@ -1389,10 +1470,15 @@ else:
     if 'msrc' in data_modalities:
         suffixes += ann_MEGartif_prefix_to_use
 anns_artif, anns_artif_pri, times_, dataset_bounds_ = \
-    utsne.concatAnns(rawnames,rawtimes_pri, suffixes,crop=(crop_start,crop_end),
-                 allow_short_intervals=True, side_rev_pri =
-                 side_switch_happened_pri, wbd_pri = wbd_pri, sfreq=sfreq)
+    concatAnns(rawnames, rawtimes_pri, suffixes,
+        crop=(crop_start,crop_end),
+        allow_short_intervals=True, 
+        side_rev_pri = side_switch_happened_pri, 
+        wbd_pri = wbd_pri, sfreq=sfreq)
 # remove wrong side artifacts (but keeping all channels on given side)
+if  use_matching_folds_main_LFP:
+    assert LFP_side_to_use_searchLFP is not None
+
 if LFP_side_to_use == "baseline_int_side":
     wrong_brain_side_let = baseline_int[-1].upper()  # ipsilater is wrong for LFP
     anns_artif = utils.removeAnnsByDescr(anns_artif,
@@ -1411,16 +1497,21 @@ ivalis_artif_tb_indarrays_merged = \
     utils.getWindowIndicesFromIntervals(wbd_merged,ivalis_artif,
                                     sfreq,ret_type='bins_contig',
                                     ret_indices_type =
-                                    'window_inds', nbins_total=nbins_total )
+                                    'window_inds', 
+                                    nbins_total=nbins_total )
 #ivalis_artif_tb, ivalis_artif_tb_indarrays = utsne.getAnnBins(ivalis_artif, Xtimes,
 #                                                            nedgeBins, sfreq, skip, windowsz, dataset_bounds)
 #ivalis_artif_tb_indarrays_merged = utsne.mergeAnnBinArrays(ivalis_artif_tb_indarrays)
 
 
 # set artifacts to NaN
+if artif_force_all_modalities:
+    featnames_for_artif_setnan = None
+else:
+    featnames_for_artif_setnan = featnames
 Xconcat_artif_nan = utils.setArtifNaN(Xconcat,
-                        ivalis_artif_tb_indarrays_merged,
-                        featnames, ignore_shape_warning=test_mode)
+        ivalis_artif_tb_indarrays_merged,
+        featnames_for_artif_setnan, ignore_shape_warning=test_mode)
 isnan = np.isnan( Xconcat_artif_nan)
 if np.sum(isnan):
     artif_manual_bininds = np.where( isnan )[0]
@@ -1458,6 +1549,10 @@ elif artif_handling_before_fit == 'reject':
     #bininds_for_fit = bininds_clean2
 else:
     raise ValueError('wrong value of artif_handling_before_fit = {}'.format(artif_handling_before_fit) )
+
+if use_matching_folds_main_LFP:
+    assert len( bininds_clean2_searchLFP ) == len(bininds_clean2), (len( bininds_clean2_searchLFP ), len(bininds_clean2) )
+    assert tuple( bininds_clean2_searchLFP ) == tuple(bininds_clean2)
     #Xconcat_all    = Xconcat
 #elif artif_handling_before_fit == 'do_nothing':
 #    #Xconcat_inc_impute = Xconcat
@@ -1818,7 +1913,7 @@ if do_Classif:
                         pl += [key ]
 
                 # make dirs except of the last thing (which is a filename)
-                os.makedirs(pjoin(*tuple(pl[:-1] ) ), exist_ok=True)
+                makedirs_rnd(pjoin(*tuple(pl[:-1] ) ), exist_ok=True)
 
                 final_path = pjoin(*tuple(pl) )
                 #path_list = pre_final_path.split(os.path.sep)
@@ -1920,15 +2015,23 @@ if do_Classif:
             results_cur['bininds_noartif_naive'] = bininds_clean1
             results_cur['bininds_noartif_naive_and_manual'] = \
                 bininds_clean2
+            results_cur['mainLFPchan'] = mainLFPchan
+            results_cur['best_LFP_exCB'] = best_LFP_exCB
+            results_cur['best_LFP_prefix_type'] = best_LFP_prefix_type
+            results_cur['best_LFP_sel_params'] = best_LFP_sel_params
+                
+            results_cur['LFP_side_to_use_final'] = LFP_side_to_use
 
             results_cur['icaobj'] = ica
 
             results_cur['runCID'] = runCID
             results_cur['runstring_ind'] =  runstring_ind
             results_cur['SLURM_job_id'] =  SLURM_job_id
-            results_cur['feat_pars_pri'] = feat_pars_pri
 
-            results_cur['pars'] = savedict['pars']
+            results_cur['feat_pars_pri'] = feat_pars_pri
+            results_cur['filename_searchLFPres'] = fnf_searchLFPres
+
+            results_cur['pars'] = pars
             saveResToFolder(results_cur, 'pars' )
 
             try:
@@ -1943,8 +2046,9 @@ if do_Classif:
                 hist, bin_edges = np.histogram(C_nocenter.flatten(), bins=20, density=False)
 
                 strong_correl_inds = np.where( C_flat > strong_correl_level )[0]
-                print('Num: strongly (>{:.2f}) correl feats (div by 2)={}, of total pairs {} it is {:.4f}'.format(strong_correl_level, len(strong_correl_inds) //2 ,
-                                                                                                            len(C_flat)//2, len(strong_correl_inds) / len(C_flat) ) )
+                print('Num: strongly (>{:.2f}) correl feats (div by 2)={}, of total pairs {} it is {:.4f}'.\
+                        format(strong_correl_level, len(strong_correl_inds) //2 , 
+                            len(C_flat)//2, len(strong_correl_inds) / len(C_flat) ) )
                 nonsyn_feat_inds = pp.getNotSyn(C,strong_correl_level)
                 print(f'Num of feats excluding synonyms for corr. level = {strong_correl_level:.3f}: {len(nonsyn_feat_inds)} of {C.shape[0]}' )
             except ValueError as e:
@@ -1967,6 +2071,9 @@ if do_Classif:
             # just skipped class_labels_good
             lab_enc.fit(class_labels_for_heavy)
             class_labels_good_for_classif = lab_enc.transform(class_labels_for_heavy)
+            if use_matching_folds_main_LFP:
+                assert len(clgfc) == len(class_labels_good_for_classif), (len(clgfc), len(class_labels_good_for_classif) )
+                assert tuple(clgfc) == tuple(class_labels_good_for_classif)
             from sklearn.utils.class_weight import compute_sample_weight
             class_weights = compute_sample_weight('balanced',class_labels_good_for_classif)
             class_label_ids = lab_enc.inverse_transform( np.arange( len(set(class_labels_good_for_classif)) ) )
@@ -2278,28 +2385,30 @@ if do_Classif:
                 import sklearn
                 group_fold_stratif = vparse(sklearn.__version__) > vparse('0.25')
 
-                for label_group_name,group_labels in group_labels_dict.items():
-                    if label_group_name not in label_groups_to_use:
-                        continue
-                    if len(group_labels) != len(X_for_heavy):
-                        continue
-                    n_splitsg = min(n_splits, len(set(group_labels)))
-                    if n_splitsg > 1:
-                        foldsg_train_holdout, foldsg_trainfs_testfs,\
-                            foldsg_train_holdout_trainfs_testfs =\
-                            utsne.getFolds(X_for_heavy, class_labels_good_for_classif,
-                                n_splits=n_splitsg, group_labels=group_labels,
-                                stratified=group_fold_stratif,
-                                holdout=True, seed=0)
+            # because we don't have foldsg in searchLFP file
+            for label_group_name,group_labels in group_labels_dict.items():
+                if label_group_name not in label_groups_to_use:
+                    continue
+                glbl = group_labels[::subskip_fit]
+                if len(glbl) != len(X_for_heavy):
+                    continue
+                n_splitsg = min(n_splits, len(set(glbl)))
+                if n_splitsg > 1:
+                    foldsg_train_holdout, foldsg_trainfs_testfs,\
+                        foldsg_train_holdout_trainfs_testfs =\
+                        utsne.getFolds(X_for_heavy, class_labels_good_for_classif,
+                            n_splits=n_splitsg, group_labels=glbl,
+                            stratified=group_fold_stratif,
+                            holdout=True, seed=0)
 
-                        # with g
-                        fold_info[f'foldsg_train_holdout:{label_group_name}'] = foldsg_train_holdout
-                        fold_info[f'foldsg_trainfs_testfs:{label_group_name}'] = foldsg_trainfs_testfs
-                        fold_info[f'foldsg_train_holdout_trainfs_testfs:{label_group_name}'] =\
-                            foldsg_train_holdout_trainfs_testfs
+                    # with g
+                    fold_info[f'foldsg_train_holdout:{label_group_name}'] = foldsg_train_holdout
+                    fold_info[f'foldsg_trainfs_testfs:{label_group_name}'] = foldsg_trainfs_testfs
+                    fold_info[f'foldsg_train_holdout_trainfs_testfs:{label_group_name}'] =\
+                        foldsg_train_holdout_trainfs_testfs
 
-                results_cur['fold_info'] = fold_info
-                saveResToFolder(results_cur, 'fold_info')
+            results_cur['fold_info'] = fold_info
+            saveResToFolder(results_cur, 'fold_info')
 
             do_XGB_cur =  do_XGB and not (int_types_key in\
                 gp.int_type_datset_rel and skip_XGB_aux_intervals  )
@@ -2565,32 +2674,40 @@ if do_Classif:
                     if int_types_key not in gp.int_type_datset_rel:
                         rc['across'] = {}
                         for label_group_name,group_labels in group_labels_dict.items():
+                            ngroups = len( set(group_labels) )
                             if label_group_name not in label_groups_to_use:
                                 continue
 
-                            if len(set(group_labels)) == 1:
+                            if ngroups == 1:
                                 print(f'CV across label groups: Skipping {label_group_name}, because it is trivial')
                                 rc['across'][label_group_name] = None
                                 continue
 
-                            ngroups = len( set(group_labels) )
+                            foldsg_train_holdout = fold_info[f'foldsg_train_holdout:{label_group_name}']
+
                             try:
                                 r0_across = utsne.getPredPowersCV(clf_XGB,
                                     X_orig,y_orig,
                                     class_ind_to_check_lenc, printLog = 0,
                                     n_splits=ngroups, add_fitopts=add_fitopts,
                                     add_clf_creopts=add_clf_creopts,
-                                    ret_clf_obj=False, seed=0, balancing=XGB_balancing,
+                                    ret_clf_obj=False, seed=0, 
+                                    balancing=XGB_balancing,
                                     fold_split=foldsg_train_holdout,
                                     perm_test=0)
                                 rc['across'][label_group_name] = r0_across
 
                                 perfstr = utsne.sprintfPerfs(r0_across['perf_aver'])
                                 print(f'{label_group_name} label grouping gave perf {perfstr}')
-                                print( r0_across['confmat_aver'] * 100 )
+                                cm = r0_across['confmat_aver']
+                                if cm is not None:
+                                    print(cm  * 100 )
                             except AssertionError as e:
-                                print(f'!!! Error during across {label_group_name} computation! {str(e)}' )
-                                rc['across'][label_group_name] = None
+                                if not gv.DEBUG_MODE:
+                                    print(f'!!! Error during across {label_group_name} computation! {str(e)}' )
+                                    rc['across'][label_group_name] = None
+                                else:
+                                    raise e
 
                     #r0_across_medcond = utsne.getPredPowersCV(clf_XGB,X_cur,y_cur,
                     #    class_ind_to_check_lenc, printLog = 0,

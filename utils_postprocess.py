@@ -626,7 +626,7 @@ def extractLightInfo(f):
     return removeLargeItems(res_cur)
 
 def removeLargeItems(res_cur, keep_featsel='all',
-                     remove_full_scores=True, verbose=0):
+                     remove_full_scores=True, verbose=0, rem_XGBobj = True):
     featsel_methods = list(res_cur['featsel_per_method'] )
     for fsh in featsel_methods:
         if isinstance(keep_featsel,list) and fsh not in keep_featsel:
@@ -743,8 +743,24 @@ def removeLargeItems(res_cur, keep_featsel='all',
                         print('delted clf_obj')
                     del sub['clf_objs']
 
+    if rem_XGBobj:
+        if 'XGBobj' in res_cur:
+            del res_cur['XGBobj']
+
     XGB_anvers = res_cur.get('XGB_analysis_versions',{} )
     for aname,sub in XGB_anvers.items():
+        #if 'XGBobj' 
+        if rem_XGBobj:
+            if 'perf_dict' in sub:
+                pd = sub['perf_dict']
+                if 'clf_objs' in pd:
+                    del pd['clf_objs']
+                if 'fold_type_shuffled' in pd:
+                    t = list( pd['fold_type_shuffled'] )
+                    t[1] = None
+                    pd['fold_type_shuffled'] = tuple(t)
+        #['all_present_features']['perf_dict']['clf_objs']
+
         if 'args' in sub:
             if 'X' in sub['args']:
                 del sub['args']['X']
@@ -1016,12 +1032,13 @@ def getBestLFPfromDict(best_LFP_dict,subj,rncombinstr,metric='balanced_accuracy'
                         grp = 'merge_nothing', it = 'basic',
                         prefix_type='modLFP_onlyH_act',
                         brain_side='contralat_to_move',
-                        disjoint=True, exCB=False, drop_type='only'):
+                        disjoint=1, exCB=False, drop_type='only'):
     # disjoint either positive (bool) or negative (=subskip value)
     # return LFP channel name as a string
     import globvars as gb
     mainmoveside = gv.gen_subj_info[subj].get('move_side',None)
     maintremside = gv.gen_subj_info[subj].get('tremor_side',None)
+    # define side by paring brain_side
     if brain_side == 'contralat_to_move':
         assert mainmoveside is not None
         side = utils.getOppositeSideStr( mainmoveside )
@@ -1051,7 +1068,10 @@ def getBestLFPfromDict(best_LFP_dict,subj,rncombinstr,metric='balanced_accuracy'
 
     if brain_side == 'contralat_to_move':
         best_kind = 'best_LFP_contralat_to_move'
+    elif brain_side == 'ipsilat_to_move':
+        best_kind = 'best_LFP_ipsilat_to_move'
     else:
+        # both sides
         best_kind = 'best_LFP'
 
     g = f'{prefix_type}_{side_det_str},{grp},{it}'
@@ -1063,7 +1083,7 @@ def getBestLFPfromDict(best_LFP_dict,subj,rncombinstr,metric='balanced_accuracy'
 
     if side != 'both':
         assert best[3] == side[0].upper(), (best,side)  # otherwise we'll get 0 features
-    return best, res['filename_full']
+    return best, res['filename_full'], (g,prefix_type,side_det_str,grp,it,best_kind)
 
 
 def updateSrcGroups(ipmpp, roi_labels, srcgrp, use_both_sides = True, want_sided = True ):

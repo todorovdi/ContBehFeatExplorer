@@ -1653,6 +1653,9 @@ def mergeAnnBinArrays(ivalis_tb_indarrays):
 def sprintfPerfs(perfs, perfs_to_show = ['sens', 'spec',
                                          'F1', 'accuracy',
                                          'balanced_accuracy']):
+    if perfs is None:
+        print('sprintfPerfs: argument is None')
+        return np.nan
     if isinstance(perfs,dict):
         pr = []
         for pts in perfs_to_show:
@@ -1661,13 +1664,9 @@ def sprintfPerfs(perfs, perfs_to_show = ['sens', 'spec',
     else:
         assert isinstance(perfs,list) or isinstance(perfs,np.ndarray)
     p = np.array(list(perfs) ) * 100
-    perfs_str = '{:.2f}%'.format(p[0])
-    if len(perfs) > 1:
-        perfs_str += ',{:.2f}%'.format(p[1])
-    if len(perfs) > 2:
-        perfs_str += ',{:.2f}%'.format(p[2])
+    for i,pn in enumerate(perfs_to_show):
+        perfs_str = '{}={:.2f}%; '.format(pn,p[i])
     return perfs_str
-
 
 def _MI(arg):
     from sklearn.feature_selection import mutual_info_classif
@@ -1925,6 +1924,8 @@ def averPerfDicts(perf_dicts):
         if not wasnan:
             not_nan_fold_inds += [indp]
 
+    if len(not_nan_fold_inds) == 0:
+        return None, []
     assert len(not_nan_fold_inds) > 0
     perfs_CV_valid = [ perf_dicts[indp] for indp in not_nan_fold_inds  ]
     ##############
@@ -2038,12 +2039,17 @@ def getPredPowersCV(clf,X,class_labels,class_ind, printLog = False, n_splits=Non
 
         test_indices = []
         split_ind = 0
-        for train_index, test_index in fold_split:
+        for fi,(train_index, test_index) in enumerate(fold_split):
             #print(train_index )
             X_train, X_test = Xarr[train_index], Xarr[test_index]
             y_train, y_test = class_labels[train_index], class_labels[test_index]
 
-            assert n_classes == len(set(y_train) )
+            print('classes =', n_classes,len(set(y_train) ),\
+                    len(set(y_test) ))
+            if len(set(y_train) ) !=  len(set(y_test) ):
+                print(f'skipping fold {fi} due to different numbers')
+                continue
+            assert n_classes == len(set(y_train) ) 
             assert n_classes == len(set(y_test) )
 
             class_labels_test_u = np.unique(y_test)
@@ -2126,8 +2132,6 @@ def getPredPowersCV(clf,X,class_labels,class_ind, printLog = False, n_splits=Non
         # averaging
         perf_aver, not_nan_fold_inds = averPerfDicts(perfs_CV)
 
-
-
         #perfarr = np.vstack( [ (p[0],p[1],p[2])  for p in perfs_CV]  )
         #confmats = [ p[-1]  for p in perfs_CV]
         #not_nan_fold_inds = np.where(  np.max( np.isnan(perfarr).astype(int) , axis= 1) == 0 )[0]
@@ -2143,7 +2147,10 @@ def getPredPowersCV(clf,X,class_labels,class_ind, printLog = False, n_splits=Non
             np.setdiff1d(np.arange(len(perfs_CV)) , not_nan_fold_inds )
         retcur['perfs_CV'] = perfs_CV
         retcur['perf_aver'] = perf_aver
-        retcur['confmat_aver'] = perf_aver['confmat']
+        if perf_aver is None:
+            retcur['confmat_aver'] = None
+        else:
+            retcur['confmat_aver'] = perf_aver['confmat']
         if ret_clf_obj:
             #ret += [models]
             retcur['clf_objs'] = models

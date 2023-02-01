@@ -57,7 +57,10 @@ echo "${raws_all[@]}"
 
 
 for (( i=0; i<$nraws_all; i++ )); do
-  . "$OSCBAGDIS_DATAPROC_CODE/run/$scrf" ${raws_all[$i]}
+  r="$OSCBAGDIS_DATAPROC_CODE/run/$scrf"
+  echo $r
+  . "$r" ${raws_all[$i]}
+  echo EC=$EC
   if [ $EC -ne 0 ]; then
     echo "Exit code $EC, exiting"
     exit $EC

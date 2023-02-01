@@ -1,8 +1,6 @@
 # saves data and collect stats
 # we do not do rescaling here! Only stat gathering
 
-
-
 import sys,os,getopt
 import utils_tSNE as utsne
 import utils_genfeats as ugf
@@ -38,6 +36,7 @@ body_side_for_baseline_int = 'body_move_side'
 channel_order = 'side,mod'
 
 prep_dat_prefix = ""
+#preproc_type    = "highpass"
 
 n_free_cores = gp.n_free_cores
 n_jobs = max(1, mpr.cpu_count() - n_free_cores)
@@ -46,7 +45,9 @@ allow_CUDA_MNE = mne.utils.get_config('MNE_USE_CUDA')
 allow_CUDA = True
 
 input_subdir = ""
+input_subdir_srcrec = ""
 output_subdir = ""
+
 msrc_inds = np.arange(8,dtype=int)  #indices appearing in channel (sources) names, not channnel indices
 
 data_modalities = ['LFP', 'msrc']
@@ -71,7 +72,7 @@ opts, args = getopt.getopt(effargv,"hr:",
           "sources_type=", "crop=" ,
          "src_grouping=", "src_grouping_fn=", "brain_side_to_use=",
         "body_side_for_baseline_int=", "channel_order=",
-         "input_subdir=", "output_subdir=",
+         "input_subdir=", "output_subdir=", "input_subdir_srcrec=",
          "save_dat=", "save_stats=", "param_file=",
          "bands_precision=", "calc_stats_multi_band=", "exit_after=",
          "use_preloaded_raws=", "allow_CUDA=", "n_jobs=", "prep_dat_prefix=" ])
@@ -127,6 +128,11 @@ for opt,arg in pars.items():
         if len(input_subdir) > 0:
             subdir = pjoin(gv.data_dir,input_subdir)
             assert os.path.exists(subdir )
+    elif opt == "input_subdir_srcrec":
+        input_subdir_srcrec = arg
+        if len(input_subdir_srcrec) > 0:
+            subdir = pjoin(gv.data_dir,input_subdir_srcrec)
+            assert os.path.exists(subdir )
     elif opt == "output_subdir":
         output_subdir = arg
         if len(output_subdir) > 0:
@@ -140,6 +146,8 @@ for opt,arg in pars.items():
         prep_dat_prefix = ""
     elif opt == "mods":
         data_modalities = arg.split(',')   #lfp of msrc
+    #elif opt == "preproc_type":
+    #    preproc_type = arg
     elif opt == "calc_stats_multi_band":
         calc_stats_multi_band = int(arg)
     elif opt == "bands_precision":
@@ -258,13 +266,19 @@ mods_to_load = ['LFP', 'src', 'EMG']
 #mods_to_load = ['src', 'FTraw']
 if use_LFP_HFO:
     mods_to_load += ['LFP_hires']
+#if preproc_type == 'tSSS':
+#    mods_to_load += ['tSSS'] 
 
 if not use_preloaded_raws:
     # verbosity levels from 10 (most vebose) to 50 (least)
     # https://mne.tools/stable/auto_tutorials/intro/50_configure_mne.html#tut-logging
-    raws_permod_both_sides = upre.loadRaws(rawnames,mods_to_load, sources_type, src_type_to_use,
-                src_file_grouping_ind,input_subdir=input_subdir,n_jobs=n_jobs,
-                                           verbose=40)
+    raws_permod_both_sides = upre.loadRaws(rawnames,mods_to_load, 
+            sources_type, src_type_to_use,
+        src_file_grouping_ind,
+        input_subdir=input_subdir,
+        input_subdir_srcrec=input_subdir_srcrec,
+        n_jobs=n_jobs,
+        verbose=40)
 else:
     print('----------  USING PRELOADED RAWS!!!!!')
 
@@ -311,11 +325,12 @@ for rn in rawnames:
 
 # the output is dat only from the selected hemisphere
 # no artifact-related modif, only loading
-r = ugf.collectDataFromMultiRaws(rawnames, raws_permod_both_sides, sources_type,
-                             src_file_grouping_ind, src_grouping, use_main_LFP_chan,
-                             brain_side_to_use, new_main_body_side, data_modalities,
-                             crop_start,crop_end,msrc_inds, rec_info_pri,
-                             None, None, channel_order  )
+r = ugf.collectDataFromMultiRaws(rawnames, raws_permod_both_sides, 
+        sources_type,
+         src_file_grouping_ind, src_grouping, use_main_LFP_chan,
+         brain_side_to_use, new_main_body_side, data_modalities,
+         crop_start,crop_end,msrc_inds, rec_info_pri,
+         None, None, channel_order  )
 
 dat_pri, dat_lfp_hires_pri, extdat_pri, anns_pri, anndict_per_intcat_per_rawn_, times_pri,\
 times_hires_pri, subfeature_order_pri, subfeature_order_lfp_hires_pri, aux_info_perraw = r

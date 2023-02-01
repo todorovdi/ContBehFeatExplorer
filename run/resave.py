@@ -222,6 +222,8 @@ assert (not do_tSSS) or (not do_SSP)   # not both together!
 tSSS_anns_type = 'MEG_flt'
 
 do_highpass_after_SSS = 1
+do_notch_after_SSS = 1
+do_resample_after_SSS = 1
 
 ################ Start doing things
 
@@ -259,16 +261,18 @@ for rawname_ in rawnames:
     if do_notch:
         addStr_input_fn += '_notch'
     if do_tSSS:
-        #addStr_input_fn += '_SSS'
-        #addStr_input_fn += '_SSS_notch_resample'
-        addStr_input_fn += '_SSS_notch'
-        if do_highpass_after_SSS:
+        ##addStr_input_fn += '_SSS'
+        ##addStr_input_fn += '_SSS_notch_resample'
+        #addStr_input_fn += '_SSS_notch'
+        #if do_highpass_after_SSS:
+        #    addStr_input_fn += '_highpass'
+        ##addStr_input_fn += '_resample'
+        addStr_input_fn = '_' + '_'.join( to_perform )
+    else:
+        if do_SSP:
+            addStr_input_fn += '_SSP'
+        if do_highpass:
             addStr_input_fn += '_highpass'
-        #addStr_input_fn += '_resample'
-    if do_SSP:
-        addStr_input_fn += '_SSP'
-    if do_highpass:
-        addStr_input_fn += '_highpass'
     #if do_ICA:  # do_ICA DOES NOT produce a new raw file, so no need to change the name
     #    addStr_input_fn += '_ICA'
 
@@ -457,10 +461,11 @@ for rawname_ in rawnames:
     if raw_notched is not None:
         del raw
         raw = raw_notched
-    elif do_notch:
+    elif do_notch and not (( 'tSSS' in to_perform) and do_notch_after_SSS ):
         # this is actually not necessary because MNE's notch filter cannot deal
         # with artifacts anyway. But I don't want to remove it so let it stay
         # here
+        print('Start notch')
         anns_artif, anns_artif_pri, times2, dataset_bounds =\
             concatAnns([fname_noext], [raw.times],
                              suffixes = MEGartif_suffixes_for_highpass,
@@ -472,9 +477,10 @@ for rawname_ in rawnames:
         raw = raw_notched
 
 
-    if do_highpass:
+    if do_highpass and not (( 'tSSS' in to_perform) and do_highpass_after_SSS ):
         # loads artif from not filtered raw, we don't want to work with LFP
         # here anymore, so only MEG
+        print('Start highpass')
         anns_artif, anns_artif_pri, times2, dataset_bounds =\
             concatAnns([fname_noext], [raw.times],
                              suffixes = MEGartif_suffixes_for_highpass,
@@ -486,7 +492,7 @@ for rawname_ in rawnames:
         # reset anns
         raw.set_annotations(mne.Annotations([],[],[]) )
 
-    if do_resample and not read_resampled:
+    if do_resample and not read_resampled and not (do_resample_after_SSS and ('tSSS' in to_perform) ):
         print('Resampling starts')
         if raw.info['sfreq'] > freqResample:
             # warning: this can propagate artifacts
@@ -518,9 +524,11 @@ for rawname_ in rawnames:
         if do_tSSS:
             # apparently it is better to do tSSS before notching and perhaps
             # even before resampling
-            assert ( len(read_type ) == 0 ) or (len(read_type) == 1 and len(read_type[0]) == 0 )
-            assert ( len(to_perform) == 1 and to_perform[0] == 'tSSS'  ) or\
-                (len(to_perform) == 2 and to_perform[0] == 'tSSS' and to_perform[1] == 'ICA')
+            if read_type[0] != 'fieldtrip_raw':
+                assert ( len(read_type ) == 0 ) or \
+                    (len(read_type) == 1 and len(read_type[0]) == 0 )
+                assert ( len(to_perform) == 1 and to_perform[0] == 'tSSS'  ) or\
+                    (len(to_perform) == 2 and to_perform[0] == 'tSSS' and to_perform[1] == 'ICA')
             if frame_SSS == 'meg':
                 origin = None
 
@@ -566,22 +574,34 @@ for rawname_ in rawnames:
             # I will work only with highpassed data later
             # so makes sense to use those artifacts. I am not sure, maybe I'd
             # like tSSS to actually remove those artifacts
-            if tSSS_anns_type == 'MEG_flt':
-                raw.set_annotations( anns_MEG_artif_flt)
-            elif tSSS_anns_type == 'MEG':
-                raw.set_annotations( anns_MEG_artif)
+            if len(MEGartif_suffixes_for_tSSS):
+                anns_artif, anns_artif_pri, times2, dataset_bounds =\
+                    concatAnns([fname_noext], [raw.times],
+                    suffixes = MEGartif_suffixes_for_tSSS,
+                    allow_missing=False )
+                raw.set_annotations( anns_artif )
             else:
+                anns_artif = None
                 print('Not setting any artifact annotations for maxwell_filter')
+            #if tSSS_anns_type == 'MEG_all':
+            #if tSSS_anns_type == 'MEG_flt':
+            #    raw.set_annotations( anns_MEG_artif_flt)
+            #elif tSSS_anns_type == 'MEG':
+            #    raw.set_annotations( anns_MEG_artif)
+            #else:
+            #    print('Not setting any artifact annotations for maxwell_filter')
             f_sss = mne.preprocessing.maxwell_filter(raw , cross_talk=crosstalk_file,
                     calibration=fine_cal_file, coord_frame=frame_SSS,
                                                     origin=origin,
                                                     st_duration=tSSS_duration,
                                                         skip_by_annotation='BAD_MEG')
 
-            f_sss.set_annotations( anns_MEG_artif_flt)
-            f_sss.notch_filter(freqsToKill, n_jobs=n_jobs)
+            if anns_artif is not None:
+                f_sss.set_annotations( anns_artif)
+            if do_notch:
+                f_sss.notch_filter(freqsToKill, n_jobs=n_jobs)
 
-            if do_highpass_after_SSS:
+            if do_highpass:
                 f_sss.filter(l_freq=lowest_freq_to_keep,
                              h_freq=highest_freq_to_keep,
                              n_jobs=n_jobs, skip_by_annotation='BAD_MEG',

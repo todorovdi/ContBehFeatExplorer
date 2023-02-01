@@ -3528,7 +3528,9 @@ def getWindowIndicesFromIntervals(wbd,ivalis,sfreq, ret_type='bins_list',
         r = bins
     return r
 
-def setArtifNaN(X, ivalis_artif_tb_indarrays_merged, feat_names, ignore_shape_warning=False, set_val=np.nan, in_place=False):
+def setArtifNaN(X, ivalis_artif_tb_indarrays_merged,
+        feat_names, ignore_shape_warning=False,
+        set_val=np.nan, in_place=False):
     '''
     ivalis -- dict, not necessarily containing only aritfacts
     copies input array
@@ -3550,7 +3552,6 @@ def setArtifNaN(X, ivalis_artif_tb_indarrays_merged, feat_names, ignore_shape_wa
     else:
         Xout = X.copy()
 
-    #nums =  [0] * len(feat_names)
     num = 0
     for interval_name in ivalis_artif_tb_indarrays_merged:
         r = parseIntervalName(interval_name)
@@ -3578,31 +3579,35 @@ def setArtifNaN(X, ivalis_artif_tb_indarrays_merged, feat_names, ignore_shape_wa
         interval_bins = ivalis_artif_tb_indarrays_merged[interval_name]
         num += len(interval_bins)
 
-        brain_side = r['artifact_brain_side']
-        # over all features
-        for feati,featn in enumerate(feat_names):
-            do_set = False
-            if mode_all_chans:
-                do_set = True
-                #print('-----------1')
-            elif r['artifact_chname'] is not None:
-                do_set = featn.find( r['artifact_chname'] ) >= 0
-                #print('-----------2 ', do_set)
-            elif featn.find(affected_chn_mod) >= 0:
-                if brain_side is not None:
-                    do_set = (featn.find(affected_chn_mod+ brain_side) >= 0 )
-                # if no brain_side is found then we should have BAD_LFP
-                    #import pdb; pdb.set_trace()
-                    #print(f'-----------3  {featn} {interval_name} {affected_chn_mod}', do_set, r)
-                else:
-                    do_set = True
-                    #print('-----------4')
-
-            #print('my imptuer ',interval_name, featn, do_set)
-            if do_set:
+        if mode_all_chans:
+            for feati in range(Xout.shape[1] ):
                 Xout[interval_bins,feati] = set_val
-                #print('fd')
-            #print(f'--in {featn} ----- set {num} bins to {set_val}')
+        else:
+            brain_side = r['artifact_brain_side']
+            # over all features
+            for feati,featn in enumerate(feat_names):
+                do_set = False
+                #if mode_all_chans:
+                #    do_set = True
+                    #print('-----------1')
+                if r['artifact_chname'] is not None:
+                    do_set = featn.find( r['artifact_chname'] ) >= 0
+                    #print('-----------2 ', do_set)
+                elif featn.find(affected_chn_mod) >= 0:
+                    if brain_side is not None:
+                        do_set = (featn.find(affected_chn_mod+ brain_side) >= 0 )
+                    # if no brain_side is found then we should have BAD_LFP
+                        #import pdb; pdb.set_trace()
+                        #print(f'-----------3  {featn} {interval_name} {affected_chn_mod}', do_set, r)
+                    else:
+                        do_set = True
+                        #print('-----------4')
+
+                #print('my imptuer ',interval_name, featn, do_set)
+                if do_set:
+                    Xout[interval_bins,feati] = set_val
+                    #print('fd')
+                #print(f'--in {featn} ----- set {num} bins to {set_val}')
 
     return Xout
 
@@ -4497,7 +4502,7 @@ def genFeatFn(rawname_,st, nch, nfeats, skip, windowsz,
 def formatMultiRawnameStr(rawnames, rawname_format, regex_mode = False,
         custom_rawname_str = None, smart_rawn_grouping = False):
     ml = np.max( [len(rn) for rn in rawnames ] )
-    if custom_rawname_str is None:
+    if custom_rawname_str is None or len(custom_rawname_str) == 0:
         if ml>4 and not regex_mode:
             import utils_preproc as upre
             subjs_analyzed, subjs_analyzed_glob = \
@@ -4565,7 +4570,7 @@ def genMLresFn(rawnames, sources_type, src_file_grouping_ind, src_grouping,
     if nr is None:
         nr = len(rawnames)
 
-                
+
     sind_join_str = formatMultiRawnameStr(rawnames, rawname_format, regex_mode,
         custom_rawname_str, smart_rawn_grouping)
 
@@ -4806,9 +4811,10 @@ def loadLabelsDict(rncur = 'S01_off_hold', input_subdir = None, verbose = 0):
     del rec_info
     return labels_dict
 
-def loadROILabels(rncur = 'S01_off_hold', input_subdir = None):
+def loadROILabels(rncur = 'S01_off_hold', input_subdir = None, sources_type = 'parcel_aal',
+                  ret_rec_info = False):
     #src_rec_info_fn_full = os.path.join(gv.data_dir, src_rec_info_fn)
-    src_rec_info_fn_full = genRecInfoFn(rncur, input_subdir = input_subdir)
+    src_rec_info_fn_full = genRecInfoFn(rncur, input_subdir = input_subdir, sources_type = sources_type)
     rec_info = np.load(src_rec_info_fn_full, allow_pickle=True)
 
     #print( list(rec_info.keys()) )
@@ -4822,18 +4828,22 @@ def loadROILabels(rncur = 'S01_off_hold', input_subdir = None):
     new_src_order = rec_info['new_src_order'][()]
     srcgrouping_names_sorted = rec_info['srcgroups_key_order'][()]
     sgdn = 'all_raw'
-    return labels_dict[sgdn],srcgroups_dict[sgdn], coords #, new_src_order
+    if ret_rec_info:
+        return rec_info,labels_dict[sgdn],srcgroups_dict[sgdn], coords #, new_src_order
+    else:
+        return labels_dict[sgdn],srcgroups_dict[sgdn], coords #, new_src_order
 
-def loadSurfAndGrids(sind_strs, source_coords, load_def=True, src_order = None):
+def loadSurfAndGrids(sind_strs, source_coords, load_def=True, src_order = None,
+                     subdir_headmodel = '', subdir_modcoord = 'coords'):
     import pymatreader as pymr
     vis_info_per_subj = {}
     nums = []
     units = []
     for sind_str in sind_strs:
         vi = {}
-        hdf = pymr.read_mat(pjoin(gv.data_dir,f'headmodel_grid_{sind_str}_surf.mat'))
+        hdf = pymr.read_mat(pjoin(gv.data_dir,subdir_headmodel, f'headmodel_grid_{sind_str}_surf.mat'))
 
-        hdf_mod = pymr.read_mat(pjoin(gv.data_dir, 'coords', f'{sind_str}_modcoord_parcel_aal.mat'))
+        hdf_mod = pymr.read_mat(pjoin(gv.data_dir,subdir_modcoord,  f'{sind_str}_modcoord_parcel_aal.mat'))
 
 
         vi['hdf'] = hdf
@@ -4881,7 +4891,7 @@ def loadSurfAndGrids(sind_strs, source_coords, load_def=True, src_order = None):
     #print('
 
     if load_def:
-        cgMNI = pymr.read_mat(pjoin(gv.data_dir, 'coords', 'cortical_grid_MNI.mat') )
+        cgMNI = pymr.read_mat(pjoin(gv.data_dir, subdir_modcoord, 'cortical_grid_MNI.mat') )
         #cgMNI['cortical_grid'].shape  #(3, 567)
         vi = {}
         vi['headsurfgrid_verts']  = cgMNI['cortical_grid']

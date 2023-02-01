@@ -1,8 +1,17 @@
 # if it is given in .ini, and it is nonozero here, there will be error
 #RAW_SUBDIR="" 
 RAW_SUBDIR="feats_wholectx_LFP256" 
-SRCREC_SUBDIR="hipass_covmat_entire" 
-OUTPUT_SUBDIR="feats_wholectx_LFP256_covmat_entire"
+
+#SRCREC_SUBDIR="SSS_covmat_rest" 
+#OUTPUT_SUBDIR="feats_wholectx_LFP256_SSS_covmat_rest"
+
+SRCREC_SUBDIR="SSS_covmat_entire" 
+OUTPUT_SUBDIR="feats_wholectx_LFP256_SSS_covmat_entire"
+
+#SRCREC_SUBDIR="hipass_covmat_entire" 
+#OUTPUT_SUBDIR="feats_wholectx_LFP256_covmat_entire"
+
+# prescale happens in genfeats, not here, I compute stats for all combine types here anyway
 #
 #SRCREC_SUBDIR="hipass_covmat_rest" 
 #OUTPUT_SUBDIR="feats_wholectx_LFP256_covmat_rest"
@@ -25,6 +34,7 @@ fi
 
 if [ ${#SRCREC_SUBDIR} -gt 0 ]; then
   INPUT_SUBDIR_STR="$INPUT_SUBDIR_STR --input_subdir_srcrec $SRCREC_SUBDIR" 
+  echo INPUT_SUBDIR_STR=$INPUT_SUBDIR_STR
 fi
 
 if [ ${#OUTPUT_SUBDIR} -gt 0 ]; then

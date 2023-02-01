@@ -1531,7 +1531,11 @@ def gatherFeatStats(rawnames, X_pri, featnames_pri, wbd_pri,
             ###### ENd of cycle over feats
             if printLog and len(show_warn_featns) :
                 rn_str = ','.join( [rawnames[rawi]  for rawi in indset_cur ] )
-                featns_str = ','.join(show_warn_featns)
+                # since the orderding should be same
+                if len(show_warn_featns) == len(featnames):
+                    featns_str = 'all feats'
+                else:
+                    featns_str = ','.join(show_warn_featns)
                 print('gatherFeatStats: Nothing found of {} for {} in raws {}'.format(int_type_cur,featns_str, rn_str) )
 
             if printLog and int_type_not_present:
@@ -1926,7 +1930,8 @@ def getCleanIntervalBins(rawname_,sfreq, times, suffixes = ['_ann_LFPartif'],ver
 
 def loadRaws(rawnames,mods_to_load, sources_type = None, src_type_to_use=None,
              src_file_grouping_ind=None, use_saved = True, highpass_lfreq = None,
-             input_subdir="", input_subdir_srcrec = "", n_jobs=1, filter_phase = 'minimum', verbose=None  ):
+             input_subdir="", input_subdir_srcrec = "", 
+             n_jobs=1, filter_phase = 'minimum', verbose=None  ):
     '''
     only loads data from different files, does not do any magic with sides
     use_saved means using previously done preproc
@@ -1969,6 +1974,12 @@ def loadRaws(rawnames,mods_to_load, sources_type = None, src_type_to_use=None,
 
         if 'resample' in mods_to_load or (not use_saved and 'EMG' in mods_to_load or "MEG" in mods_to_load):
             #rawname_resample = rawname_ + '_resample_raw.fif'
+            #if preproc_type in ['highpass', 'hipass']:
+            #    rawname_resample = rawname_ + '_resample_notch_highpass.fif'
+            #elif preproc_type in ['tSSS']:
+            #    rawname_resample = rawname_ + '_tSSS_notch_highpass_resample.fif'
+            #else:
+            #    raise ValueError(f'Wrong preproc type {preproc_type}')
             rawname_resample = rawname_ + '_resample_notch_highpass.fif'
             rawname_resample_full = os.path.join(data_dir, rawname_resample)
             raw_resample = mne.io.read_raw_fif(rawname_resample_full, verbose=verbose)
@@ -2046,14 +2057,16 @@ def loadRaws(rawnames,mods_to_load, sources_type = None, src_type_to_use=None,
             raw_afterICA = mne.io.read_raw_fif(rawname_afterICA_full, verbose=verbose)
             raw_permod_both_sides_cur['afterICA'] = raw_afterICA
 
-        if 'SSS' in mods_to_load:
+        if 'tSSS' in mods_to_load:
             #rawname_SSS = rawname_ + '_notch_SSS_raw.fif'
             #rawname_SSS = rawname_ + '_notch_SSS_raw.fif'
             #rawname_SSS = rawname_ + '_SSS_notch_resample_raw.fif'
-            rawname_SSS = rawname_ + '_SSS_notch_highpass_resample_raw.fif'
+            #rawname_SSS = rawname_ + '_SSS_notch_highpass_resample_raw.fif'
+
+            rawname_SSS = rawname_ + '_tSSS_notch_highpass_resample.fif'
             rawname_SSS_full = os.path.join(data_dir, input_subdir, rawname_SSS)
             raw_SSS = mne.io.read_raw_fif(rawname_SSS_full, verbose=verbose)
-            raw_permod_both_sides_cur['SSS'] = raw_SSS
+            raw_permod_both_sides_cur['tSSS'] = raw_SSS
 
         if highpass_lfreq is not None:
             for mod in raw_permod_both_sides_cur:

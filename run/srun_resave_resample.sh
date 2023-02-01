@@ -16,18 +16,18 @@ HIRES_FILE_TYPE=fieldtrip_raw
 
   RECALC_ARTIF0=0
   RECALC_ARTIF1=0
-RESAVE_MAT_FILE=1
-       HIGHPASS=1
-       ICA_only=1
+RESAVE_MAT_FILE=0
+       HIGHPASS=0
+       ICA_only=0
            tSSS=0
             SSP=0
 
-   RECONSTRUCT_SOURCES=0
+   RECONSTRUCT_SOURCES=1
 SRC_REC_AFTER_highpass=0
-    SRC_REC_AFTER_tSSS=0
+    SRC_REC_AFTER_tSSS=1
      SRC_REC_AFTER_SSP=0
      SRC_REC_AFTER_ICA=0
-        RUN_MATLAB_JOB=0
+        RUN_MATLAB_JOB=1  # set to 0 when debug run_process_FTsources
 
 
 # first pass, only artif plots to adjust artif detection alg params
@@ -125,7 +125,10 @@ fi
 
 if [ $tSSS -ne 0 ]; then
   #python $INTERACTIVE $RUNF -r $raw --read_type resample,notch --to_perform tSSS,ICA --badchans_SSS $RESAVE_BAD_CHANS_SSS
-  python $INTERACTIVE $RUNF -r $raw --read_type $HIRES_FILE_TYPE --to_perform tSSS,ICA --badchans_SSS $RESAVE_BAD_CHANS_SSS --output_subdir SSS --recalc_LFPEMG 0 --recalc_artif 0 
+  #
+  #python $INTERACTIVE $RUNF -r $raw --read_type $HIRES_FILE_TYPE --to_perform tSSS,ICA --badchans_SSS $RESAVE_BAD_CHANS_SSS --output_subdir SSS --recalc_LFPEMG 0 --recalc_artif 0 
+
+  python $INTERACTIVE $RUNF -r $raw --read_type $HIRES_FILE_TYPE --to_perform tSSS,notch,highpass,resample --badchans_SSS $RESAVE_BAD_CHANS_SSS --output_subdir SSS --recalc_LFPEMG 0 --recalc_artif 0 
   EC=$?
   if [ $EC -ne 0 ]; then
     echo "Exit code $EC, exiting"
@@ -196,32 +199,43 @@ if [ $RECONSTRUCT_SOURCES -ne 0 ]; then
     python $INTERACTIVE $RUNDIR/run_process_FTsources.py -r $raw --groupings $GROUPINGS --alg_type $ALG_TYPE --sources_type $ROI_TYPES2
   fi
   if [ $SRC_REC_AFTER_tSSS -ne 0 ]; then
+    if [ -z ${OUTPUT_SUBDIR+x} ]; then
+      echo "undef OUTPUT_SUBDIR, setting to SSS"
+      OUTPUT_SUBDIR=SSS
+      echo OUTPUT_SUBDIR=$OUTPUT_SUBDIR
+    fi
+
+    if [ -z ${INPUT_SUBDIR+x} ]; then
+      echo "undef INPUT_SUBDIR, setting to SSS"
+      INPUT_SUBDIR=SSS
+      echo INPUT_SUBDIR=$INPUT_SUBDIR
+    fi
+
     if [ $RUN_MATLAB_JOB -ne 0 ]; then
       MATLAB_SCRIPT_PARAMS=$MATLAB_SCRIPT_PARAMS_DEF
-
-      if [ -z ${OUTPUT_SUBDIR+x} ]; then
-        echo "undef OUTPUT_SUBDIR, setting to SSS"
-        OUTPUT_SUBDIR=SSS
+      if [ -n $OUTPUT_SUBDIR ]; then
         MATLAB_SCRIPT_PARAMS=$MATLAB_SCRIPT_PARAMS'output_subdir="'$OUTPUT_SUBDIR'";'
       fi
-
-      if [ -z ${INPUT_SUBDIR+x} ]; then
-        echo "undef INPUT_SUBDIR, setting to SSS"
-        INPUT_SUBDIR=SSS
+      if [ -n $INPUT_SUBDIR ]; then
         MATLAB_SCRIPT_PARAMS=$MATLAB_SCRIPT_PARAMS'input_subdir="'$INPUT_SUBDIR'";'
       fi
+
       MATLAB_SCRIPT_PARAMS=$MATLAB_SCRIPT_PARAMS"use_data_afterICA=0;"
-      MATLAB_SCRIPT_PARAMS=$MATLAB_SCRIPT_PARAMS'input_rawname_type=["SSS",  "notch", "highpass", "resample"];'
+      MATLAB_SCRIPT_PARAMS=$MATLAB_SCRIPT_PARAMS'input_rawname_type=["tSSS",  "notch", "highpass", "resample"];'
+      echo "MATLAB_SCRIPT_PARAMS=$MATLAB_SCRIPT_PARAMS"
       . $RUNDIR/srun_Fieldtrip_srcrec.sh $raw
       if [ $EC -ne 0 ]; then
         echo "Exit code $EC, exiting"
         exit $EC
       fi
 
+      echo "SRCREC_COVMAT_REST_ONLY=$SRCREC_COVMAT_REST_ONLY" > $DATA_DUSS/$OUTPUT_SUBDIR/runinfo.txt
+
       #S='input_rawname_type=["SSS",  "notch", "highpass", "resample"]; input_subdir="SSS"; output_subdir="SSS"; '  
     fi
 
-    python $INTERACTIVE $RUNDIR/run_process_FTsources.py -r $raw --groupings $GROUPINGS --alg_type $ALG_TYPE --input_subdir SSS --output_subdir SSS
+    # yes it should be twice OUTPUT_SUBDIR here, not an error
+    python $INTERACTIVE $RUNDIR/run_process_FTsources.py -r $raw --groupings $GROUPINGS --alg_type $ALG_TYPE --input_subdir $OUTPUT_SUBDIR --output_subdir $OUTPUT_SUBDIR --sources_type $ROI_TYPES2 
     EC=$?
     if [ $EC -ne 0 ]; then
       echo "Exit code $EC, exiting"
@@ -240,7 +254,7 @@ if [ $RECONSTRUCT_SOURCES -ne 0 ]; then
       fi
     fi
 
-    python $INTERACTIVE $RUNDIR/run_process_FTsources.py -r $raw --groupings $GROUPINGS --alg_type $ALG_TYPE --input_subdir afterICA --output_subdir afterICA
+    python $INTERACTIVE $RUNDIR/run_process_FTsources.py -r $raw --groupings $GROUPINGS --alg_type $ALG_TYPE --input_subdir afterICA --output_subdir afterICA --sources_type $ROI_TYPES2  
     EC=$?
     if [ $EC -ne 0 ]; then
       echo "Exit code $EC, exiting"

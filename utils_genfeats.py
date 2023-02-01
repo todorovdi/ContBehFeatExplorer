@@ -21,7 +21,7 @@ def collectDataFromMultiRaws(rawnames, raws_permod_both_sides, sources_type,
                              brain_side_to_use, desired_main_body_side, data_modalities,
                              crop_start,crop_end,msrc_inds, rec_info_pri,
                              mainLFPchans_pri=None, mainLFPchan_newname=None,
-                             channel_order = 'side,mod' ):
+                             channel_order = 'side,mod', preproc_type = 'highpass' ):
     '''
     uses loaded data in different modalities and converts is to numpy arrays,
     performing side switching if necessary
@@ -143,7 +143,11 @@ def collectDataFromMultiRaws(rawnames, raws_permod_both_sides, sources_type,
 
         # first create copies
         raws_lfp_perside = {'L': raw_lfponly.copy(), 'R': raw_lfponly.copy() }
-        raws_srconly_perside = {'L': raw_srconly.copy(), 'R': raw_srconly.copy() }
+        #raws_srconly_perside = {'L': raw_srconly.copy(), 'R': raw_srconly.copy() }
+        chns_src = raw_srconly.ch_names
+        times = raw_srconly.times
+
+        raws_srconly_perside = {}
         if raw_lfp_hires is not None:
             raws_lfp_hires_perside = {'L': raw_lfp_hires.copy(), 'R': raw_lfp_hires.copy() }
 
@@ -170,9 +174,9 @@ def collectDataFromMultiRaws(rawnames, raws_permod_both_sides, sources_type,
 
 
             # old ver
-            chis =  mne.pick_channels_regexp(raw_srconly.ch_names, 'msrc{}_all_*'.format(side)  )
+            chis =  mne.pick_channels_regexp(chns_src, 'msrc{}_all_*'.format(side)  )
             if len(chis) == 0:
-                chis =  mne.pick_channels_regexp(raw_srconly.ch_names, 'msrc{}_{}_[0-9]+_c[0-9]+'.
+                chis =  mne.pick_channels_regexp(chns_src, 'msrc{}_{}_[0-9]+_c[0-9]+'.
                                                 format(side, src_grouping)  )
             nchis_before_CB_manip = len(chis)
 
@@ -181,9 +185,9 @@ def collectDataFromMultiRaws(rawnames, raws_permod_both_sides, sources_type,
                 CB_contrahand_parcel_ind = roi_labels_cur.index('Cerebellum_{}'.format(side))
                 hand_side = getOppositeSideStr(side)
                 CB_ipsihand_parcel_ind = roi_labels_cur.index('Cerebellum_{}'.format(hand_side) )
-                CB_contrahand_inds = mne.pick_channels_regexp(raw_srconly.ch_names, 'msrc{}_{}_{}_c[0-9]+'.
+                CB_contrahand_inds = mne.pick_channels_regexp(chns_src, 'msrc{}_{}_{}_c[0-9]+'.
                                                             format(side,src_grouping,CB_contrahand_parcel_ind)  )
-                CB_ipsihand_inds = mne.pick_channels_regexp(raw_srconly.ch_names, 'msrc{}_{}_{}_c[0-9]+'.
+                CB_ipsihand_inds = mne.pick_channels_regexp(chns_src, 'msrc{}_{}_{}_c[0-9]+'.
                                                         format(hand_side,src_grouping,CB_ipsihand_parcel_ind)  )
                 #print(chis, CB_contrahand_inds)
                 chis_dif = set(chis) - set( CB_contrahand_inds)
@@ -194,13 +198,20 @@ def collectDataFromMultiRaws(rawnames, raws_permod_both_sides, sources_type,
 
             if hand_side in main_body_side:
                 assert len(chis) > 0, f'no source channels found at least on {side} side, before CB manip was {nchis_before_CB_manip}'
-            chnames_src = [raw_srconly.ch_names[chi] for chi in chis]
-            raws_srconly_perside[side].pick_channels(   chnames_src  )
+            chnames_src = [chns_src[chi] for chi in chis]
+
+            rawtmp = raw_srconly.copy()
+            rawtmp.pick_channels(   chnames_src  ) 
+            raws_srconly_perside[side] = rawtmp
+            #raws_srconly_perside[side].pick_channels(   chnames_src  )
 
 
 
             #print( raws_srconly_perside[side].ch_names)
             print('{} brain side,  {} sources'.format(side, len(chis) ) )
+
+        del raw_srconly
+        import gc; gc.collect()
 
 
         import utils_preproc as upre
@@ -333,7 +344,7 @@ def collectDataFromMultiRaws(rawnames, raws_permod_both_sides, sources_type,
                     inds = mne.pick_channels_regexp(  chns  , 'msrc._{}.*'.format(src_grouping) )
                 assert len(inds) > 0
                 chns_selected = list( np.array(chns)[inds]  )
-                curdat, times = curraw[chns_selected]
+                curdat, times_ = curraw[chns_selected]
                 #msrc_inds
                 chnames_added = chns_selected
             else:
@@ -355,7 +366,6 @@ def collectDataFromMultiRaws(rawnames, raws_permod_both_sides, sources_type,
         subfeature_order_pri += [subfeature_order]
         #dats = {'lfp': dat_lfp, 'msrc':dat_src}
         dat = np.vstack(dats)
-        times = raw_srconly.times
 
         dat_pri += [dat]
         times_pri += [times]

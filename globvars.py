@@ -30,6 +30,7 @@ global gparams
 global artifact_intervals
 global code_dir
 global data_dir
+global data_dir_tmp
 global dir_fig
 global dir_fig_preproc
 global fbands
@@ -69,6 +70,14 @@ if os.environ.get('DATA_DUSS') is not None:
     data_dir = os.path.expandvars('$DATA_DUSS')
 else:
     data_dir = '/home/demitau/data'
+
+if os.environ.get('DATA_DUSS_TMP') is not None:
+    data_dir_tmp = os.path.expandvars('$DATA_DUSS_TMP')
+else:
+    if os.environ.get('SCRATCH') is not None:
+        data_dir_tmp = pjoin( os.path.expandvars('$SCRATCH') , 'OSCBAGDIS' )
+    else:
+        data_dir_tmp = '/home/demitau/data_tmp'
 
 if os.environ.get('OUTPUT_OSCBAGDIS') is not None:
     dir_fig = os.path.expandvars('$OUTPUT_OSCBAGDIS')

@@ -84,6 +84,8 @@ fi
 unset __conda_setup
 unset PYTHONPATH
 conda activate cobd
+conda deactivate
+conda activate cobd
 export PYTHONPATH="$OSCBAGDIS_DATAPROC_CODE"
 export python_correct_ver=python
 
@@ -102,7 +104,7 @@ echo "RUNSTRINGS_FN=$RUNSTRINGS_FN"
 
 if [ $# -ge 2 ]; then
   mode=$2
-  if [[ "$mode" != "multi" ]] && [[ "mode" != "single" ]]; then
+  if [[ "$mode" != "multi" ]] && [[ "$mode" != "single" ]]; then
     echo "Wrong mode $mode"
     exit 1
   fi

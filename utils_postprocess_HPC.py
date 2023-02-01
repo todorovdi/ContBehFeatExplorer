@@ -23,7 +23,7 @@ def collectPerformanceInfo3(rawnames, prefixes, interval_groupings= None, interv
                            allow_multi_fn_same_prefix = False, use_light_files=True,
                             rawname_regex_full =False,
                            start_time=None,end_time=None,
-                           lighter_light = False, load=True, verbose=1 ):
+                           lighter_light = False, load=True, verbose=1, ret_df = False, use_tmpdir_to_load = False):
     '''
     rawnames can actually be just subject ids (S01  etc)
     red means smallest possible feat set as found by XGB
@@ -98,7 +98,8 @@ def collectPerformanceInfo3(rawnames, prefixes, interval_groupings= None, interv
 
     prefix_implicit = True
     #prefix_expr = '(\w+)_'
-    prefix_expr = '([a-zA-Z0-9_,:]+)_'
+    #prefix_expr = '([a-zA-Z0-9_,:]+)_'
+    prefix_expr = r'([a-zA-Z0-9_,:\-@]+)_'
     #regex = ('_{}_{}grp{}-{}_{}_PCA_nr({})_[0-9]+chs_nfeats({})_' +\
     #    'pcadim({}).*wsz[0-9]+__\(.+,.+\)\.npz').\
     #    format(rawgroup_idstr[:3], sources_type_, group_fn, group_ind, prefix,
@@ -141,6 +142,7 @@ def collectPerformanceInfo3(rawnames, prefixes, interval_groupings= None, interv
 
     strs = []
     inds = []
+    rows = []
     # dict of (prefix,int_grouping,intset) -> filename,mod_time
     fn_per_fntype = {}
     n_old = 0
@@ -169,6 +171,7 @@ def collectPerformanceInfo3(rawnames, prefixes, interval_groupings= None, interv
                     #print('  !!! too old ({} days before), skipping {}'.format(nd,fnf) )
                     n_old += 1
                     continue
+
         # if we had'nt skiiped due to age
         match_info = match_infos[fni]
         mg = match_info.groups()
@@ -221,6 +224,9 @@ def collectPerformanceInfo3(rawnames, prefixes, interval_groupings= None, interv
         else:
             fn_per_fntype[s] = [ ( fnf,mod_time ) ]
 
+
+        row = {'filename_full':fnf, 'mod_time':mod_time }
+
     if printFilenames and verbose >= 3:
         print( 'fn_per_fntype keys are', fn_per_fntype.keys() )
 
@@ -232,6 +238,7 @@ def collectPerformanceInfo3(rawnames, prefixes, interval_groupings= None, interv
     ####################
 
     if not list_only:
+        rows = []
         for s in fn_per_fntype:
             if verbose > 0:
                 print(f'!!!!!!!!!!   Start loading (={load}) files for {s}')
@@ -268,11 +275,15 @@ def collectPerformanceInfo3(rawnames, prefixes, interval_groupings= None, interv
 
 
                 if load:
+                    
                     loadSingleRes(res_cur,
                         use_light_files=use_light_files,
                         lighter_light=lighter_light,
-                        remove_large_items=remove_large_items)
+                        remove_large_items=remove_large_items,
+                        use_tmpdir = use_tmpdir_to_load)
                     ######################
+
+                rows += [ res_cur.copy() ]
 
                 if rawstrid not in output_per_raw:
                     output_per_raw[rawstrid] = {}
@@ -311,12 +322,20 @@ def collectPerformanceInfo3(rawnames, prefixes, interval_groupings= None, interv
     #    output_per_raw = output_per_raw_
     #return feat_counts, output_per_raw
 
-    return output_per_raw,Ximputed_per_raw, good_bininds_per_raw
+    if ret_df:
+        df = pd.DataFrame(rows)
+        ret = df,output_per_raw,Ximputed_per_raw, good_bininds_per_raw 
+    else:
+        ret = output_per_raw,Ximputed_per_raw, good_bininds_per_raw 
+    return ret
 
 def loadSingleRes(res_cur, use_light_files=True,
-                  lighter_light=False, remove_large_items=1):
+                  lighter_light=False, remove_large_items=1,
+                  in_place = True, use_tmpdir = False):
     # lighter light will involve re-generation of light file (maybe based on something that was already light)
     fname_full = res_cur['filename_full']
+    if use_tmpdir:
+        fname_full = fname_full.replace(gv.data_dir, gv.data_dir_tmp)
     t0 = time()
     from zipfile import BadZipFile
     from utils_postprocess import removeLargeItems
@@ -326,9 +345,14 @@ def loadSingleRes(res_cur, use_light_files=True,
         from pathlib import Path
         if use_light_files:
             assert Path(fname_full).name.startswith('_!'), fname_full
-            res_cur.update( f['results_light'][()] )
+            res = f['results_light'][()]
         else:
-            res_cur.update( f['results_cur'][()]  )
+            res = f['results_cur'][()]
+
+        if in_place:
+            res_cur.update(res  )
+        else:
+            res_cur = res
 
 
         if 'featsel_shap_res' in f and 'featsel_shap_res' not in res_cur:
@@ -365,6 +389,8 @@ def loadSingleRes(res_cur, use_light_files=True,
         print(str(e) )
         res_cur['ERROR'] = ('BadZipFile', str(e) )
         #continue
+
+    return res_cur
 
 def checkTupleListTableCompleteness(arg, grouping_to_check=None, it_to_check=None , prefixes_ignore=[]):
     if isinstance(arg,(list,np.ndarray) ):
@@ -457,10 +483,10 @@ def getOutputSetInfo( output_per_raw ):
 def fillStatinfo(df_orig, grp, operation, operation_col):
     if operation == 'max':
         statinfo = grp.max()
-        res = grp.idxmax()
+        res = grp.idxmax(numeric_only = 1)
     elif operation == 'min':
         statinfo = grp.min()
-        res = grp.idxmin()
+        res = grp.idxmin(numeric_only = 1)
 
     #statinfo.reset_index(inplace=True)
     #statinfo.insert(0,'operation',operation)
@@ -494,6 +520,7 @@ def fillStatinfo(df_orig, grp, operation, operation_col):
 def getCorrespModLFP(row, df, bad_pref_parts = ['_modLFP_'],
                      base_pref_start = 'onlyH_act_modLFP_subskip8',
                      base_pref_start_dict = None):
+    # we will search for keys of base_pref_start_dict in pref templ
     #prefix = row['prefix'][0]
     assert (base_pref_start_dict is None) or (base_pref_start is None)
     prefix_templ = row['prefix_templ']
@@ -512,12 +539,16 @@ def getCorrespModLFP(row, df, bad_pref_parts = ['_modLFP_'],
             if prefix_templ.find(bps) >= 0:
                 return None
 
-        allowed = ['BB','%%','^^']
+        #allowed = ['B-B','%-%','^-^']
+        allowed = ['B-B','%_exCB-%','^_exCB-^']
         side_code = None
         for ae in allowed:
             if prefix_templ.endswith(ae):
-                side_code = ae
+                sidelet = ae[0]  
+                assert sidelet in ['B','%','^']
+                side_code = ae 
         if side_code is None:
+            print(f'Side code is none for prefix_templ={prefix_templ}')
             return None
 
         prefix_templ_LFP = None
@@ -529,20 +560,34 @@ def getCorrespModLFP(row, df, bad_pref_parts = ['_modLFP_'],
                 if prefix_templ.find(bps) >= 0:
                     prefix_templ_upd = prefix_templ.replace(bps,bpsv)
                     prefix_templ_LFP = prefix_templ_upd# + side_code
+                    #print(side_code, prefix_templ_upd,prefix_templ_LFP)
                     found = True
                     #import pdb; pdb.set_trace()
                     break
             if not found:  # if the prefix is really different, difficult to decide wrt what compute improvemenet
+                print( f'getCorrespModLFP: not found for prefix_templ = {prefix_templ}')
                 return None
         cond = df[ 'prefix_templ' ] == prefix_templ_LFP
+        print(sum(cond) )
+        #print( f'getCorrespModLFP: cond = df[ prefix_templ ] == {prefix_templ_LFP}')
     else:
-        sidelet = row['LFP_side_to_use'][0].upper()
-        side_code = sidelet + sidelet
+        LFP_side_to_use = row['LFP_side_to_use']
+        assert LFP_side_to_use is not None
+        #sidelet = LFP_side_to_use#[0].upper()
+        copyLFPstr = 'copy_from_search_LFP'
+        if LFP_side_to_use == 'both':
+            addstr = ''
+        else:
+            addstr = '_exCB'
+        side_code = '@' + f'{LFP_side_to_use}{addstr}-{copyLFPstr}'
 
         if base_pref_start is not None:
             prefix_LFP = base_pref_start + side_code
+            print(f'settting due to base_pref_start = {base_pref_start}')
         found = False
+        # check if we  base prefs in prefix
         for bps,bpsv in base_pref_start_dict.items():
+            print(prefix,bps)
             ind = prefix.find(bps)
             if ind >= 0:
                 prefix_upd = prefix[:ind] + bpsv
@@ -550,8 +595,10 @@ def getCorrespModLFP(row, df, bad_pref_parts = ['_modLFP_'],
                 found = True
                 break
         if not found:  # if the prefix is really different, difficult to decide wrt what compute improvemenet
+            print( f'getCorrespModLFP: not found for prefix = {prefix}')
             return None
         cond = df[ 'prefix' ] == prefix_LFP
+        #print( f'getCorrespModLFP: cond = df[ prefix ] == {prefix_LFP}')
         #todo get side
 
     cols = ['rawname', 'grouping', 'interval_set']
@@ -559,7 +606,9 @@ def getCorrespModLFP(row, df, bad_pref_parts = ['_modLFP_'],
     for col in cols:
         cond &= df[ col ] == row[col]
     subdf = df[cond]
-    assert len(subdf) == 1, (prefix,prefix_templ,prefix_LFP,prefix_templ_LFP,len(subdf))
+
+    #print(prefix, prefix_templ)
+    assert len(subdf) == 1, (len(subdf), prefix,prefix_templ,prefix_LFP,prefix_templ_LFP,len(subdf))
 
     #print(prefix_templ,side_code,prefix_templ_LFP, subdf.iloc[0]['prefix_templ'])
 
@@ -581,20 +630,24 @@ def makeSubjParamsStr(df, inplace=True):
 
 ## add some more columns
 def addParsColumns(df_all, output_per_raw):
-    extract_pars = ['SLURM_job_id','runstring_ind','parcel_group_names', 'brain_side_to_use','LFP_side_to_use']
+    extract_pars = ['SLURM_job_id','runstring_ind','parcel_group_names', 'brain_side_to_use','LFP_side_to_use_final', 'subskip_fit']
     #%debug
 
-    def tmpf(row):
-        moc = getMocFromRow(row,output_per_raw)
-        if moc is None:
-            return None
-        if 'pars' not in moc:
-            return None
-        return moc['pars'].get(p,None)
-
     for p in extract_pars:
+        def tmpf(row):
+            moc = getMocFromRow(row,output_per_raw)
+            if moc is None:
+                return None
+            if 'pars' not in moc:
+                return None
+            return moc['pars'].get(p,None)
         #lbd = lambda row:
-        df_all[p] = df_all.apply(tmpf,1)
+        if p == 'LFP_side_to_use_final':
+            df_all['LFP_side_to_use'] = df_all.apply(tmpf,1)
+        else:
+            df_all[p] = df_all.apply(tmpf,1)
+
+    return df_all
 
 def addRunCorrespCols(df, output_per_raw, inplace = True):
     if not inplace:
@@ -624,7 +677,6 @@ def addRunCorrespCols(df, output_per_raw, inplace = True):
 
 # adds improvement and improv shuffled cols to the df produced by plotTableInfo
 def addImprovColDfAll(df, inplace=True, score='bacc', score_shuffled = 'bacc_shuffled', base_pref_start_dict = None):
-    cnvd = {'clmove':'%%', 'ilmove':'^^'}
     if not inplace:
         df = df.copy()
     df['improv']                   = len(df) * [np.nan]
@@ -634,6 +686,7 @@ def addImprovColDfAll(df, inplace=True, score='bacc', score_shuffled = 'bacc_shu
     for index,row in df.iterrows():
         row_modLFP = getCorrespModLFP(row,df,base_pref_start_dict=base_pref_start_dict, base_pref_start=None)
         if row_modLFP is None:
+            print(f'None for {index}:  {row["prefix"]} ( {row["prefix_templ"]} ) ')
             continue
 
         df.at[index,'corresp_LFP_prefix_templ'] = row_modLFP['prefix_templ']
@@ -650,6 +703,7 @@ def addImprovColDfAll(df, inplace=True, score='bacc', score_shuffled = 'bacc_shu
         #row['improv_shuffled'] = area_and_LFP - LFP
     return df
 
+# old (wrt Jan 31, 2023), not used anymore
 def addImprovCol(df, barnames_pre, inplace=True, bad_pref_starts = ['onlyH_act_modLFP_subskip8']):
     # this adds improv col to onlyBar output
     cnvd = {'clmove':'%%', 'ilmove':'^^'}
@@ -733,7 +787,7 @@ def tupleList2multiLevelDict(tpll): #,min_depth=0,max_depth=99999, cur_depth = 0
 def checkPrefixCollectionConsistencty(subdir,prefixes,start_time, end_time,
                                       grouping_to_check, it_to_check,
                                       use_main_LFP_chan=1, light_only=1,
-                                     prefixes_ignore  = [], preloaded = None):
+                                     prefixes_ignore  = [], preloaded = None, use_tmpdir_to_load = False):
     sources_type ='parcel_aal'
     ndaysBefore = None
     if preloaded is not None:
@@ -748,7 +802,7 @@ def checkPrefixCollectionConsistencty(subdir,prefixes,start_time, end_time,
                 list_only=0, allow_multi_fn_same_prefix=0,
                 use_light_files = light_only, rawname_regex_full=0,
                 start_time=start_time, end_time=end_time,
-                load=False, verbose=0)
+                load=False, verbose=0, use_tmpdir_to_load=use_tmpdir_to_load)
 
         if r is None:
             return None,None
@@ -1154,6 +1208,7 @@ def findBestParcelGroups(df, exCB = False, remove_bad = 1, verbose=0):
         templ,bestname,side_to_collect,side_used_in_fit,templ_grp = templ_tpl
         print(templ,bestname,side_to_collect,side_used_in_fit,templ_grp)
         subdf = df[df['prefix'].str.match(templ)]
+        print('len subdf = ', len(subdf))
 
         cond = subdf['parcel_group_names'].str.endswith('_L') | \
             subdf['parcel_group_names'].str.endswith('_R')
@@ -1225,24 +1280,32 @@ def findBestParcelGroups(df, exCB = False, remove_bad = 1, verbose=0):
             cond2 &= cond_exCB
         subdf3 = subdf2[cond2]
 
-        lenCB = sum( subdf3[subdf3['rawname'] == 'S01_off']['parcel_group_names'].str.startswith('Cerebellum')  )
+        c = (subdf3['rawname'] == 'S01_off') &\
+                (subdf3['parcel_group_names'].str.startswith('Cerebellum')  ) 
+        lenCB = sum(c )
         # dirty hack needed because I have computed a bit too much stuff
-        if lenCB == 3 and remove_bad:
+        if lenCB > 1 and remove_bad:
+            print(f'lenCB = {lenCB}  {subdf3.loc[c,["prefix","parcel_group_names","parcel_group_name_RC","bacc"]].values }')
             bad_prefixes = ['onlyH_act_only46', 'onlyH_act_only48'] + \
                 ['onlyH_act_LFPand_only46', 'onlyH_act_LFPand_only48']
+
+            subset_bad = set( subdf3['prefix'].unique() ) & set( bad_prefixes)
+            pgns_bad = subdf3[subdf3['prefix' ].isin(bad_prefixes) ]['parcel_group_names'].unique()
+            print(f'Removing bad prefixes {subset_bad} pgn = {pgns_bad}')
             subdf3 = subdf3[~subdf3['prefix'].isin(bad_prefixes)]
 
         subdf3= subdf3.reset_index()
         grpcols = ['grouping','interval_set','rawname']
         deb_cols = []
         deb_cols = ['prefix', 'parcel_group_names', 'brain_side_to_use','LFP_side_to_use']
-        grp = subdf3[grpcols + ['bacc','bacc_shuffled','improv','improv_shuffled','num'] + deb_cols].groupby(grpcols)
+        cols = grpcols + ['bacc','bacc_shuffled','improv','improv_shuffled','num'] + deb_cols
+        grp = subdf3[cols].groupby(grpcols)
 
         grps += [grp]
 
         cts = list( set( grp.size() ) )
         assert len(cts) == 1, cts
-        assert cts[0] in [15,30],  cts[0]
+        assert cts[0] in [15,30],  ( cts[0], subdf3['prefix'].unique() )#, display(subdf3[cols]))
         #assert cts[0] == len( set(subdf3['prefix']) ), (cts, len( set(subdf3['prefix']) ))
 
         g = grp.get_group(('merge_nothing', 'basic', 'S01_off'))
@@ -1834,8 +1897,9 @@ def _old_collectPerformanceInfo2_(rawnames, prefixes, ndays_before = None,
     #if output_per_raw_ is not None:
     #    output_per_raw = output_per_raw_
     #return feat_counts, output_per_raw
+    ret = output_per_raw,Ximputed_per_raw, good_bininds_per_raw 
 
-    return output_per_raw,Ximputed_per_raw, good_bininds_per_raw
+    return ret
 
 def getFileAge(fname_full, ret_hours=True):
     #created = os.stat( fname_full ).st_ctime
@@ -2107,11 +2171,12 @@ def analyzeRnstr(rn):
 
     return  subjs_involved, mcs, mvsls, mvosls
 
-def prepTableInfo3(output_per_raw, prefixes=None, perf_to_use_list = [('perfs_XGB','perfs_XGB_red') ],
+def prepTableInfo3(output_per_raw, prefixes=None, 
+        perf_to_use_list = [('perfs_XGB','perfs_XGB_red') ],
                   to_show = [('allsep','merge_nothing','basic')],
                   show_F1=False, use_CV_perf=True, rname_crop = slice(0,3), save_csv = True,
                   sources_type='parcel_aal', subdir='',
-                   scores = ['sens','spec','F1'], return_df = False, df_inc_full_dat=False, recalc = False ):
+                   scores = ['sens','spec','F1'], return_df = False, df_inc_full_dat=False, recalc = False, use_tmpdir_to_load = False ):
 
     #perf_to_use is either 'perfs_XGB', 'perfs_XGB_red' or one of lda versions
     # Todo: pert_to_use_list -- is list of couples -- one and list ot feat
@@ -2145,6 +2210,11 @@ def prepTableInfo3(output_per_raw, prefixes=None, perf_to_use_list = [('perfs_XG
         prefixes = list( sorted( list( output_per_raw[k0].keys() ) ) )
 
 
+    # just to count
+    tpll = multiLevelDict2TupleList(output_per_raw,4,3)
+
+    rows = []
+    ctr = 0
     for tpl in perf_to_use_list:
         clf_type,perf_to_use,perf_red_to_use = tpl[:3]
         if len(tpl) == 4:
@@ -2205,11 +2275,13 @@ def prepTableInfo3(output_per_raw, prefixes=None, perf_to_use_list = [('perfs_XG
                         if mult_clf_results is not None:
                             if not mult_clf_results.get('loaded',True):
                                 fname_full = mult_clf_results['filename_full']
-                                print(f'Loading {fname_full}')
-
+                                print(f'#### prepTableInfo3: Loading {ctr}/{len(tpll)}')
 
                                 loadSingleRes(mult_clf_results,use_light_files=True,lighter_light=False,
-                                        remove_large_items=True)
+                                        remove_large_items=True,
+                                       use_tmpdir = use_tmpdir_to_load )
+
+                                ctr += 1
 
                                 #f = np.load(fname_full, allow_pickle=1)
                                 #mult_clf_results.update( f['results_light'][()] )
@@ -2511,8 +2583,8 @@ def prepTableInfo3(output_per_raw, prefixes=None, perf_to_use_list = [('perfs_XG
                             pref_templ = prefix[:-2] + suff
 
                     info_cur['prefix_templ'] = pref_templ
-
-                    df = df.append(info_cur,ignore_index=True)
+                    rows += [ info_cur ]
+                    #df = df.append(info_cur,ignore_index=True)
 
                 table += [table_row]
                 info_per_rn_pref[ (rn,it_grp, it_set) ] = info_per_pref
@@ -2534,8 +2606,9 @@ def prepTableInfo3(output_per_raw, prefixes=None, perf_to_use_list = [('perfs_XG
         table_per_perf_type[perf_to_use] = table
         table_info_per_perf_type[tpl] = info_per_rn_pref
 
+
     if return_df:
-        df.reset_index()
+        df = pd.DataFrame(rows)
         return df, table_info_per_perf_type, table_per_perf_type
     else:
         return table_info_per_perf_type, table_per_perf_type
@@ -5492,17 +5565,20 @@ def plotTableInfos_onlyBarDf2(df, dfstat, barnames_pre=None, output_subdir='', a
             if barname_pre in bestnames_all:
                 mode = 'bestname'
                 dfcur = dfstat[dfstat['operation_col'] == sorted_by ]
+                print(f'usindg dfstat for operation_col == {sorted_by}')
             elif barname_pre in prefixes_all:
                 mode = 'prefix'
                 dfcur = df
+                print(f'using df for {mode}')
             elif barname_pre in prefix_templs_all:
                 mode = 'prefix_templ'
                 dfcur = df
+                print(f'using df for {mode}')
             colname = mode
 
             subdf = dfcur[ (dfcur['rawname'] == rn) & ( dfcur[colname] == barname_pre ) ]
 
-            assert len(subdf) == 1, (rn,barname_pre, len(subdf) )
+            assert len(subdf) == 1, (rn,barname_pre, len(subdf), mode )
             row = dict( subdf.iloc[0] )
             subj = str( row['subject'] )
             num      = int( row.get('num',-1)      )
@@ -5514,13 +5590,13 @@ def plotTableInfos_onlyBarDf2(df, dfstat, barnames_pre=None, output_subdir='', a
             xs_red2 += [ num_red2]
 
             p = float( row[col1] )
+            if np.isnan(row[col1] ):
+                print('          aaaaa')
+                return None
             str_to_put = f'{p:.0f}%'
 
             prefix_like_orig      = prefix2final_name[barname_pre]
             assert prefix_like_orig is not None
-
-            print(prefix_like_orig)
-
 
 
             bai = prefix_like_orig.find('best area')  # best area index
@@ -5551,13 +5627,15 @@ def plotTableInfos_onlyBarDf2(df, dfstat, barnames_pre=None, output_subdir='', a
             else:
                 prefix_like = prefix_like_orig
 
+
+
+            print('prefix_like_orig = ', prefix_like_orig, 'prefix_like = ',prefix_like)
+
             row['barname_pre']      = barname_pre
             #rot['barname_pre'] = prefTempl2pref(barname_pre, subj)
             row['prefix_like_orig'] = prefix_like_orig
             row['prefix_like']      = prefix_like
             rows_output += [row]
-
-
 
             #prefix_like_orig = str(row['barname_pre_human'].values[0] )
             side_endings = ['_L','_R','_B']
@@ -5588,8 +5666,12 @@ def plotTableInfos_onlyBarDf2(df, dfstat, barnames_pre=None, output_subdir='', a
                 ys_add += [float(row[col3])]
         # end of cycle over prefixed_sorted
 
-        print( 'prefixes_wnums = ',prefixes_wnums )
+        print( 'prefix_likes = ',prefixes_wnums )
+        print( 'ys =',ys )
         print( 'ys_red =',ys_red )
+
+        ys = np.array(ys)
+        ys_red = np.array(ys_red)
 
         rowind_bars = 0
         if crop_rawname == 'last':
@@ -5613,8 +5695,8 @@ def plotTableInfos_onlyBarDf2(df, dfstat, barnames_pre=None, output_subdir='', a
             sis = np.argsort(xs)
         else:
             sis = np.arange(len(prefixes_wnums) )
-        ax.barh(np.array(prefixes_wnums)[sis], np.array(ys)[sis], color = color_full,    alpha=alpha_bar)
-        ax.barh(np.array(prefixes_wnums)[sis], np.array(ys_red)[sis],
+        ax.barh(np.array(prefixes_wnums)[sis], ys[sis], color = color_full,    alpha=alpha_bar)
+        ax.barh(np.array(prefixes_wnums)[sis], ys_red[sis],
                 color = color_red, alpha=alpha_bar)
         if len(ys_add):
             ax.barh(np.array(prefixes_wnums)[sis], np.array(ys_add)[sis],
@@ -6103,6 +6185,18 @@ def getMocFromRow(row : dict, output_per_raw: dict) -> dict:
         moc = None
     return moc
 
+def getMocFromRowMultiOPR(row, pptype2res):
+    '''
+    pptype2res -- str -> output_per_raw
+    '''
+    ppt = row['pptype']
+    #for ppt in pptype2res:
+    #cond = df['pptype'] == ppt
+    opr = pptype2res[ppt]
+    
+    moc = getMocFromRow(row,opr)
+    return moc
+
 def getTremorDetPerf(mult_clf_output,grouping,it, ret_pct=False,
         across=None, sidelet=None):
     # returns in percents
@@ -6118,6 +6212,246 @@ def getTremorDetPerf(mult_clf_output,grouping,it, ret_pct=False,
             lbl += '_' + sidelet
         ti = clnames.index(lbl)
         return cm[ti,ti]
+
+def plotConfmats2(dfc, output_per_raw, normalize_mode = 'true', best_LFP=False, common_norm = True,
+                reaver_confmats = 0, ww=3,hh=3, keep_beh_state_sides = True,
+                 keep_subj_list_title = False, labelpad_cbar = 100, labelpad_x = 20, labelpad_y = 20,
+                colorbar_axes_bbox = [0.80, 0.1, 0.045, 0.8], rename_class_names = None):
+    '''
+    in this version of this function output_per_raw is ALL data and dfc is FILTERED
+    normalize_mode == true means that we start from real positives (nut just correctly predicted)
+    common_norm -- colorbar always has max 100 and min 0 (regardless of actual min and max vals)
+
+    if best LFP then plot for the best channel
+    '''
+    #tpll = pp.multiLevelDict2TupleList(outputs_grouped,4,3)
+    assert len(dfc)
+
+    rawnames = list(sorted( dfc['rawname'].unique() ))
+    # TODO: it will plot all confmats for all the outputs, I might want to restruct to just one
+    #nc = int( np.ceil( np.sqrt( len(outputs_grouped) ) ) );
+    #nr = len(outputs_grouped) // nc; #nc= len(scores_stats) - 2;
+    #nr = len(outputs_grouped) // nc; #nc= len(scores_stats) - 2;
+    nc = int( np.ceil( np.sqrt( len(rawnames) ) ) );
+    nr = len(rawnames) / nc; #nc= len(scores_stats) - 2;
+    nr = int(np.ceil(nr) )
+
+    fig,axs = plt.subplots(nr,nc, figsize = (nc*ww + ww*0.5,nr*hh))#, gridspec_kw={'width_ratios': [1,1,3]} );
+    if nr == 1 and nc == 1:
+        axs = np.array([[axs]])
+
+    #rawnames = list(sorted(outputs_per_raw.keys()) )
+
+    axs = axs.flatten()
+    for ax in axs:
+        ax.set_visible(False)
+
+    confmats_normalized = []
+    for rowi, row in dfc.iterrows():
+        #rn = tpl[0]
+        #mult_clf_output = tpl[-1]
+        rn = row['rawname']
+        mult_clf_output = getMocFromRow(row, output_per_raw)
+
+        if not best_LFP:
+            pcm = mult_clf_output['XGB_analysis_versions']['all_present_features']['perf_dict']
+        else:
+            chn_LFP = mult_clf_output['best_LFP']['XGB']['winning_chan']
+            pcm = mult_clf_output['XGB_analysis_versions'][f'all_present_features_only_{chn_LFP}']['perf_dict']
+
+
+        if reaver_confmats:
+            ps = pcm.get('perfs_CV', None)
+            if isinstance(ps[0],list):
+                confmats_cur = [p[-1] for p in ps]
+            else:
+                confmats_cur = [p['confmat'] for p in ps]
+            confmats_cur_normalized = [utsne.confmatNormalize(cm,normalize_mode) for cm in confmats_cur]
+            confmat_normalized =  np.array(confmats_cur_normalized).mean(axis=0)*100
+        else:
+            confmat = pcm.get('confmat', None)
+            if confmat is None:
+                confmat = pcm.get('confmat_aver', None)
+            assert confmat is not None
+            confmat_normalized = utsne.confmatNormalize(confmat,normalize_mode) * 100
+        confmats_normalized += [confmat_normalized]
+
+    #     if normalize_mode == 'total':
+    #         confmat_normalized = confmat / np.sum(confmat) * 100
+    #     elif normalize_mode == 'col':
+    #         confmat_normalized = confmat / np.sum(confmat, axis=1)[None,:] * 100
+
+
+    # canonical order of interval names
+    from globvars import gp
+    if keep_beh_state_sides:
+        canon_order = gp.int_types_basic_sided
+    else:
+        canon_order = gp.int_types_basic
+
+
+    import matplotlib as mpl
+    if common_norm:
+        norm = mpl.colors.Normalize(vmin=0, vmax=100)
+    else:
+        mn,mx = np.nan,np.nan
+        raise ValueError('Need to implement mn,mx computation!')
+        norm = mpl.colors.Normalize(vmin=mn, vmax=mx)
+    #for axi,(ax,(rn,(spec_key,mult_clf_output) ) ) in enumerate(zip(axs, outputs_grouped.items() ) ):
+    confmats_normalized_reord = []
+    xts2 = []
+
+    for rowi, row in dfc.iterrows():
+        rn = row['rawname']
+        print(f'Starting plotting confmat for {rn}')
+        mult_clf_output = getMocFromRow(row, output_per_raw)
+
+        class_label_names              = mult_clf_output.get('class_label_names_ordered',None)
+        # if not in archive, regenerate
+        if class_label_names is None:
+            class_labels_good = mult_clf_output['class_labels_good']
+            revdict = mult_clf_output['revdict']
+            from sklearn import preprocessing
+            lab_enc = preprocessing.LabelEncoder()
+            # just skipped class_labels_good
+            lab_enc.fit(class_labels_good)
+            class_labels_good_for_classif = lab_enc.transform(class_labels_good)
+            class_label_ids = lab_enc.inverse_transform( np.arange( len(set(class_labels_good_for_classif)) ) )
+            class_label_names = [revdict[cli] for cli in class_label_ids]
+
+        #        ## confmat_ratio[i,j] = ratio of true i-th predicted as j-th among total
+        #confmat = confmats[axi]
+        #confmat_normalized = utsne.confmatNormalize(confmat,normalize_mode) * 100
+        confmat_normalized = confmats_normalized[rowi]
+
+        #sind_str = rn.split('_')[0]
+        #axind =  sind_strs.index(sind_str)
+        axind =  rawnames.index(rn)
+        ax = axs[axind]
+        ttl = rn
+        if not keep_subj_list_title:
+            end = rn.split('_')[-1]
+            ll = len(end)
+            #ttl = rn[:-ll-1].upper()
+            #ttl = end.upper()
+        ax.set_title(ttl.upper())
+
+
+        if keep_beh_state_sides:
+            class_label_names_ticks = class_label_names
+        else :
+            class_label_names_ticks = [cln[:-2] for cln in class_label_names]
+
+        perm = [ class_label_names_ticks.index(intname) for intname in canon_order]
+        assert tuple(np.array(class_label_names_ticks)[perm]) == tuple( canon_order)
+        class_label_names_ticks  = canon_order
+
+        # changing class names to publication-ready
+        if rename_class_names is not None:
+            class_label_names_ticks2 = []
+            for cln in class_label_names_ticks:
+                if keep_beh_state_sides:
+                    cln_ = cln[:-2]
+                else:
+                    cln_ = cln
+
+                if cln_ in rename_class_names:
+                    cln_res = cln.replace( cln_, rename_class_names[cln_] )
+                else:
+                    cln_res = cln
+                class_label_names_ticks2 += [cln_res]
+            class_label_names_ticks = class_label_names_ticks2
+        #print(rn, 'class_label_names =', class_label_names)
+        #print(rn, 'class_label_names_ticks=', class_label_names_ticks)
+        confmat_normalized_reord = confmat_normalized[perm,:][:,perm]
+        confmats_normalized_reord += [confmat_normalized_reord]
+
+        ax.set_visible(True)
+        pc = ax.pcolor(confmat_normalized_reord, norm=norm)
+
+
+        # setting ticks and labels nicely, not for all axes, only for the left and bottom ones
+        rowi,coli = np.unravel_index(axind,(nr,nc))
+        xts = ax.get_xticks()
+        print(xts)
+
+        mnxts,mxxts = np.min(xts), np.max(xts)
+        shift  = ( (mxxts - mnxts) / 4) / 2
+        #shift  = (xts[1] + xts[0]) / 2
+        #shift = 0 #debug
+        #xtsd = (shift)  + xts[:-1]
+        #return ax
+        if rowi == nr-1:
+            xts2 = shift + np.linspace(xts[0],xts[-1],len(class_label_names) + 1 )
+            xts2[-1] = xts[-1]
+            ax.set_xticks(xts2 )
+            ax.set_xticklabels( class_label_names_ticks + [''],rotation=90)
+            ax.set_xlabel('Predicted', labelpad=labelpad_x)
+        else:
+            ax.set_xticks([])
+
+        if coli == 0:
+            xts2 = shift + np.linspace(xts[0],xts[-1],len(class_label_names) + 1 )
+            xts2[-1] = xts[-1]
+            #if len(xts2):
+            ax.set_yticks(xts2)
+            ax.set_yticklabels( class_label_names_ticks + [''])
+            ax.set_ylabel('True', labelpad=labelpad_y)
+        else:
+            ax.set_yticks([])
+
+        #ax.set_visible(True)
+        del confmat_normalized, confmat_normalized_reord
+
+    plt.subplots_adjust(left = 0.15, bottom=0.26, right=0.75, top=0.9)
+
+    ##################################################
+
+    confmat_normalized_ = np.array(confmats_normalized_reord)
+    assert confmat_normalized_.size
+    confmat_normalized_diags = np.array( [np.diag(np.diag(cm)) for cm in confmats_normalized_reord] )
+    eyes = np.array( [np.eye(confmat_normalized_.shape[-1] ) for cm in confmats_normalized_reord], dtype=bool)
+    confmat_normalized_offdiags = confmat_normalized_ - confmat_normalized_diags
+    confmat_normalized_offdiags_largedval = confmat_normalized_offdiags + eyes * 1e5
+    mx = np.max(confmat_normalized_)
+    mn = np.min(confmat_normalized_)
+    #mn_diag     = np.min ( confmat_normalized_diags  )
+    #mn_off_diag = np.min (  confmat_normalized_offdiags_largedval  )
+    #mx_off_diag = np.max (  confmat_normalized_offdiags  )
+
+    confmat_normalized_diags_els = confmat_normalized_[ np.where( eyes ) ]
+    confmat_normalized_offdiags_els = confmat_normalized_[ np.where( ~eyes ) ]
+
+    mn_diag     = np.min ( confmat_normalized_diags_els )
+    mn_off_diag = np.min ( confmat_normalized_offdiags_els )
+    mx_off_diag = np.max ( confmat_normalized_offdiags_els )
+
+    me_diag = np.mean(confmat_normalized_diags_els)
+    me_off_diag = np.mean (  confmat_normalized_offdiags_els  )
+
+    ##################################################
+    # create colorbar with tick
+    cax = plt.axes(colorbar_axes_bbox)
+    clrb = plt.colorbar(pc, cax=cax)
+    #cax.set_ylabel(f'percent of {normalize_mode} points (in a CV fold)', labelpad=labelpad_cbar )
+    cax.set_ylabel(f'percent of {normalize_mode} points', labelpad=labelpad_cbar )
+
+    ax2 = clrb.ax.twinx()
+    y0,y1 = cax.get_ybound()  # they are from 0 to 1
+    ticks       = [  mn_off_diag, mn_diag,  mx_off_diag, me_diag, me_off_diag]
+    tick_labels = [ 'min_off_diag', 'min_diag',  'max_off_diag', 'mean_diag', 'mean_off_diag' ]
+    if common_norm:
+        ticks       = [  mn_off_diag, mn_diag,  mx_off_diag, mx,mn ]
+        tick_labels = [ 'min off diag', 'min diag',  'max off diag', 'max' , 'min' ]
+    desarr = np.array( ticks )
+    #ax2.set_yticks( desarr/ (y1-y0) )
+    ax2.set_yticks( desarr )
+    ax2.set_yticklabels( tick_labels )
+    ax2.set_ylim( y0,y1)
+
+    print(mn,mx, mn_diag)
+    return cax, clrb, confmats_normalized_reord, confmat_normalized_offdiags, confmat_normalized_diags_els
+    #plt.tight_layout()
 
 #def plotConfmats(outputs_grouped, normalize_mode = 'true', best_LFP=False, common_norm = True,
 #                 ww=3,hh=3):
@@ -7042,6 +7376,36 @@ def prefTempl2pref(pref_templ, subject):
     pref = pref.replace('^', movesidelet)
     return pref
 
+def prefixTempl2Prefix(prefix_templ,rawname):
+    subj = rawname.split('_')[0]
+    mainmoveside = gv.gen_subj_info[subj].get('move_side',None)
+    assert mainmoveside is not None
+    movesidelet = mainmoveside[0].upper()
+    moveopsidelet = utils.getOppositeSideStr( movesidelet )
+    templ_eff = prefix_templ.    replace('%', moveopsidelet)
+    templ_eff = templ_eff.replace('^', movesidelet)
+    return templ_eff
+
+def prefix2prefixTempl(prefix, rawname, LFP_side_to_use_final = None):
+    subj = rawname.split('_')[0]
+    mainmoveside = gv.gen_subj_info[subj].get('move_side',None)
+    assert mainmoveside is not None
+    movesidelet = mainmoveside[0].upper()
+    moveopsidelet = utils.getOppositeSideStr( movesidelet )
+
+    tmp = prefix
+    if LFP_side_to_use_final is not None:
+        side = LFP_side_to_use_final
+        sidelet = side[0].upper()
+
+        tmp = tmp.replace('C',sidelet)  # different 
+
+    tmp = tmp.replace(movesidelet,'^')
+    tmp = tmp.replace(moveopsidelet,'%')
+
+    return tmp
+
+
 def _getPrefixInds(tpll,prefix_to_test):
     # it respects '%' and '^' wildcards
     prefix_inds = []
@@ -7469,7 +7833,8 @@ def printLogPart(mco, text_to_find = 'Start classif' ):
 
     print(lines[lineind, :] )
 
-def filterOutputs(outputs_grouped,rns=None,prefs=None,grps=None,its=None):
+def filterOutputs(outputs_grouped,rns=None,
+        prefs=None,grps=None,its=None):
     import utils
     # % -- main move side let
     outputs_res = {}
@@ -7481,6 +7846,8 @@ def filterOutputs(outputs_grouped,rns=None,prefs=None,grps=None,its=None):
         #assert mainmoveside is not None
         #movesidelet = mainmoveside[0].upper()
         #moveopsidelet = utils.getOppositeSideStr( movesidelet )
+
+        # TODO: correctly processs copy from best LFP
 
         outputs_res[rn] = {}
         o_cur_rn = outputs_grouped[rn]
@@ -7607,7 +7974,7 @@ def recurseMultiLevelDict(d, prefix=None, sep='/'):
             yield sep.join(prefix + [key, value])
 
 def collectBestLFP(subdir = 'searchLFP_both_sides_oversample2_LFP256_allaritf' , 
-        start_time_str = "22 April 2022 17:11:15",
+        start_time_str = "26 January 2023 20:11:15",
         save_result = 1,  q_perm = 0.9, 
         savefile_rawname_format ='subj',
         output_per_raw = None):
@@ -7673,7 +8040,7 @@ def collectBestLFP(subdir = 'searchLFP_both_sides_oversample2_LFP256_allaritf' ,
         else:
             raise ValueError('not implemented')
     rncombinstrs = list(sorted(set(rncombinstrs)))
-    print('recent subjects infolved = ',rncombinstrs)
+    print('recent rncombstrs infolved = ',rncombinstrs)
 
     import utils_postprocess_HPC as postp
     #Earliest file 19 Aug 2021 03:05:15, latest file 19 Aug 2021 21:21:45
@@ -7870,7 +8237,8 @@ def collectBestLFP(subdir = 'searchLFP_both_sides_oversample2_LFP256_allaritf' ,
 
     #print(list(recurse(dirDict)))
 
-def collectCalcResults(subdir, start_time, end_time = None):
+def collectCalcResults(subdir, start_time, end_time = None, use_tmpdir_to_load = False, load=False):
+    # load -- hether I want to do actual load or just collect filenames (for deferred loading)
     import os, sys, mne, json, pymatreader, re, time, gc;
     import globvars as gv
     import utils
@@ -7929,13 +8297,13 @@ def collectCalcResults(subdir, start_time, end_time = None):
     #a1 = re.match('_\!_'+rawname_regex+'_.*',lf)
     #print(a0,a1.groups())#
 
-    print('list recent prefixes')
+    #print('list recent prefixes')
 
-    prefixes = postp.listRecentPrefixes(days = ndaysBefore, light_only=light_only,                                     
-                                        custom_rawname_regex = rawname_regex, recent_files = recent)
+    #prefixes = postp.listRecentPrefixes(days = ndaysBefore, light_only=light_only,                                     
+    #                                    custom_rawname_regex = rawname_regex, recent_files = recent)
 
     from utils_postprocess_HPC import listComputedData
-    r = listComputedData(subdir,prefixes,start_time, end_time, use_main_LFP_chan=1)
+    r = listComputedData(subdir,None,start_time, end_time, use_main_LFP_chan=1)
     print('listComputedData = ',r)
     if r is None:
         print("found nothing")
@@ -7946,7 +8314,10 @@ def collectCalcResults(subdir, start_time, end_time = None):
 
 
     print(rawnames)
+    prefixes = prefixes_found
     display(prefixes)
+
+    assert np.any( [ p.find('@') >= 0 for p in  prefixes ] )
 
     ######################   Consistency
 
@@ -7957,7 +8328,7 @@ def collectCalcResults(subdir, start_time, end_time = None):
         r = checkPrefixCollectionConsistencty(subdir,prefixes,start_time, end_time,
                                               grouping_to_check, it_to_check,
                                               use_main_LFP_chan=1, light_only=1,
-                                             prefixes_ignore  = [], preloaded=None)
+                                             prefixes_ignore  = [], preloaded=None , use_tmpdir_to_load = use_tmpdir_to_load)
         missing, preloaded = r
         print('missing=', missing)
     import gc; gc.collect()
@@ -7965,14 +8336,12 @@ def collectCalcResults(subdir, start_time, end_time = None):
     ##################    Load
 
     sources_type = 'parcel_aal'  # or ''
-    load = False # whether I want to do actual load or just collect filenames (for deferred loading)
     #groupings_to_collect = ['merge_nothing']; interval_sets_to_collect = ['basic']
-    groupings_to_collect = None; groupings_to_collect = None
-    load = False
+    groupings_to_collect = None; isets_to_collect = None
     prefixes_to_collect = None # = prefixes
     r = postp.collectPerformanceInfo3(None,prefixes_to_collect,
                       interval_groupings=groupings_to_collect,
-                              interval_sets =  groupings_to_collect,
+                              interval_sets =  isets_to_collect,
                 nraws_used='[0-9]+', sources_type = sources_type,
                printFilenames=1,
                 ndays_before=ndaysBefore,
@@ -7981,7 +8350,7 @@ def collectCalcResults(subdir, start_time, end_time = None):
                  list_only=0, allow_multi_fn_same_prefix=0,
                  use_light_files = light_only, rawname_regex_full=0,
                  start_time=start_time,
-                   end_time=end_time, load=load)
+                   end_time=end_time, load=load, use_tmpdir_to_load=use_tmpdir_to_load)
 
     #nraws_used='(10,12,20,24)'
     #output_per_raw,Ximp_per_raw,gis_per_raw = r
@@ -7989,9 +8358,6 @@ def collectCalcResults(subdir, start_time, end_time = None):
     print('len(output_per_raw) =', len(output_per_raw))
     import gc; gc.collect()
 
-    if load:
-        np.savez(pjoin(gv.data_dir,subdir,'gathered.npz'), output_per_raw=output_per_raw )
-    import gc; gc.collect()
 
     #Audio(filename=sound_file, autoplay=True)
     import utils_postprocess as pp
@@ -8056,10 +8422,11 @@ def collectCalcResults(subdir, start_time, end_time = None):
     #################################   Completeness of loaded
 
     from utils_postprocess_HPC import checkTupleListTableCompleteness
-    print('Total')
+    print('---- Total complentess')
     b,missing = checkTupleListTableCompleteness(tpll_reshaped)
+    print(missing)
 
-    print('---- per grouping')
+    print('---- per grouping complentess')
     for grps_cur in groupings_found:
         print(grps_cur)
         outputs_filtered = postp.filterOutputs(output_per_raw, rns=rawnames,
@@ -8069,10 +8436,23 @@ def collectCalcResults(subdir, start_time, end_time = None):
 
     return output_per_raw
 
+def extendDfMultiOPR(df, pptype2res):
+    dfs = []
+    for ppt,opr in pptype2res.items():
+        print(f'  Extending DF for ppt={ppt}')
+        dfc = df.query(f'pptype == "{ppt}"').copy()
+        opr = pptype2res[ppt]
+        dfc_mod = extendDf(dfc, opr)
+        dfs += [dfc_mod]
+    return pd.concat(dfs, ignore_index=1)
+
 def extendDf(df, output_per_raw):
-        #%debug
+    import re
     from utils_postprocess_HPC import getTremorDetPerf
-    from utils_postprocess_HPC import  getMocFromRow
+    from utils_postprocess_HPC import getMocFromRow
+
+    print('addRunCorrespCols')
+    addRunCorrespCols(df, output_per_raw)
 
     def addTremorPerf(row):
         #print('a',row)
@@ -8086,6 +8466,7 @@ def extendDf(df, output_per_raw):
         #row['tremor_det'] = r
         return r
 
+    print('tremor detection performance')
     df['tremor_det_perf'] = df.apply(addTremorPerf,axis=1)
     df.reset_index()
 
@@ -8094,6 +8475,16 @@ def extendDf(df, output_per_raw):
     df['numpts'] = pd.to_numeric(df['numpts'])
     df['sens'] = pd.to_numeric(df['sens'])
     df['spec'] = pd.to_numeric(df['spec'])
+
+    df['subject'] = df['rawname'].apply(lambda x: x.split('_')[0]) 
+    df['medcond'] = df['rawname'].apply(lambda x: x.split('_')[1]) 
+    df['move_hand_side_letter'] = df['move_hand_side_letter'].apply(lambda x: x[0] if isinstance(x,list) else x) 
+    df['move_hand_opside_letter'] = df['move_hand_opside_letter'].apply(lambda x: x[0] if isinstance(x,list) else x) 
+
+
+    print('addParsColumns')
+    df = addParsColumns(df, output_per_raw)
+    df['subskip_fit'] = pd.to_numeric(df['subskip_fit'])
 
     ##### Add counts columns
     def lbd(row):
@@ -8107,15 +8498,233 @@ def extendDf(df, output_per_raw):
         tot = np.sum( list(cts.values()) )
         cts2 = cts.copy()
         s = ''
-        for k,v in cts.items():
-            k2 = k[:-2]
-            #k2 = k
-            stmp = f'{v / tot * 100:4.1f}%={v/32:5.1f}s'
-            cts2[k2] = stmp
-            s += f', {k2}: {stmp}'
-            total = tot / 32  # in sec
+
+        subskip_fit = row['subskip_fit']
+        total = tot / subskip_fit  # in sec
+
+        #for k,v in cts.items():
+        #    k2 = k[:-2]
+        #    #k2 = k
+        #    stmp = f'{v / tot * 100:4.1f}%={v/32:5.1f}s'
+        #    cts2[k2] = stmp
+        #    s += f', {k2}: {stmp}'
+        #    # 256
+
         return cts, total
 
+    # these numpers are taken from label_good which HAVE NOT been subskipped
     df[['points_per_beh_state', 'total_len_sec']] = df.apply(lbd,1,result_type='expand')
 
+    from utils_tSNE import countClassLabels
+    def lbd(row):
+        moc = getMocFromRow( row , output_per_raw)
+        if moc is None:
+            return { 'uuu':np.nan}
+        y = featnames = moc['class_labels_good_for_classif']
+        revdict = moc['revdict_lenc']
+        numpoints_per_class_id = countClassLabels(y, class_ids_grouped=None, revdict=revdict)
+        #print(sidelet)
+        print(numpoints_per_class_id)
+        return numpoints_per_class_id
+
+    df['points_per_beh_state2'] = df.apply(lbd,1)
+    df['numpts2'] = df['points_per_beh_state2'].apply(lambda x: np.sum( list( x.values() ) ) ,1)
+
+    ##########################################o
+
+    print('pctpts')
+    from globvars import gp
+    for it in  gp.int_types_basic:
+        def lbd(d):        
+            if d is None:
+                return None
+            for k,v in d.items():
+                if k.startswith(it):
+                    #res = d[k] / 32
+                    res = d[k] 
+                    return int( res )
+        df[f'numpts_{it}'] = df['points_per_beh_state2'].apply(lbd)
+        
+        def lbd(row):
+            n = row[f'numpts_{it}']
+            if n is None:
+                n = np.nan
+            npts_pct = n / row['numpts2']
+            return npts_pct * 100
+        df[f'pctpts_{it}'] = df.apply(lbd,1)
+        
+    from featlist import selFeatsRegexInds
+    from utils_postprocess_HPC import prefTempl2pref, prefix2prefixTempl
+
+    print('mainLFPside')
+    regex = re.compile(".*LFP(.).*")
+    def lbd(row):
+        moc = getMocFromRow( row , output_per_raw)
+        if moc is None:
+            return None,None
+        featnames = moc['feature_names_filtered']
+        inds = selFeatsRegexInds(featnames, '.*LFP.*')
+        sidelet = None
+        templ = None
+
+        if len(inds):
+            assert len(inds) in [1,3], len(inds)
+            r = re.match(regex, featnames[inds[0]])
+            sidelet = r.groups()[0]
+            
+            templ = prefix2prefixTempl(sidelet, row['subject'])
+        #print(sidelet)
+        return sidelet, templ
+
+    df[['mainLFPside','mainLFPside_templ']] = df.apply(lbd,1,result_type = 'expand')
+    #return sidelet
+
+    ########################################
+    def lbd(row):
+        moc = getMocFromRow(row, output_per_raw)
+        if moc is None:
+            return None
+    #     pars = moc['pars']
+    #     s = f' ../run/run_ML.py'
+    #     for p,v in pars.items():
+    #         if p in ['iniAdd', 'search_best_LFP', 'code_ver' ]:
+    #             continue  
+    #         s += f' --{p} {v}'        
+    #     s += ' --exit_after artif_processed'
+
+        s = moc['LFP_side_to_use_final']
+        return s
+
+    #df['runs'] = df.apply(lbd,1)
+    #df['runs']
+
+    df['LFP_side_to_use'] = df.apply(lbd,1)
+
+
+    ###########################################
+    def lbd(row):
+        moc = getMocFromRow(row, output_per_raw)
+        if moc is None:
+            return None
+        rn = row['rawname']
+        subj = row['subject']
+        prefix = row['prefix']
+        if isinstance(subj, list):
+            subj = subj[0]
+        subjs_involved, mcs, mvsls, mvosls = analyzeRnstr(rn)
+
+        mainmoveside = gv.gen_subj_info[subj].get('move_side',None)
+        moveopside =  utils.getOppositeSideStr( mainmoveside ) 
+
+        movesidelet = mainmoveside[0].upper()
+        moveopsidelet = utils.getOppositeSideStr( movesidelet )
+
+        pars = moc['pars']
+
+        #onlyH_mob_subskip8@left_exCB-copy_from_search_LFP
+
+        pref_templ = None
+        pref_templ0 = None
+        atsymbol = prefix.find('@') >= 0
+        if atsymbol:
+            dashi = prefix.find('-')
+            side_brain = prefix[:dashi]
+            side_LFP   = prefix[dashi + 1:]
+
+            suff = side_LFP
+            suff = suff.replace(mainmoveside,'^')
+            side_LFP2_0 = suff.replace(moveopside,'%')
+            if side_LFP == "copy_from_search_LFP":
+                assert pars['LFP_side_to_use'] == 'copy_from_search_LFP'
+                side = moc['LFP_side_to_use_final']
+                sidelet = side[0].upper()
+
+                #suff = side_LFP
+                #suff = suff.replace(side_LFP,sidelet)
+                suff = sidelet
+                suff = suff.replace(movesidelet,'^')
+                side_LFP2 = suff.replace(moveopsidelet,'%')
+                #print('side_LFP2 = ',side_LFP2)
+
+            else:
+                side_LFP2 = side_LFP2_0
+
+            if side_LFP2 in ['L','R' ]:
+                print(side_LFP, side_LFP2_0, side_LFP2)
+                raise ValueError('rrr')
+
+            suff = side_brain
+            suff = suff.replace(mainmoveside,'^')
+            brain_side2 = suff.replace(moveopside,'%')
+
+            brain_side2 = brain_side2.replace('both','B')
+
+            pref_templ = f"{brain_side2}-{side_LFP2}"
+            pref_templ0 = f"{brain_side2}-{side_LFP2_0}"
+                #pref_templ = prefix[:-2] + suff
+        else:
+            for suff in ['LL','RR','LR','RL','BB','BL','BR', 'LB','RB']:
+                #assert len(set(mvsls)) == 1, (prefix,mvsls)
+                if prefix.endswith(suff) and len(set(mvsls)) == 1:
+                    suff = prefix[-2:]
+                    suff = suff.replace(movesidelet,'^')
+                    suff = suff.replace(moveopsidelet,'%')
+                    pref_templ = prefix[:-2] + suff
+                    
+                    pref_templ0 = pref_templ
+            for suff in ['BC','LC','RC']:
+                if prefix.endswith(suff) and len(set(mvsls)) == 1:
+                    assert pars['LFP_side_to_use'] == 'copy_from_search_LFP'
+                    side = moc['LFP_side_to_use_final']
+                    sidelet = side[0].upper()
+
+                    suff = prefix[-2:]
+                    suff = suff.replace('C',sidelet)  # different 
+                    suff = suff.replace(movesidelet,'^')
+                    suff = suff.replace(moveopsidelet,'%')
+                    pref_templ = prefix[:-2] + suff
+
+                    # same but not touching C
+                    suff = prefix[-2:]
+                    suff = suff.replace(movesidelet,'^')
+                    suff = suff.replace(moveopsidelet,'%')
+                    pref_templ0 = prefix[:-2] + suff
+
+        #if pref_templ is None:
+        #    print( prefix )
+        return pref_templ,pref_templ0
+
+    df[['prefix_templ','prefix_templ0']] = df.apply(lbd,1,
+            result_type= 'expand')
+
+    # need base_pref_start_dict
+    #df = addImprovColDfAll(df, inplace
+    #df = addImprovCol
+
+    qval = 0.9
+    global rowinfostr_fails
+    rowinfostr_fails = []
+    def lbd(row):
+        moc = getMocFromRow(row, output_per_raw)
+        if moc is None:
+            global rowinfostr_fails
+            rowinfostr = f'{row["rawname"]} {row["grouping"]} {row["interval_set"]} {row["pptype"]} {row["prefix"] }'
+            print(f'For this row we got no Moc :( {rowinfostr}')
+            #row
+            rowinfostr_fails += [ rowinfostr ]
+            #raise ValueError('aaa')
+            return None
+        anver = moc['XGB_analysis_versions']    
+        pti = anver['all_present_features']['perf_dict']['perm_test_info']
+        #print(pti['score_noperm'])
+        perm_scores = pti['perm_scores']
+        v = np.quantile( perm_scores, q=qval)
+        return v
+    print('rowinfostr_fails = ',rowinfostr_fails)
+
+    df[f'bacc_perm_{qval:.1f}'] = df.apply(lbd,1)
+
+
     return df
+
+###
