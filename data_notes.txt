@@ -2,3 +2,6 @@ S02_on_hold
 often alpha-mu come from strage locations
 often tremor comes from left side of the head (regardless of tremor side)
 868.7-872.2 -- broadband MEG artifact
+
+S02_off_hold -- holdtrem is very present
+S04_off_hold as well but less

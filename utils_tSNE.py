@@ -1942,9 +1942,14 @@ def averPerfDicts(perf_dicts):
 
 def getFolds(X,y,n_splits, group_labels=None, stratified=True,
              holdout = True, seed=0 ):
+    '''
+    Generate folds for CV
+    if holdout, return three things, otherwise just two
+    '''
     from sklearn.model_selection import StratifiedKFold,KFold,GroupKFold
     from sklearn.model_selection import train_test_split
     assert len(X) == len(y)
+    # first just generate splits
     if group_labels is None:
         if stratified:
             kf = StratifiedKFold(n_splits=n_splits, shuffle=True,
@@ -1966,6 +1971,7 @@ def getFolds(X,y,n_splits, group_labels=None, stratified=True,
 
     split_res = list(split_res)  # to be able to save later
 
+    # create holdout data out of train indices
     if holdout:
         r = []
         rfeatsel = []
@@ -2049,7 +2055,7 @@ def getPredPowersCV(clf,X,class_labels,class_ind, printLog = False, n_splits=Non
             if len(set(y_train) ) !=  len(set(y_test) ):
                 print(f'skipping fold {fi} due to different numbers')
                 continue
-            assert n_classes == len(set(y_train) ) 
+            assert n_classes == len(set(y_train) )
             assert n_classes == len(set(y_test) )
 
             class_labels_test_u = np.unique(y_test)

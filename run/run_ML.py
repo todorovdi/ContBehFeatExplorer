@@ -295,7 +295,7 @@ opts, args = getopt.getopt(effargv,"hr:n:s:w:p:",
          "calc_MI=", "calc_VIF=", "calc_Boruta=",
          "n_samples_SHAP=", "calc_selMinFeatSet=",
           "selMinFeatSet_drop_perf_pct=", "selMinFeatSet_conv_perf_pct=",
-          "savefile_rawname_format=", "savefile_rawname_format_best_LFP=", 
+          "savefile_rawname_format=", "savefile_rawname_format_best_LFP=",
          "selMinFeatSet_after_featsel=", "n_jobs=", "label_groups_to_use=",
          "SLURM_job_id=", "runCID=", "featsel_only_best_LFP=",
          "best_LFP_info_file=",  "best_LFP_disjoint=", "tune_search_best_LFP=",
@@ -1005,10 +1005,10 @@ for rawn in rawnames:
             #rnstr = ','.join(rawnames)
             #p = pjoin(search_LFP_dir, rnstr)
             #fold_info = np.load('fold_info.npz')
- 
+
             rc_searchLFP = f_searchLFPres['results_cur'][()]
             bininds_clean2_searchLFP = rc_searchLFP['bininds_noartif_naive_and_manual']
-            clgfc = rc_searchLFP[ 'class_labels_good_for_classif' ] 
+            clgfc = rc_searchLFP[ 'class_labels_good_for_classif' ]
 
 
             fold_info = rc_searchLFP['fold_info']
@@ -1417,7 +1417,7 @@ nbins_total =  sum( [ len(times) for times in rawtimes_pri ] )
 # here I need to use side_switched because I need to concatenate anns (I were
 # not doing it in the previous processing stages)
 anns, anns_pri, times_concat, dataset_bounds, wbd_merged = \
-        concatAnns(rawnames, rawtimes_pri, 
+        concatAnns(rawnames, rawtimes_pri,
             crop=(crop_start,crop_end),
             side_rev_pri = side_switch_happened_pri,
             wbd_pri = wbd_pri, sfreq=sfreq, ret_wbd_merged=1)
@@ -1472,8 +1472,8 @@ else:
 anns_artif, anns_artif_pri, times_, dataset_bounds_ = \
     concatAnns(rawnames, rawtimes_pri, suffixes,
         crop=(crop_start,crop_end),
-        allow_short_intervals=True, 
-        side_rev_pri = side_switch_happened_pri, 
+        allow_short_intervals=True,
+        side_rev_pri = side_switch_happened_pri,
         wbd_pri = wbd_pri, sfreq=sfreq)
 # remove wrong side artifacts (but keeping all channels on given side)
 if  use_matching_folds_main_LFP:
@@ -1497,7 +1497,7 @@ ivalis_artif_tb_indarrays_merged = \
     utils.getWindowIndicesFromIntervals(wbd_merged,ivalis_artif,
                                     sfreq,ret_type='bins_contig',
                                     ret_indices_type =
-                                    'window_inds', 
+                                    'window_inds',
                                     nbins_total=nbins_total )
 #ivalis_artif_tb, ivalis_artif_tb_indarrays = utsne.getAnnBins(ivalis_artif, Xtimes,
 #                                                            nedgeBins, sfreq, skip, windowsz, dataset_bounds)
@@ -1894,7 +1894,7 @@ if do_Classif:
             #        rncombinstr = ','.join(rawnames)
             #else:
             #    rncombinstr = custom_rawname_str
-        
+
 
             #formatMultiRawnameStr(rawnames, fn, rawname_format, regex_mode,
             rncombinstr = formatMultiRawnameStr(rawnames, savefile_rawname_format,
@@ -2019,7 +2019,7 @@ if do_Classif:
             results_cur['best_LFP_exCB'] = best_LFP_exCB
             results_cur['best_LFP_prefix_type'] = best_LFP_prefix_type
             results_cur['best_LFP_sel_params'] = best_LFP_sel_params
-                
+
             results_cur['LFP_side_to_use_final'] = LFP_side_to_use
 
             results_cur['icaobj'] = ica
@@ -2047,7 +2047,7 @@ if do_Classif:
 
                 strong_correl_inds = np.where( C_flat > strong_correl_level )[0]
                 print('Num: strongly (>{:.2f}) correl feats (div by 2)={}, of total pairs {} it is {:.4f}'.\
-                        format(strong_correl_level, len(strong_correl_inds) //2 , 
+                        format(strong_correl_level, len(strong_correl_inds) //2 ,
                             len(C_flat)//2, len(strong_correl_inds) / len(C_flat) ) )
                 nonsyn_feat_inds = pp.getNotSyn(C,strong_correl_level)
                 print(f'Num of feats excluding synonyms for corr. level = {strong_correl_level:.3f}: {len(nonsyn_feat_inds)} of {C.shape[0]}' )
@@ -2368,7 +2368,9 @@ if do_Classif:
             #class_labels_good_for_classif = lab_enc.transform(class_labels_for_heavy)
 
             # TODO: if there is subskip > 1, it should be done HERE ONLY
+            # if we did not load folds, create them
             if not use_main_LFP_chan or (not use_matching_folds_main_LFP):
+                print('Creating new folds')
                 fold_info = {}
 
                 folds_train_holdout, folds_trainfs_testfs,\
@@ -2377,14 +2379,16 @@ if do_Classif:
                         n_splits=n_splits, group_labels=None,
                         stratified=True, holdout=True,seed=0)
 
+                # this is supposed to be used during main XGB run
                 fold_info['folds_train_holdout'] = folds_train_holdout
+                # this is supposed to be used during searchLFP
                 fold_info['folds_trainfs_testfs'] = folds_trainfs_testfs
                 fold_info['folds_train_holdout_trainfs_testfs'] = folds_train_holdout_trainfs_testfs
 
                 from packaging.version import parse as vparse
                 import sklearn
-                group_fold_stratif = vparse(sklearn.__version__) > vparse('0.25')
 
+            group_fold_stratif = vparse(sklearn.__version__) > vparse('0.25')
             # because we don't have foldsg in searchLFP file
             for label_group_name,group_labels in group_labels_dict.items():
                 if label_group_name not in label_groups_to_use:
@@ -2626,9 +2630,11 @@ if do_Classif:
                     saveResToFolder(results_cur['XGB_analysis_versions'],
                                     XGB_version_name, 'XGB_analysis_versions' )
                 else:
+                    # MAIN RUN of XGB classif
                     XGB_version_name = 'all_present_features'
 
                     clf_XGB = XGBClassifier(**add_clf_creopts)
+                    # this is just of noCV data
                     if XGB_balancing == 'oversample':
                         clf_XGB.fit(X_cur_oversampled, y_cur_oversampled, **add_fitopts)
                     else:
@@ -2691,7 +2697,7 @@ if do_Classif:
                                     class_ind_to_check_lenc, printLog = 0,
                                     n_splits=ngroups, add_fitopts=add_fitopts,
                                     add_clf_creopts=add_clf_creopts,
-                                    ret_clf_obj=False, seed=0, 
+                                    ret_clf_obj=False, seed=0,
                                     balancing=XGB_balancing,
                                     fold_split=foldsg_train_holdout,
                                     perm_test=0)
@@ -2791,7 +2797,7 @@ if do_Classif:
                                         main_metric=tune_metric, savedir=tune_savedir)
                             else:
                                 add_clf_creopts_cur_side = add_clf_creopts_CV
-                            
+
                             clf_XGB_ = XGBClassifier(**add_clf_creopts_cur_side)
 
                             if XGB_balancing == 'oversample':
@@ -2860,7 +2866,7 @@ if do_Classif:
 
                         else:
                             add_clf_creopts_minus_curLFP = add_clf_creopts_CV
-                        
+
                         clf_XGB_ = XGBClassifier(**add_clf_creopts_minus_curLFP)
 
                         if XGB_balancing == 'oversample':

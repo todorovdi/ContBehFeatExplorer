@@ -8444,7 +8444,11 @@ def extendDfMultiOPR(df, pptype2res):
         opr = pptype2res[ppt]
         dfc_mod = extendDf(dfc, opr)
         dfs += [dfc_mod]
-    return pd.concat(dfs, ignore_index=1)
+    if len(dfs) > 1:
+        r = pd.concat(dfs, ignore_index=1) 
+    else:
+        r = dfc_mod
+    return r
 
 def extendDf(df, output_per_raw):
     import re
