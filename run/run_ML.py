@@ -230,6 +230,9 @@ XGB_featsel_feats = ['VIFsel']
 shapr_featsel_feats = ['all']
 
 use_smoothened = 0
+use_smoothened_Wiener = 0
+require_rawnames_consist_with_bestLFP = 1
+force_use_bestLFP_first_rawname = 0
 
 selMinFeatSet_drop_perf_pct = 2.
 selMinFeatSet_conv_perf_pct = 2.
@@ -258,6 +261,7 @@ savefile_rawname_format = 'subj'
 savefile_rawname_format_best_LFP = 'subj,medcond'
 custom_rawname_str = None
 custom_rawname_str_best_LFP = None
+int_types_best_LFP,grouping_best_LFP='auto','auto'
 
 exit_after = 'end'  #load, rescale, artif_processed
 
@@ -284,16 +288,19 @@ opts, args = getopt.getopt(effargv,"hr:n:s:w:p:",
          'sources_type=', 'bands_type=', 'crop=', 'parcel_types=',
          "src_grouping=", "src_grouping_fn=", 'groupings_to_use=',
          'int_types_to_use=', 'skip_XGB=', 'skip_LDA=',
+         'int_types_best_LFP=','grouping_best_LFP=',
          'LFP_related_only=', "best_LFP_data_mods=",
          'parcel_group_names=', "subskip_fit=", "search_best_LFP=",
          "save_output=", 'rescale_feats=', "cross_couplings_only=", "LFPchan=",
          "heavy_fit_red_featset=", "n_splits=", "input_subdir=",
          "output_subdir=", "artif_handling=", "plot_types=",
          "skip_XGB_aux_int=", "max_XGB_step_nfeats=", "self_couplings_only=",
-         "param_file=", "scale_feat_combine_type=", "use_smoothened=",
+         "param_file=", "scale_feat_combine_type=",
+         "use_smoothened=", "use_smoothened_Wiener=",
          "featsel_methods=", "allow_CUDA=", "XGB_tree_method=",
          "calc_MI=", "calc_VIF=", "calc_Boruta=",
-         "n_samples_SHAP=", "calc_selMinFeatSet=",
+         "n_samples_SHAP=", "calc_selMinFeatSet=", "require_rawnames_consist_with_bestLFP=",
+         'force_use_bestLFP_first_rawname=',
           "selMinFeatSet_drop_perf_pct=", "selMinFeatSet_conv_perf_pct=",
           "savefile_rawname_format=", "savefile_rawname_format_best_LFP=",
          "selMinFeatSet_after_featsel=", "n_jobs=", "label_groups_to_use=",
@@ -388,6 +395,14 @@ for opt,arg in pars.items():
         do_cleanup = int(arg)
     elif opt == "XGB_tree_method":
         XGB_tree_method = arg
+    elif opt == "int_types_best_LFP":
+        int_types_best_LFP = arg
+    elif opt == "grouping_best_LFP":
+        grouping_best_LFP = arg
+    elif opt == "require_rawnames_consist_with_bestLFP":
+        require_rawnames_consist_with_bestLFP = int(arg)
+    elif opt == "force_use_bestLFP_first_rawname":
+        force_use_bestLFP_first_rawname = int(arg)
     elif opt == "featsel_only_best_LFP":
         featsel_only_best_LFP = int(arg)
     elif opt == "best_LFP_info_file":
@@ -532,6 +547,8 @@ for opt,arg in pars.items():
         src_grouping = int(arg)
     elif opt == "use_smoothened":
         use_smoothened = int(arg)
+    elif opt == "use_smoothened_Wiener":
+        use_smoothened_Wiener = int(arg)
     elif opt == "src_grouping_fn":
         src_file_grouping_ind = int(arg)
     elif opt == "max_XGB_step_nfeats":
@@ -733,6 +750,7 @@ if test_mode:
 
 tasks = []
 X_pri = []
+rawname_rep_pri = []
 feature_names_pri = []
 selected_feat_inds_pri = []
 baseline_int_pri = []
@@ -831,8 +849,12 @@ for rawn in rawnames:
 
 
     sfreq = f['sfreq']
+    # only one at the same time
+    assert not (use_smoothened and use_smoothened_Wiener)
     if use_smoothened:
         X_allfeats =  f['X_smooth']
+    elif use_smoothened_Wiener:
+        X_allfeats =  f['X_smooth_Wiener']
     else:
         X_allfeats =  f['X']
     Xtimes = f['Xtimes']
@@ -925,7 +947,11 @@ for rawn in rawnames:
         else:
             disjoint = int(best_LFP_disjoint)
         assert len(groupings_to_use) == 1, 'unclear which grouping to use'
-        assert len(int_types_to_use) == 1, 'unclear which interval type to use'
+        int_types_to_use_sub = [it for it in int_types_to_use if it not in gv.rawnames_combine_types]
+        #assert len(int_types_to_use) == 1, 'unclear which interval type to use'
+        assert len(int_types_to_use_sub) == 1, 'unclear which interval type to use'
+ 
+
         #NOTE: maybe I want to keep the fixed rule of selecting the LFP
         # for everyone (i.e. not depening on grouping, interval type etc
         # otherwise it can be additional mess. Or maybe not becasue
@@ -949,22 +975,34 @@ for rawn in rawnames:
             exCB = best_LFP_exCB
 
 
-        # take rawnames that are related to current subject AND current medcond
-        rawnames_cursubj =  [rn for rn in rawnames if '_'.join(rn.split('_')[:2]) \
-                             == '_'.join(rawn.split('_')[:2])]
-        #formatMultiRawnameStr(rawnames_cursubj, 'subj,medcond_glob')
+        # it is important if we did not calc best LFP a combination of diff medcond
+        if force_use_bestLFP_first_rawname and (not use_matching_folds_main_LFP):
+            rawnames_cursubj = rawnames[:1]
+        else:
+            # take rawnames that are related to current subject AND current medcond
+            rawnames_cursubj =  [rn for rn in rawnames if '_'.join(rn.split('_')[:2]) \
+                                 == '_'.join(rawn.split('_')[:2])]
+            #formatMultiRawnameStr(rawnames_cursubj, 'subj,medcond_glob')
         rncombinstr = formatMultiRawnameStr(rawnames_cursubj, savefile_rawname_format_best_LFP,
                 custom_rawname_str = custom_rawname_str_best_LFP)
 
         # TODO: load this file and check that labels are the same
+        if grouping_best_LFP == 'auto':
+            grp = groupings_to_use[0]
+        else:
+            grp = grouping_best_LFP
+
+        if int_types_best_LFP == 'auto':
+            it = int_types_to_use[0]
+        else:
+            it = int_types_best_LFP
         mainLFPchan, fnf_searchLFPres, best_LFP_sel_params =\
-                getBestLFPfromDict(best_LFP_info,subj,
-                        rncombinstr,
+                getBestLFPfromDict(best_LFP_info,subj, rncombinstr,
                 disjoint=disjoint,
                 brain_side = brain_side_to_use,
                 exCB = exCB,
-                grp=groupings_to_use[0],
-                it=int_types_to_use[0])
+                grp=grp,
+                it=it)
 
         fnf_searchLFPres_pri += [fnf_searchLFPres]
 
@@ -976,7 +1014,8 @@ for rawn in rawnames:
         # compare strings here
         pars_searchLFP = f_searchLFPres['pars'][()]
         if len(rawnames) <= 2:
-            assert pars_searchLFP['rawnames'] == pars['rawnames']
+            if require_rawnames_consist_with_bestLFP:
+                assert pars_searchLFP['rawnames'] == pars['rawnames']
         else:
             if pars_searchLFP['rawnames'] != pars['rawnames'] :
                 print( f'There is no equality: {pars_searchLFP["rawnames"]} != {pars["rawnames"]}' )
@@ -1178,6 +1217,7 @@ for rawn in rawnames:
 
 
     X_pri += [ X ]
+    rawname_rep_pri += [ len(X) * [rawn]  ]
     del X_allfeats
     feature_names_pri += [ good_feats ]
     selected_feat_inds_pri += [selected_feat_inds]
@@ -1192,8 +1232,13 @@ for rawn in rawnames:
 
 ############### enf of feature loading
 # allow 0
+# check if we are taking from the same best LFP file
 if use_matching_folds_main_LFP:
-    assert len(set(fnf_searchLFPres_pri) ) <= 1, 'otherwise artif sync would fail'
+    if require_rawnames_consist_with_bestLFP: 
+        assert len(set(fnf_searchLFPres_pri) ) <= 1, 'otherwise artif sync would fail'
+    elif len(set(fnf_searchLFPres_pri) ) > 1:
+        print('WARNING: len(set(fnf_searchLFPres_pri) ) > 1')
+    #    fnf_searchLFPres_pri = fnf_searchLFPres_pri[:1]  # doing it here has no effect anyway
 
 baseline_int_type_pri = [pcff['baseline_int_type']  for pcff in feat_pars_pri]
 
@@ -1272,6 +1317,11 @@ if rescale_feats:
     # pcff['body_side_for_baseline_int']
     bint_side_pri
     scale_data_combine_type_pri = [pcff['scale_data_combine_type'] for pcff in feat_pars_pri]
+    rescale_feats_pri =  [int(pcff['rescale_feats']) for pcff in feat_pars_pri]
+    prescale_data_pri =  [int(pcff['prescale_data']) for pcff in feat_pars_pri]
+
+    assert len(set(rescale_feats_pri )) == 1, rescale_feats_pri
+    assert len(set(prescale_data_pri )) == 1, prescale_data_pri
 
 
     if len(set(baseline_int_pri)) > 1:
@@ -1283,12 +1333,15 @@ if rescale_feats:
     if len(set(scale_data_combine_type_pri)) > 1:
         print(f'Warning: scale_data_combine_type_pri not unique {scale_data_combine_type_pri}')
 
-    # set in args to this script (run_ML)
-    assert baseline_int_type_pri[0]       == baseline_int_type, (baseline_int_type_pri,baseline_int_type)
-    if not gv.DEBUG_MODE:
-        assert scale_data_combine_type_pri[0] == scale_feat_combine_type, (scale_data_combine_type_pri, scale_feat_combine_type )
-    else:
-        print( f'scale_data_combine_type_pri={scale_data_combine_type_pri}, scale_feat_combine_type={scale_feat_combine_type} ')
+    # compare rescaling params with what was set in args to this script (run_ML). But only if features were previously rescaled
+    if rescale_feats_pri[0]:
+        assert baseline_int_type_pri[0]       == baseline_int_type, (baseline_int_type_pri,baseline_int_type)
+
+    print( f'scale_data_combine_type_pri={scale_data_combine_type_pri}, scale_feat_combine_type={scale_feat_combine_type} ')
+    if rescale_feats_pri[0]:
+        assert scale_data_combine_type_pri[0] == scale_feat_combine_type, (scale_data_combine_type_pri, scale_feat_combine_type, rescale_feats_pri )
+    #if not gv.DEBUG_MODE:
+    #else:
 
     # WARNING: This will give wrong results if we have inconsistent sides
     #assert len(set(main_side_pri) ) == 1
@@ -1333,6 +1386,8 @@ if rescale_feats:
             minlen_bins = 5 * sfreq // skip,
             combine_within=scale_feat_combine_type,
             bindict_per_rawn=bindict_per_rawn  )
+    # scale within should belong to globvars.rawnames_combine_types 
+    # = ['no', 'subj', 'medcond', 'task', 'across_everything', 'medcond_across_subj', 'task_across_subj']
     #X_pri = X_pri_rescaled
 
     if show_plots and 'feat_stats' in plot_types:
@@ -1353,6 +1408,8 @@ if rescale_feats:
     Xconcat = np.concatenate(X_pri_rescaled,axis=0)
 else:
     Xconcat = np.concatenate(X_pri,axis=0)
+
+rawname_rep_concat = sum(rawname_rep_pri,[])
 
 
 dsattrib = np.nan * np.ones( len(Xconcat) )
@@ -1475,6 +1532,7 @@ anns_artif, anns_artif_pri, times_, dataset_bounds_ = \
         allow_short_intervals=True,
         side_rev_pri = side_switch_happened_pri,
         wbd_pri = wbd_pri, sfreq=sfreq)
+
 # remove wrong side artifacts (but keeping all channels on given side)
 if  use_matching_folds_main_LFP:
     assert LFP_side_to_use_searchLFP is not None
@@ -1581,6 +1639,8 @@ else:
     print('Warning not removing unlabeled before PCA')
     bininds_for_fit = bininds_clean2
 
+assert len(rawname_rep_concat) == len(Xconcat_imputed)
+rawname_rep_concat_for_fit = np.array(rawname_rep_concat)[bininds_for_fit]
 #####################################################
 
 
@@ -1782,6 +1842,7 @@ if do_Classif:
                 revdict_per_dataset_int_type[int_types_key_cur] = revdict
                 class_ids_grouped_per_dataset_int_type[int_types_key_cur] = class_ids_grouped
 
+
             if int_types_key in gp.int_type_datset_rel:
                 # distinguishing datasets
                 class_labels = group_labels
@@ -1807,6 +1868,8 @@ if do_Classif:
                     Xconcat_good_cur = Xsubset_to_fit_ICA
                 else:
                     Xconcat_good_cur = Xsubset_to_fit
+                    
+                rnsrep_ = rawname_rep_concat_for_fit[::subskip_fit]
             else:
                 # here we really want to have only one side, even if we use
                 # both brain sides. Unless we want to do multilabel classif (NO)
@@ -1853,6 +1916,8 @@ if do_Classif:
                 #this is a string label
                 class_to_check = '{}_{}'.format(int_types_to_distinguish[0],
                                                 hand_sidelet_for_classif_labels )
+
+                rnsrep_ = rawname_rep_concat_for_fit[inds_not_neut][::subskip_fit]
             class_ind_to_check = class_ids_grouped[class_to_check]
 
 
@@ -2006,6 +2071,7 @@ if do_Classif:
                 with open(verfn ) as f:
                     verstr = f.readlines()[0]
             results_cur['code_ver'] = verstr
+            results_cur['rawname_rep_concat_y_compat'] = rnsrep_
             results_cur['group_labels_dict'] = group_labels_dict
             results_cur['feature_names_filtered'] = featnames #=feature_names_pri[0]
             results_cur['feature_names_nice'] = featnames_nice #=feature_names_pri[0]
@@ -2385,9 +2451,8 @@ if do_Classif:
                 fold_info['folds_trainfs_testfs'] = folds_trainfs_testfs
                 fold_info['folds_train_holdout_trainfs_testfs'] = folds_train_holdout_trainfs_testfs
 
-                from packaging.version import parse as vparse
-                import sklearn
-
+            from packaging.version import parse as vparse
+            import sklearn
             group_fold_stratif = vparse(sklearn.__version__) > vparse('0.25')
             # because we don't have foldsg in searchLFP file
             for label_group_name,group_labels in group_labels_dict.items():
@@ -2705,6 +2770,13 @@ if do_Classif:
 
                                 perfstr = utsne.sprintfPerfs(r0_across['perf_aver'])
                                 print(f'{label_group_name} label grouping gave perf {perfstr}')
+                                # see which rawnames belong to which fold
+                                for perf,(train_inds,test_inds) in zip(r0_across['perfs_CV'],foldsg_train_holdout): 
+                                    rns_train = list(set(rnsrep_[train_inds]))
+                                    rns_test = list(set(rnsrep_[test_inds]))
+                                    perf['generalization_pattern_from_fold'] = '{}->{}'.format(
+					','.join(rns_train),','.join(rns_test))
+
                                 cm = r0_across['confmat_aver']
                                 if cm is not None:
                                     print(cm  * 100 )
@@ -3813,13 +3885,14 @@ if not single_fit_type_mode:
         # we need to restrict the LDA output to the right index range
         #for grouping_key in groupings_to_use:
         for grouping_key in mult_clf_results_pg_cur:
-            grouping = gv.groupings[grouping_key]
+            grouping = gp.groupings[grouping_key]
 
             mult_clf_results_pit = {}
             #for int_types_key in int_types_to_use:
             for int_types_key in mult_clf_results_pg_cur[grouping_key]:
                 r = mult_clf_results_pg_cur[grouping_key][int_types_key]
-                if r is not None:
+                save_transformed = 0
+                if r is not None and save_transformed:
                     r['transformed_imputed'] = r['transformed_imputed'][sl]
                     r['transformed_imputed_CV'] = r['transformed_imputed_CV'][sl]
 

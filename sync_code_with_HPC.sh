@@ -18,7 +18,8 @@ if [[ $SYNC_MODE != "get_from" && $SYNC_MODE != "send_to" && $SYNC_MODE != "both
   exit 1
 fi
 
-run="python3 _rsync_careful.py"
+MYSCRIPTS=$HOME/current/Linux/scripts
+run="python3 $MYSCRIPTS/_rsync_careful.py"
 #run="ipython3 -i _rsync_careful.py --"
   
 echo '' > sync_dest_changes.log

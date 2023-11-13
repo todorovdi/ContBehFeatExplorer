@@ -12,8 +12,8 @@
 ###SBATCH --time=23:00:00
 ## usually finished in around 30 min
 #SBATCH --time=01:00:00
-##SBATCH --partition=gpus
-#SBATCH --partition=batch
+#SBATCH --partition=gpus
+##SBATCH --partition=batch
 #SBATCH --mem=128G
 
 ##SBATCH --partition=batch
@@ -49,7 +49,8 @@
 ###  sbatch <jobscript> 
 ## srun <executable>
 
-jutil env activate -p icei-hbp-2020-0012
+#jutil env activate -p icei-hbp-2020-0012
+. _acc.sh
 
 JOBID=$SLURM_JOB_ID
 ID=$SLURM_ARRAY_TASK_ID
@@ -103,7 +104,8 @@ unset __conda_setup
 
 unset PYTHONPATH
 conda activate cobd
-#export PYTHONPATH="$OSCBAGDIS_DATAPROC_CODE:$PYTHONPATH"
+conda deactivate
+conda activate cobd
 export PYTHONPATH="$OSCBAGDIS_DATAPROC_CODE"
 export python_correct_ver=python
 

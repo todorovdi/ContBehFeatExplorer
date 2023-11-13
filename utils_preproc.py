@@ -774,7 +774,8 @@ def getArtifForChn(chn,bindict,lendat):
 def collectAllMarkedIntervals( rn,times, main_side, side_rev, sfreq=256,
             ann_MEGartif_prefix_to_use = '_ann_MEGartif_flt',
             printLog=True, allow_missing_files=False,
-                              remove_nonmain_artif=True):
+                              remove_nonmain_artif=True, 
+                              verbose=0):
     '''
     * does reversal if needed
     * removes artifacts from the wrong side, but does not remove
@@ -789,7 +790,7 @@ def collectAllMarkedIntervals( rn,times, main_side, side_rev, sfreq=256,
 
     anns_mvt, anns_artif_pri, times2, dataset_bounds = \
     utsne.concatAnns([rn],[times],side_rev_pri=[side_rev],
-                     allow_missing=allow_missing_files)
+                     allow_missing=allow_missing_files, verbose=verbose)
     #ivalis_mvt = utils.ann2ivalDict(anns_mvt)
     lens_mvt = utils.getIntervalsTotalLens(anns_mvt, include_unlabeled
                                             =False, times=times)
@@ -802,7 +803,8 @@ def collectAllMarkedIntervals( rn,times, main_side, side_rev, sfreq=256,
     anns_MEGartif, anns_artif_pri, times2, dataset_bounds = \
         utsne.concatAnns([rn],[times],[ann_MEGartif_prefix_to_use],
                          side_rev_pri=[side_rev],
-                         allow_missing=allow_missing_files )
+                         allow_missing=allow_missing_files, verbose=verbose )
+
     lens_MEGartif = utils.getIntervalsTotalLens(anns_MEGartif, include_unlabeled =False,
                                             times=times)
     if printLog:
@@ -814,7 +816,7 @@ def collectAllMarkedIntervals( rn,times, main_side, side_rev, sfreq=256,
     anns_LFPartif, anns_artif_pri, times2, dataset_bounds = \
         utsne.concatAnns([rn],[times],['_ann_LFPartif'],
                          side_rev_pri=[side_rev],
-                         allow_missing=allow_missing_files )
+                         allow_missing=allow_missing_files, verbose=verbose )
     lens_LFPartif = utils.getIntervalsTotalLens(anns_LFPartif, include_unlabeled =False,
                                             times=times)
     if printLog:
@@ -902,13 +904,14 @@ def collectAllMarkedIntervalBins(rn,times,main_side, side_rev,
             sfreq=256, ann_MEGartif_prefix_to_use = '_ann_MEGartif_flt',
                                  printLog=True,
                                  allow_missing_files=False,
-                                remove_nonmain_artif=True, wbd=None ):
+                                remove_nonmain_artif=True, wbd=None,
+                                verbose = 0):
 
     anndict_per_intcat = collectAllMarkedIntervals(rn,times,main_side,
         side_rev, sfreq=sfreq,
         ann_MEGartif_prefix_to_use = ann_MEGartif_prefix_to_use,
         printLog=printLog, allow_missing_files=allow_missing_files,
-        remove_nonmain_artif=remove_nonmain_artif)
+        remove_nonmain_artif=remove_nonmain_artif, verbose=verbose)
 
     return markedIntervals2Bins(anndict_per_intcat,times,sfreq,wbd=wbd)
 
@@ -1222,7 +1225,7 @@ def gatherFeatStats(rawnames, X_pri, featnames_pri, wbd_pri,
                     require_intervals_present = 1,
                     ann_MEGartif_prefix_to_use = '_ann_MEGartif_flt',
                     printLog=True, artif_handling = 'reject',
-                   bindict_per_rawn = None ):
+                   bindict_per_rawn = None, verbose =0 ):
     '''
     it assumes that featnams are constant across datasets WITHIN indset.
         So I cannot apply it to raws from different subjects really. But from the same subject I can
@@ -1330,7 +1333,7 @@ def gatherFeatStats(rawnames, X_pri, featnames_pri, wbd_pri,
             bindict_per_bintype = \
             collectAllMarkedIntervalBins(rn,times,main_side, side_rev, sfreq,
                 wbd = wbd, ann_MEGartif_prefix_to_use = ann_MEGartif_prefix_to_use,
-                allow_missing_files=False)
+                allow_missing_files=False, verbose=verbose)
 
             bindict_per_rawn[rn ] =bindict_per_bintype
 
@@ -2639,9 +2642,11 @@ def concatRaws(raws,rescale=True,interval_for_stats = (0,300) ):
 
 
 def getIntervalInfoFromRawname(rawname_, crop=None,
-    collect_artif_info = True,
-        ann_MEGartif_prefix_to_use = [ '_ann_MEGartif_flt', '_ann_MEGartif' , '_ann_MEGartif_ICA' ] ,
-        print_empty = False, artif_thr_pct = 10, subdir = ''):
+    collect_artif_info = True, 
+    ann_MEGartif_prefix_to_use = [
+        '_ann_MEGartif_flt', '_ann_MEGartif' , '_ann_MEGartif_ICA' ] ,
+    print_empty = False, artif_thr_pct = 10, subdir = '',
+    verbose=0):
     '''
     returns ann_len_dict, ann_dict
     '''
@@ -2726,6 +2731,9 @@ def getIntervalInfoFromRawname(rawname_, crop=None,
     rd = {'BAD_MEGL':'BAD_icaMEGL', 'BAD_MEGR':'BAD_icaMEGR',
                      'BAD_MEG':'BAD_icaMEG'}
     fnsuff2renameDict['_ann_MEGartif_ICA'] = rd
+    #########################
+    rd = {'BAD_muscle':'BAD_muMEG'}
+    fnsuff2renameDict['_ann_MEGartif_muscle'] = rd
 
 
     if collect_artif_info:
@@ -2744,17 +2752,19 @@ def getIntervalInfoFromRawname(rawname_, crop=None,
                         allow_short_intervals=True,
                             side_rev_pri = [0],
                             wbd_pri = None, sfreq=int(raw.info['sfreq']),
-                             subdir=subdir)
+                             subdir=subdir , verbose =  verbose)
 
         if len(ann_MEGartif_prefix_to_use) > 1:
             for ann_MEGartif_addprefix in ann_MEGartif_prefix_to_use[1:]:
+                if verbose:
+                    print(ann_MEGartif_addprefix)
                 suffixes2 = [ann_MEGartif_addprefix]
                 anns_artif2, anns_artif_pri, times_, dataset_bounds_ = \
                     utsne.concatAnns([rawname_],[times], suffixes2,crop=(crop[0],crop[1]),
                                 allow_short_intervals=True,
                                     side_rev_pri = [0],
                                     wbd_pri = None, sfreq=int(raw.info['sfreq']),
-                                     subdir=subdir)
+                                     subdir=subdir, verbose =  verbose)
                 # TODO: maybe concat here?
                 rd = fnsuff2renameDict[ann_MEGartif_addprefix]
                 anns_artif2 = utils.renameAnnDescr(anns_artif2,

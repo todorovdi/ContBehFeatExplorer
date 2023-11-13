@@ -1503,7 +1503,6 @@ def plotBrainPerSubj(sind_strs, vis_info_per_subj, source_coords, subdir, clim,
                 #infos[sind_str][medcond]['info2'] = info2
 
                 info_rel_LFP  = plotinfo_cur['info_pgn_rel_LFP']
-                info_abs      = plotinfo_cur['info_pgn_abs']
 
                 if sind_str == 'S01':
                     info0 = info_rel_LFP
@@ -1563,6 +1562,7 @@ def plotBrainPerSubj(sind_strs, vis_info_per_subj, source_coords, subdir, clim,
                     figtitle = f'{sind_str} {medcond.upper()}' +\
                     f',   LFP perf={LFP_val:.0f}%\n'
                     if figtitle_inc_LFP_plus_best:
+                        info_abs      = plotinfo_cur['info_pgn_abs']
                         impr_absolute = info_abs['impr_per_medcond_per_pgn']
                         best_area = max(impr_absolute, key=impr_absolute.get)
                         #best = info2[best_area] #NO, it is single area W/O LFP!

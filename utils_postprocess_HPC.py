@@ -10,6 +10,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from utils_postprocess import multiLevelDict2TupleList
 from pathlib import Path
+from collections import OrderedDict as odict
 
 STS2ststr = {'%':'contra', '^':'ipsi', 'B':'bilat'}
 
@@ -519,9 +520,10 @@ def fillStatinfo(df_orig, grp, operation, operation_col):
 # returns row with modLFP corresponding to current row (if possible)
 def getCorrespModLFP(row, df, bad_pref_parts = ['_modLFP_'],
                      base_pref_start = 'onlyH_act_modLFP_subskip8',
-                     base_pref_start_dict = None):
+                     base_pref_start_dict = None, use_opside = False):
     # we will search for keys of base_pref_start_dict in pref templ
     #prefix = row['prefix'][0]
+    # other one or another is not None, not both
     assert (base_pref_start_dict is None) or (base_pref_start is None)
     prefix_templ = row['prefix_templ']
     prefix = row['prefix']
@@ -535,10 +537,17 @@ def getCorrespModLFP(row, df, bad_pref_parts = ['_modLFP_'],
 
     prefix_LFP,prefix_templ_LFP = None,None
     if prefix_templ is not None:
+        if use_opside:
+            #raise ValueError('Not impl')
+            return None
+        # we return None if we ask about corresp LFP for modLFP itself
+        # (we could return the original row but I decided not to in order
+        # to have clear separation between modLFP and others)
         for bps in bad_pref_parts:
             if prefix_templ.find(bps) >= 0:
                 return None
 
+        # detect side code
         #allowed = ['B-B','%-%','^-^']
         allowed = ['B-B','%_exCB-%','^_exCB-^']
         side_code = None
@@ -556,6 +565,7 @@ def getCorrespModLFP(row, df, bad_pref_parts = ['_modLFP_'],
             prefix_templ_LFP = base_pref_start + side_code
         else:
             found = False
+            # check if compatible with our base pref start dict
             for bps,bpsv in base_pref_start_dict.items():
                 if prefix_templ.find(bps) >= 0:
                     prefix_templ_upd = prefix_templ.replace(bps,bpsv)
@@ -568,36 +578,46 @@ def getCorrespModLFP(row, df, bad_pref_parts = ['_modLFP_'],
                 print( f'getCorrespModLFP: not found for prefix_templ = {prefix_templ}')
                 return None
         cond = df[ 'prefix_templ' ] == prefix_templ_LFP
-        print(sum(cond) )
+        print('sum cond = ',sum(cond) )
         #print( f'getCorrespModLFP: cond = df[ prefix_templ ] == {prefix_templ_LFP}')
     else:
+        # this is the case for onlyH_act_LFPand_only*
+
         LFP_side_to_use = row['LFP_side_to_use']
         assert LFP_side_to_use is not None
         #sidelet = LFP_side_to_use#[0].upper()
+        # TODO: maybe I can try to allow both-both
         copyLFPstr = 'copy_from_search_LFP'
         if LFP_side_to_use == 'both':
             addstr = ''
         else:
             addstr = '_exCB'
+        # side code we'll use to search for modLFP calc res in our dataframe later
+        if use_opside:
+            if LFP_side_to_use == 'both':
+                return None
+            LFP_side_to_use = utils.getOppositeSideStr(LFP_side_to_use)
         side_code = '@' + f'{LFP_side_to_use}{addstr}-{copyLFPstr}'
 
         if base_pref_start is not None:
             prefix_LFP = base_pref_start + side_code
-            print(f'settting due to base_pref_start = {base_pref_start}')
+            print(f'getCorrespModLFP: setting due to base_pref_start = {base_pref_start}')
         found = False
         # check if we  base prefs in prefix
         for bps,bpsv in base_pref_start_dict.items():
-            print(prefix,bps)
+            #print(prefix,bps)
             ind = prefix.find(bps)
             if ind >= 0:
                 prefix_upd = prefix[:ind] + bpsv
                 prefix_LFP = prefix_upd + side_code
                 found = True
+                print('getCorrespModLFP: found ',prefix,bps)
                 break
         if not found:  # if the prefix is really different, difficult to decide wrt what compute improvemenet
             print( f'getCorrespModLFP: not found for prefix = {prefix}')
             return None
         cond = df[ 'prefix' ] == prefix_LFP
+        print('sum cond (prefix = {}) = {}'.format(prefix_LFP,sum(cond) ) )
         #print( f'getCorrespModLFP: cond = df[ prefix ] == {prefix_LFP}')
         #todo get side
 
@@ -608,7 +628,7 @@ def getCorrespModLFP(row, df, bad_pref_parts = ['_modLFP_'],
     subdf = df[cond]
 
     #print(prefix, prefix_templ)
-    assert len(subdf) == 1, (len(subdf), prefix,prefix_templ,prefix_LFP,prefix_templ_LFP,len(subdf))
+    assert len(subdf) == 1, (len(subdf), prefix,prefix_templ,prefix_LFP,prefix_templ_LFP)
 
     #print(prefix_templ,side_code,prefix_templ_LFP, subdf.iloc[0]['prefix_templ'])
 
@@ -683,23 +703,33 @@ def addImprovColDfAll(df, inplace=True, score='bacc', score_shuffled = 'bacc_shu
     df['improv_shuffled']          = len(df) * [np.nan]
     df['corresp_LFP_prefix_templ'] = len(df) * ['']
     df['corresp_LFP_prefix']       = len(df) * ['']
+    df[f'corresp_LFP_{score}']         = len(df) * ['']
     for index,row in df.iterrows():
-        row_modLFP = getCorrespModLFP(row,df,base_pref_start_dict=base_pref_start_dict, base_pref_start=None)
-        if row_modLFP is None:
-            print(f'None for {index}:  {row["prefix"]} ( {row["prefix_templ"]} ) ')
-            continue
+        for use_opside in [0, 1]:
+            row_modLFP = getCorrespModLFP(row,df,
+                base_pref_start_dict=base_pref_start_dict, 
+                base_pref_start=None, use_opside = use_opside)
+            if row_modLFP is None:
+                print(f'None for {index}:  {row["prefix"]} ( {row["prefix_templ"]} ) use_opside = {use_opside}')
+                continue
 
-        df.at[index,'corresp_LFP_prefix_templ'] = row_modLFP['prefix_templ']
-        df.at[index,'corresp_LFP_prefix']       = row_modLFP['prefix']
+            if use_opside:
+                cp = 'opside_'
+            else:
+                cp = ''
+            df.at[index,cp + 'corresp_LFP_prefix_templ'] = row_modLFP['prefix_templ']
+            df.at[index,cp + 'corresp_LFP_prefix']       = row_modLFP['prefix']
 
-        area_and_LFP = float( row[score] )
-        LFP = float( row_modLFP[score] )
-        df.at[index,'improv'] = area_and_LFP - LFP
-        #row['improv'] = area_and_LFP - LFP
+            area_and_LFP = float( row[score] )
+            LFP = float( row_modLFP[score] )
+            df.at[index,cp + 'improv'] = area_and_LFP - LFP
 
-        area_and_LFP = float( row[score_shuffled] )
-        LFP = float( row_modLFP[score_shuffled] )
-        df.at[index,'improv_shuffled'] = area_and_LFP - LFP
+            df.at[index,cp + f'corresp_LFP_{score}'] = LFP
+            #row['improv'] = area_and_LFP - LFP
+
+            area_and_LFP = float( row[score_shuffled] )
+            LFP = float( row_modLFP[score_shuffled] )
+            df.at[index,cp + 'improv_shuffled'] = area_and_LFP - LFP
         #row['improv_shuffled'] = area_and_LFP - LFP
     return df
 
@@ -1206,9 +1236,17 @@ def findBestParcelGroups(df, exCB = False, remove_bad = 1, verbose=0):
     grps = []
     for templ_tpl in templs:
         templ,bestname,side_to_collect,side_used_in_fit,templ_grp = templ_tpl
-        print(templ,bestname,side_to_collect,side_used_in_fit,templ_grp)
+        print('templ_tpl = ',templ,bestname, side_to_collect,side_used_in_fit, templ_grp)
         subdf = df[df['prefix'].str.match(templ)]
-        print('len subdf = ', len(subdf))
+        #print('subdf len',len(subdf))
+        if len(subdf) == 0:
+            print('   skipping because prefix did not match templ = ',templ)
+            continue
+
+        assert df['grouping'].nunique() == 1
+        assert df['interval_set'].nunique() == 1
+        grouping = df.iloc[0]['grouping']
+        iset = df.iloc[0]['interval_set']
 
         cond = subdf['parcel_group_names'].str.endswith('_L') | \
             subdf['parcel_group_names'].str.endswith('_R')
@@ -1216,6 +1254,10 @@ def findBestParcelGroups(df, exCB = False, remove_bad = 1, verbose=0):
             subdf2 = subdf[cond]
         elif side_used_in_fit == 'both':
             subdf2 = subdf[~cond]
+        #print('subdf2 len',len(subdf2))
+        if len(subdf2) == 0:
+            print('   skipping because did not find parcel_group_names endings consistent with side_used_in_fit = {}'.format(side_used_in_fit) )
+            continue
 
         cond_exCB = (subdf2['brain_side_to_use'] == 'both') | \
             subdf2['brain_side_to_use'].str.endswith('exCB')
@@ -1279,6 +1321,7 @@ def findBestParcelGroups(df, exCB = False, remove_bad = 1, verbose=0):
         if exCB:
             cond2 &= cond_exCB
         subdf3 = subdf2[cond2]
+        print('subdf3 len',len(subdf3))
 
         c = (subdf3['rawname'] == 'S01_off') &\
                 (subdf3['parcel_group_names'].str.startswith('Cerebellum')  ) 
@@ -1304,11 +1347,14 @@ def findBestParcelGroups(df, exCB = False, remove_bad = 1, verbose=0):
         grps += [grp]
 
         cts = list( set( grp.size() ) )
+        print(cts)
         assert len(cts) == 1, cts
         assert cts[0] in [15,30],  ( cts[0], subdf3['prefix'].unique() )#, display(subdf3[cols]))
         #assert cts[0] == len( set(subdf3['prefix']) ), (cts, len( set(subdf3['prefix']) ))
 
-        g = grp.get_group(('merge_nothing', 'basic', 'S01_off'))
+        #g = grp.get_group(('merge_nothing', 'basic', 'S01_off'))
+        g = grp.get_group((grouping, iset, 'S01_off'))
+ 
 
         prefixes_grp = g['prefix']
         pgn_grp      = g['parcel_group_names']
@@ -1339,7 +1385,7 @@ def findBestParcelGroups(df, exCB = False, remove_bad = 1, verbose=0):
             stats += [r]
 
         print('')
-    stats = pd.concat(stats).reset_index().drop('index',1)
+    stats = pd.concat(stats).reset_index().drop(columns='index',axis=1)
     return stats
 
 def addBestParcelGroups(output_per_raw, table_info_per_perf_type,
@@ -2344,6 +2390,14 @@ def prepTableInfo3(output_per_raw, prefixes=None,
                                                 ps = pdict['perfs_CV']
                                                 if recalc:
                                                     perfs_add_CV_recalc = recalcPerfFromCV(ps,lblind_trem)
+
+                                                d = {}
+                                                for perf in ps:
+                                                    k = perf['generalization_pattern_from_fold']
+                                                    d[k] = perf['balanced_accuracy']
+                                                perfs_add_CV['genpat2bacc'] = d
+
+                                                #pdict['perI#f'generalization_pattern_from_fold'
                                 else:
                                     print(f'perf_to_use (={perf_to_use}): None!')
 
@@ -2357,6 +2411,7 @@ def prepTableInfo3(output_per_raw, prefixes=None,
                                     num_red_set = True
                                 else:
                                     anver_red_cur = mult_clf_results['XGB_analysis_versions'].get(perf_red_to_use,None)
+
                                 if anver_red_cur is not None:
                                     if 'perf_aver' in anver_red_cur:
                                         perfs_red_CV   = anver_red_cur['perf_aver']
@@ -2374,8 +2429,12 @@ def prepTableInfo3(output_per_raw, prefixes=None,
                                     EBM_dict = mult_clf_results['featsel_per_method'][perf_red_to_use][featsubset_name]
                                     perfs_red = EBM_dict['perf_dict']['perf_nocv']
                                     perfs_red_CV = EBM_dict['perf_dict']['perf_aver']
+                                elif perf_red_to_use is None:
+                                    perfs_red = None
+                                    perfs_red_CV = None
                                 else:
-                                    print(f'perf_red_to_use (={perf_to_use}): None!')
+                                    print(f'perf_red_to_use (={perf_red_to_use}): None!')
+                                    raise ValueError('perf_red_to_use is None')
 
                                 if 'importances' in anver_cur:
                                     num = len(anver_cur['importances'] )
@@ -2432,6 +2491,7 @@ def prepTableInfo3(output_per_raw, prefixes=None,
                                     ps = anver_red_cur.get('perfs_CV', None)
                                 else:
                                     print(f'perf_red_to_use (={perf_red_to_use}): None!')
+                                    #raise ValueError('perf_red_to_use is None')
                                 if recalc:
                                     perfs_red_CV_recalc = recalcPerfFromCV(ps,lblind_trem)
 
@@ -2468,12 +2528,16 @@ def prepTableInfo3(output_per_raw, prefixes=None,
 
                     if perfs_red is None:
                         sens_red,spec_red,F1_red = np.nan, np.nan, np.nan
+                        bacc_red = np.nan
                     else:
                         #print([type( p) for p in perfs_red])
+                        #print('perfs_red = ', perfs_red)
                         if isinstance(perfs_red, (list,tuple,np.ndarray) ):
                             sens_red,spec_red,F1_red = perfs_red[:3]
+                            bacc_red = np.nan
                         else:
                             sens_red,spec_red,F1_red = perfs_red['sens'],perfs_red['spec'],perfs_red['F1']
+                            bacc_red = perfs_red['balanced_accuracy']
                         was_red_valid = True
 
                     if num is not None and num_red is not None:
@@ -2501,6 +2565,7 @@ def prepTableInfo3(output_per_raw, prefixes=None,
                     info_cur['bacc'] = bacc
                     info_cur['sens_red'] = sens_red
                     info_cur['spec_red'] = spec_red
+                    info_cur['bacc_red'] = bacc_red
 
                     info_cur['perf_dict_shuffled'] = perf_shuffled
 
@@ -2526,6 +2591,25 @@ def prepTableInfo3(output_per_raw, prefixes=None,
                             info_cur['spec_add'] = perfs_add_CV['spec']
                             info_cur['F1_add']   = perfs_add_CV['F1']
                             info_cur['bacc_add']   = perfs_add_CV['balanced_accuracy']
+                            info_cur['perf_add_name'] = perf_add_cur
+
+                            # remove full rawnames and put only medconds (otherwise outer join of pandas will make it look bad)
+                            for k,v in perfs_add_CV.get('genpat2bacc',{}).items():
+                                rns_ll = k.split('->')
+                                medconds_ = []
+                                for rns in rns_ll:
+                                    rns = rns.split(',')
+                                    import utils_preproc as upre
+                                    r0,r = upre.getRawnameListStructure(rns, ret_glob=1)
+                                    #print(r['medconds']) 
+                                    medconds = list(r0.values())[0]['medconds'] 
+                                    assert len(medconds) == 1 
+                                    medconds_ += medconds
+                                k = '_to_'.join(medconds_)
+                                info_cur['bacc_' + k] = v
+                                    #print(medconds[0])
+                                #info_cur[k.replace('->','_to_')] = v
+
                         info_cur['sens_add_recalc'] = perfs_add_CV_recalc[0]
                         info_cur['spec_add_recalc'] = perfs_add_CV_recalc[1]
                     #print('sens_add',info_cur.get('sens_add',None))
@@ -6198,7 +6282,7 @@ def getMocFromRowMultiOPR(row, pptype2res):
     return moc
 
 def getTremorDetPerf(mult_clf_output,grouping,it, ret_pct=False,
-        across=None, sidelet=None):
+        across=None, sidelet=None, allow_missing_tremor=False):
     # returns in percents
     if mult_clf_output is None:
         return np.nan
@@ -6210,14 +6294,40 @@ def getTremorDetPerf(mult_clf_output,grouping,it, ret_pct=False,
         lbl = 'trem'
         if sidelet is not None:
             lbl += '_' + sidelet
-        ti = clnames.index(lbl)
-        return cm[ti,ti]
+        if lbl not in clnames:
+            if not allow_missing_tremor:
+                raise ValueError('{} not in clnames = {}!'.format(lbl, clnames) )
+            else:
+                return np.nan
+        else:
+            ti = clnames.index(lbl)
+            return cm[ti,ti]
+
+def chanceLevelConfmat(countsd):
+    # Let's say you have these counts for each class
+    #counts = {"notrem": 300, "tremor": 200, "move": 400, "hold": 100}
+    assert isinstance(countsd, odict)
+    counts = odict(countsd)
+    # Calculate the total number of instances
+    total = sum(counts.values())
+
+    # Create a dataframe for the confusion matrix
+    n = len(countsd)
+    confusion_matrix = pd.DataFrame(np.zeros((n,n)), index=counts.keys(), columns=counts.keys())
+
+    # Fill each row with the proportions
+    for class_name in confusion_matrix.index:
+        for class_name2 in confusion_matrix.columns:
+            confusion_matrix.loc[class_name,class_name2] = counts[class_name2] / total
+    return confusion_matrix
 
 def plotConfmats2(dfc, output_per_raw, normalize_mode = 'true', best_LFP=False, common_norm = True,
                 reaver_confmats = 0, ww=3,hh=3, keep_beh_state_sides = True,
                  keep_subj_list_title = False, labelpad_cbar = 100, labelpad_x = 20, labelpad_y = 20,
                 colorbar_axes_bbox = [0.80, 0.1, 0.045, 0.8], rename_class_names = None):
     '''
+    plots mutiple confmats, for every row of dfc
+
     in this version of this function output_per_raw is ALL data and dfc is FILTERED
     normalize_mode == true means that we start from real positives (nut just correctly predicted)
     common_norm -- colorbar always has max 100 and min 0 (regardless of actual min and max vals)
@@ -6226,6 +6336,7 @@ def plotConfmats2(dfc, output_per_raw, normalize_mode = 'true', best_LFP=False, 
     '''
     #tpll = pp.multiLevelDict2TupleList(outputs_grouped,4,3)
     assert len(dfc)
+
 
     rawnames = list(sorted( dfc['rawname'].unique() ))
     # TODO: it will plot all confmats for all the outputs, I might want to restruct to just one
@@ -6290,6 +6401,11 @@ def plotConfmats2(dfc, output_per_raw, normalize_mode = 'true', best_LFP=False, 
         canon_order = gp.int_types_basic
 
 
+    #if class_counts is not None:
+    #else:
+    #    cm_chance = None
+
+
     import matplotlib as mpl
     if common_norm:
         norm = mpl.colors.Normalize(vmin=0, vmax=100)
@@ -6299,6 +6415,7 @@ def plotConfmats2(dfc, output_per_raw, normalize_mode = 'true', best_LFP=False, 
         norm = mpl.colors.Normalize(vmin=mn, vmax=mx)
     #for axi,(ax,(rn,(spec_key,mult_clf_output) ) ) in enumerate(zip(axs, outputs_grouped.items() ) ):
     confmats_normalized_reord = []
+    confmats_chance = []
     xts2 = []
 
     for rowi, row in dfc.iterrows():
@@ -6323,6 +6440,15 @@ def plotConfmats2(dfc, output_per_raw, normalize_mode = 'true', best_LFP=False, 
         #confmat = confmats[axi]
         #confmat_normalized = utsne.confmatNormalize(confmat,normalize_mode) * 100
         confmat_normalized = confmats_normalized[rowi]
+
+
+        class_counts = odict({})
+        for class_name in canon_order:
+            class_counts[class_name] = row[f'numpts_{class_name}']
+        cm_chance = chanceLevelConfmat(class_counts) 
+        cm_chance = cm_chance.values * 100 
+        confmats_chance += [cm_chance]
+
 
         #sind_str = rn.split('_')[0]
         #axind =  sind_strs.index(sind_str)
@@ -6368,7 +6494,26 @@ def plotConfmats2(dfc, output_per_raw, normalize_mode = 'true', best_LFP=False, 
 
         ax.set_visible(True)
         pc = ax.pcolor(confmat_normalized_reord, norm=norm)
-
+         
+        #cm_chance
+        if cm_chance is not None:
+            display(confmat_normalized_reord,cm_chance)
+            diff_matrix = (confmat_normalized_reord - cm_chance)
+            #sns.heatmap(original_matrix, annot=True, fmt=".0f", cmap='YlGnBu')
+            #horshift= 0.2
+            horshift= 0
+            # Print the values of the difference matrix on the heatmap
+            for i in range(diff_matrix.shape[0]):
+                for j in range(diff_matrix.shape[1]):
+                    mel0 = confmat_normalized_reord[i,j]
+                    mel = diff_matrix[i, j] 
+                    if mel >= 0:
+                        sgn = '+'
+                    else:
+                        sgn = ''
+                    ax.text(j + 0.5 + horshift, i + 0.5, 
+                            f'{mel0:.0f}%\n({sgn}{mel:.0f}%)', 
+                        ha='center', va='center', color='red', size=10)
 
         # setting ticks and labels nicely, not for all axes, only for the left and bottom ones
         rowi,coli = np.unravel_index(axind,(nr,nc))
@@ -6407,6 +6552,8 @@ def plotConfmats2(dfc, output_per_raw, normalize_mode = 'true', best_LFP=False, 
 
     ##################################################
 
+    confmat_chance_ = np.array(confmats_chance)
+
     confmat_normalized_ = np.array(confmats_normalized_reord)
     assert confmat_normalized_.size
     confmat_normalized_diags = np.array( [np.diag(np.diag(cm)) for cm in confmats_normalized_reord] )
@@ -6419,15 +6566,35 @@ def plotConfmats2(dfc, output_per_raw, normalize_mode = 'true', best_LFP=False, 
     #mn_off_diag = np.min (  confmat_normalized_offdiags_largedval  )
     #mx_off_diag = np.max (  confmat_normalized_offdiags  )
 
+
+    confmat_chance_diags_els    = confmat_chance_[ np.where( eyes ) ]
+    confmat_chance_offdiags_els = confmat_chance_[ np.where( ~eyes ) ]
+
     confmat_normalized_diags_els = confmat_normalized_[ np.where( eyes ) ]
     confmat_normalized_offdiags_els = confmat_normalized_[ np.where( ~eyes ) ]
 
-    mn_diag     = np.min ( confmat_normalized_diags_els )
-    mn_off_diag = np.min ( confmat_normalized_offdiags_els )
-    mx_off_diag = np.max ( confmat_normalized_offdiags_els )
+    dcbt = {} # dict color bar ticks
+    dcbt['max'] = mx
+    dcbt['min'] = mn
 
-    me_diag = np.mean(confmat_normalized_diags_els)
-    me_off_diag = np.mean (  confmat_normalized_offdiags_els  )
+    mn_diag     = np.min ( confmat_normalized_diags_els ); dcbt['min_diag'] = mn_diag
+    mx_diag = np.max ( confmat_normalized_diags_els ); dcbt['max_diag'] = mx_diag
+    dcbt['min_off_diag'] = np.min ( confmat_normalized_offdiags_els )
+    dcbt['max_off_diag'] = np.max ( confmat_normalized_offdiags_els )
+
+    me_diag = np.mean(confmat_normalized_diags_els); dcbt['mean_diag'] = me_diag
+    me_off_diag = np.mean (  confmat_normalized_offdiags_els  ); dcbt['mean_off_diag'] = me_off_diag
+
+    dcbt['max_chance'] = np.max(confmat_chance_)
+    dcbt['min_chance'] = np.min(confmat_chance_)
+    dcbt['min_chance_diag']     = np.min ( confmat_chance_diags_els )
+    dcbt['max_chance_diag']     = np.max ( confmat_chance_diags_els )
+    dcbt['min_chance_off_diag'] = np.min ( confmat_chance_offdiags_els )
+    dcbt['max_chance_off_diag'] = np.max ( confmat_chance_offdiags_els )
+
+    dcbt['mean_chance_diag']     = np.mean(confmat_chance_diags_els)
+    dcbt['mean_chance_off_diag'] = np.mean (  confmat_chance_offdiags_els  )
+    print(dcbt)
 
     ##################################################
     # create colorbar with tick
@@ -6438,11 +6605,23 @@ def plotConfmats2(dfc, output_per_raw, normalize_mode = 'true', best_LFP=False, 
 
     ax2 = clrb.ax.twinx()
     y0,y1 = cax.get_ybound()  # they are from 0 to 1
-    ticks       = [  mn_off_diag, mn_diag,  mx_off_diag, me_diag, me_off_diag]
-    tick_labels = [ 'min_off_diag', 'min_diag',  'max_off_diag', 'mean_diag', 'mean_off_diag' ]
+    #ticks       = [  mn_off_diag, mn_diag,  mx_off_diag, me_diag, me_off_diag]
+    tick_labels0 = [ 'min_off_diag', 'min_diag',  'max_off_diag', 'mean_diag', 'mean_off_diag' ]
     if common_norm:
-        ticks       = [  mn_off_diag, mn_diag,  mx_off_diag, mx,mn ]
-        tick_labels = [ 'min off diag', 'min diag',  'max off diag', 'max' , 'min' ]
+        #ticks       = [  mn_off_diag, mn_diag,  mx_off_diag, mx,mn ]
+        tick_labels0 = [ 'min off diag', 'min diag',  'max off diag', 'max' , 'min' ]
+
+    #ticks       = [  mn_off_diag, mn_diag,  mx_off_diag, mx,mn, me_diag, me_off_diag, mx_diag ]
+    tick_labels0 = [ 'min_off_diag', 'min_diag',  'max_off_diag', 'max' , 'min','mean_diag', 'mean_off_diag', 'max_diag', 
+            'mean_chance_off_diag', 'mean_chance_diag'  ]
+
+    ticks = []
+    tick_labels =[]
+    for tl in tick_labels0:
+        tick_labels += [tl.replace('_',' ' ) ]
+        ticks += [dcbt[tl] ]
+
+
     desarr = np.array( ticks )
     #ax2.set_yticks( desarr/ (y1-y0) )
     ax2.set_yticks( desarr )
@@ -8237,7 +8416,8 @@ def collectBestLFP(subdir = 'searchLFP_both_sides_oversample2_LFP256_allaritf' ,
 
     #print(list(recurse(dirDict)))
 
-def collectCalcResults(subdir, start_time, end_time = None, use_tmpdir_to_load = False, load=False):
+def collectCalcResults(subdir, start_time, end_time = None, use_tmpdir_to_load = False, load=False,
+        require_at_symbol_prefix = True, rawname_regex = None, rawname_before_string = None):
     # load -- hether I want to do actual load or just collect filenames (for deferred loading)
     import os, sys, mne, json, pymatreader, re, time, gc;
     import globvars as gv
@@ -8271,7 +8451,8 @@ def collectCalcResults(subdir, start_time, end_time = None, use_tmpdir_to_load =
                                        end_time=end_time)
     print('len(recent)=',len(recent))
     rawnames = []
-    rawname_regex = '([S0-9]+_[a-z]+)'
+    if rawname_regex is None:
+        rawname_regex = '([S0-9]+_[a-z]+)'
     re1 = re.compile('_\!_'+rawname_regex+'_.*')
     re2 = re.compile('_'+rawname_regex+'_.*')
     print('collect rawnames')
@@ -8280,10 +8461,14 @@ def collectCalcResults(subdir, start_time, end_time = None, use_tmpdir_to_load =
         if light_only:
             if not lf.startswith('_!'):
                 continue    
-        if light_only:
-            r = re.match(re1,lf)
+        if rawname_before_string is not None:
+            ind = lf.find(rawname_before_string)
         else:
-            r = re.match(re2,lf)
+            ind = len(lf)
+        if light_only:
+            r = re.match(re1,lf[:ind])
+        else:
+            r = re.match(re2,lf[:ind])
         if r is None:
             print('None ',lf)
             continue
@@ -8291,6 +8476,7 @@ def collectCalcResults(subdir, start_time, end_time = None, use_tmpdir_to_load =
         if cr not in rawnames:
             rawnames += [ cr ]
     rawnames = list(sorted(set(rawnames)))
+    print('rawnames = ',rawnames)
 
     rawname_regex = '([S0-9]+_[a-z]+)'
     #a0 = re.findall('_\!_'+rawname_regex+'_.*',lf)
@@ -8311,13 +8497,16 @@ def collectCalcResults(subdir, start_time, end_time = None, use_tmpdir_to_load =
     print('listComputedData = ',r)
 
     rawnames_found, groupings_found, its_found, prefixes_found = r
+    if len(rawnames_found ) == 0:
+        return None
 
 
-    print(rawnames)
     prefixes = prefixes_found
+    print('prefixes = ')
     display(prefixes)
 
-    assert np.any( [ p.find('@') >= 0 for p in  prefixes ] )
+    if require_at_symbol_prefix:
+        assert np.any( [ p.find('@') >= 0 for p in  prefixes ] )
 
     ######################   Consistency
 
@@ -8340,17 +8529,17 @@ def collectCalcResults(subdir, start_time, end_time = None, use_tmpdir_to_load =
     groupings_to_collect = None; isets_to_collect = None
     prefixes_to_collect = None # = prefixes
     r = postp.collectPerformanceInfo3(None,prefixes_to_collect,
-                      interval_groupings=groupings_to_collect,
-                              interval_sets =  isets_to_collect,
-                nraws_used='[0-9]+', sources_type = sources_type,
-               printFilenames=1,
-                ndays_before=ndaysBefore,
-                use_main_LFP_chan=1,
-                 subdir=subdir, remove_large_items = 1,
-                 list_only=0, allow_multi_fn_same_prefix=0,
-                 use_light_files = light_only, rawname_regex_full=0,
-                 start_time=start_time,
-                   end_time=end_time, load=load, use_tmpdir_to_load=use_tmpdir_to_load)
+        interval_groupings=groupings_to_collect,
+        interval_sets =  isets_to_collect,
+        nraws_used='[0-9]+', sources_type = sources_type,
+        printFilenames=1,
+        ndays_before=ndaysBefore,
+        use_main_LFP_chan=1,
+        subdir=subdir, remove_large_items = 1,
+        list_only=0, allow_multi_fn_same_prefix=0,
+        use_light_files = light_only, rawname_regex_full=0,
+        start_time=start_time,
+        end_time=end_time, load=load, use_tmpdir_to_load=use_tmpdir_to_load)
 
     #nraws_used='(10,12,20,24)'
     #output_per_raw,Ximp_per_raw,gis_per_raw = r
@@ -8436,13 +8625,14 @@ def collectCalcResults(subdir, start_time, end_time = None, use_tmpdir_to_load =
 
     return output_per_raw
 
-def extendDfMultiOPR(df, pptype2res):
+def extendDfMultiOPR(df, pptype2res, allow_missing_tremor = False):
     dfs = []
     for ppt,opr in pptype2res.items():
         print(f'  Extending DF for ppt={ppt}')
-        dfc = df.query(f'pptype == "{ppt}"').copy()
+        # important to copy because inplace modfications follow 
+        dfc = df.query(f'pptype == "{ppt}"').copy() 
         opr = pptype2res[ppt]
-        dfc_mod = extendDf(dfc, opr)
+        dfc_mod = extendDf(dfc, opr, allow_missing_tremor=allow_missing_tremor)
         dfs += [dfc_mod]
     if len(dfs) > 1:
         r = pd.concat(dfs, ignore_index=1) 
@@ -8450,7 +8640,7 @@ def extendDfMultiOPR(df, pptype2res):
         r = dfc_mod
     return r
 
-def extendDf(df, output_per_raw):
+def extendDf(df, output_per_raw, allow_missing_tremor = False):
     import re
     from utils_postprocess_HPC import getTremorDetPerf
     from utils_postprocess_HPC import getMocFromRow
@@ -8464,7 +8654,7 @@ def extendDf(df, output_per_raw):
         try:
             moc = getMocFromRow(row, output_per_raw)
             #moc = output_per_raw[row['rawname']][row['prefix']][grp][it]
-            r = getTremorDetPerf(moc,grp,it)
+            r = getTremorDetPerf(moc,grp,it, allow_missing_tremor=allow_missing_tremor)
         except KeyError:
             r = np.nan
         #row['tremor_det'] = r
@@ -8472,7 +8662,47 @@ def extendDf(df, output_per_raw):
 
     print('tremor detection performance')
     df['tremor_det_perf'] = df.apply(addTremorPerf,axis=1)
-    df.reset_index()
+    #df.reset_index()
+
+    def addPar(row):
+        #print('a',row)
+        try:
+            moc = getMocFromRow(row, output_per_raw)
+            r = moc['pars']
+        except (KeyError,TypeError) as e:
+            print('addPar: ',e)
+            r = {}
+        return r
+    df['par'] = df.apply(addPar,axis=1)
+
+    param_keys_to_extract = ('feat_types,n_permutations_permtest,rescale_feats,'
+        'scale_feat_combine_type,'
+        'baseline_int_type,grouping_best_LFP,int_types_best_LFP').split(',')
+    for pk in param_keys_to_extract:
+        df[pk] = df.apply(lambda x: x['par'].get(pk,None), 1)
+
+    ###################
+    def lbd(row):
+        #print('a',row)
+        try:
+            moc = getMocFromRow(row, output_per_raw)
+            r = moc['feat_pars_pri']
+        except (KeyError,TypeError) as e:
+            print('add feat_pars_pri: ',e)
+            r = None
+        return r
+    df['feat_pars_pri'] = df.apply(lbd,axis=1)
+
+    feat_param_keys_to_extract = ('scale_data_combine_type,baseline_int_type,'
+            'prescale_data,rescale_feats').split(',')
+    for pk in feat_param_keys_to_extract:
+        def lbd(x): 
+            fp = x['feat_pars_pri']
+            if fp is None:
+                return None
+            else:
+                return fp[0].get(pk,None)
+        df['featf:' + pk] = df.apply(lbd, 1)
 
     df['num'] = pd.to_numeric(df['num'])
     df['num'] = df['num'].map(lambda x: int(x) if ( not (np.isnan(x) or (x is None) ) ) else 0    )
@@ -8480,8 +8710,20 @@ def extendDf(df, output_per_raw):
     df['sens'] = pd.to_numeric(df['sens'])
     df['spec'] = pd.to_numeric(df['spec'])
 
+    df['g_is'] = df.apply(lambda x: (x['grouping'],x['interval_set']),1)
+
+
     df['subject'] = df['rawname'].apply(lambda x: x.split('_')[0]) 
-    df['medcond'] = df['rawname'].apply(lambda x: x.split('_')[1]) 
+    def f(s):
+        els = s.split('_')
+        if len(els) > 1:
+            return els[1]
+        elif len(els) == 1:
+            return 'off,on'
+        else:
+            return None
+
+    df['medcond'] = df['rawname'].apply(f) 
     df['move_hand_side_letter'] = df['move_hand_side_letter'].apply(lambda x: x[0] if isinstance(x,list) else x) 
     df['move_hand_opside_letter'] = df['move_hand_opside_letter'].apply(lambda x: x[0] if isinstance(x,list) else x) 
 
@@ -8528,7 +8770,7 @@ def extendDf(df, output_per_raw):
         revdict = moc['revdict_lenc']
         numpoints_per_class_id = countClassLabels(y, class_ids_grouped=None, revdict=revdict)
         #print(sidelet)
-        print(numpoints_per_class_id)
+        #print(numpoints_per_class_id)
         return numpoints_per_class_id
 
     df['points_per_beh_state2'] = df.apply(lbd,1)

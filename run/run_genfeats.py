@@ -85,6 +85,7 @@ use_existing_TFR             = 1  # for DEBUG in jupyter only
 load_feat                    = 0
 save_feat                    = 1
 do_Kalman                    = 1
+do_Wiener                    = 1
 
 
 load_TFR_max_age_h = 24
@@ -182,7 +183,7 @@ opts, args = getopt.getopt(effargv,"hr:",
          "src_grouping=", "src_grouping_fn=", "brain_side_to_use=",
          "body_side_for_baseline_int=",
          "load_TFR=", "save_TFR=", "save_CSD=", "load_CSD=", "use_existing_TFR=",
-         "Kalman_smooth=", "save_bpcorr=", "save_rbcorr=", "load_rbcorr=", "load_bpcorr=",
+         "Kalman_smooth=", "Wiener_smooth=", "save_bpcorr=", "save_rbcorr=", "load_rbcorr=", "load_bpcorr=",
          "load_TFRCSD_max_age_h=", "load_only=", "input_subdir=", "output_subdir=",
          "rbcorr_use_local_means=", "scale_data_combine_type=", "stats_fn_prefix=",
          "param_file=", "coupling_types=", "use_preloaded_data=", "feat_stats_artif_handling=",
@@ -395,6 +396,8 @@ for opt,arg in pars.items():
         prep_dat_prefix = arg
     elif opt == 'Kalman_smooth':
         do_Kalman = int(arg)
+    elif opt == 'Wiener_smooth':
+        do_Wiener = int(arg)
     elif opt == 'n_jobs':
         n_jobs = int(arg)
     elif opt == 'use_existing_TFR':
@@ -2119,16 +2122,29 @@ for rawi in range(len(rawnames)):
     subfeature_order_newsrcgrp_pri[rawi] = \
         replaceMEGsrcChnamesParams(subfeature_order_pri[rawi], 0,9, '.*', 0)
 
+nbins_estim_Kalman = 15
+nbins_estim_Wiener = 5 # must be odd
+
 X_pri_smooth = len(X_pri) * [ None ]
 if do_Kalman:
     for rawind in range(len(X_pri)):
         X = X_pri[rawind]
-        nbins_estim_Kalman = 15
+
         estim = X[:nbins_estim_Kalman,:].T
 
 
-        X_nonsmooth = X
         X_smooth = ugf.smoothData(X.T,Tp_Kalman,estim, n_jobs=n_jobs).T
+        X_pri_smooth[rawind] = X_smooth
+
+if do_Wiener:
+    for rawind in range(len(X_pri)):
+        X = X_pri[rawind]
+        #noise_est_shape = (nbins_estim_Wiener,1)
+        noise_est_shape = nbins_estim_Wiener
+
+        from scipy.signal import wiener
+        X_smooth = wiener(X, mysize=noise_est_shape)
+        #X_smooth = ugf.smoothData(X.T,Tp_Kalman,estim, n_jobs=n_jobs).T
         X_pri_smooth[rawind] = X_smooth
 
 
@@ -2215,6 +2231,7 @@ if save_feat:
         info['cross_types'] = cross_types
         info['src_type_to_use'] = src_type_to_use
         info['do_Kalman']  = do_Kalman
+        info['do_Wiener']  = do_Wiener
         info['Tp_Kalman'] = Tp_Kalman
         info['rbcorr_use_local_means'] = rbcorr_use_local_means
         info['baseline_int'] = baseline_int

@@ -54,10 +54,10 @@ $py -c "import os; print('cwd for $py=',os.getcwd() );"
 
 
 echo "CUDA_VISIBLE_DEVICES=$CUDA_VISIBLE_DEVICES , PMI_RANK=$PMI_RANK"
-if [ -n "$CUDA_VISIBLE_DEVICES" ]; then
-  $py -c "import GPUtil; print('GPUs = ',GPUtil.getAvailable()); import pycuda.driver as cuda_driver; cuda_driver.init(); "
-  #$?
-fi
+#if [ -n "$CUDA_VISIBLE_DEVICES" ]; then
+#  $py -c "import GPUtil; print('GPUs = ',GPUtil.getAvailable()); import pycuda.driver as cuda_driver; cuda_driver.init(); "
+#  #$?
+#fi
 
 #$py $CODE/run/$RUNSTRING_CUR --SLURM_job_id "$JOBID"_"$RUNSTRING_IND"  --calc_MI 0
 $py $CODE/run/$RUNSTRING_CUR --SLURM_job_id "$JOBID"_"$JOB_ARRAY_IND" --runstring_ind $RUNSTRING_IND 

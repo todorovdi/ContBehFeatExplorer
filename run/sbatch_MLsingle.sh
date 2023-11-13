@@ -51,7 +51,7 @@
 #srun --exclusive -n 128 ./mpi-prog2 &
 #wait
 
-jutil env activate -p icei-hbp-2020-0012
+. _acc.sh
 
 JOBID=$SLURM_JOB_ID
 ID=$SLURM_ARRAY_TASK_ID

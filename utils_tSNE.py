@@ -1370,7 +1370,7 @@ def concatAnns(rawnames, Xtimes_pri, suffixes=['_anns'], crop=(None,None),
                allow_short_intervals = False, allow_missing=False, dt_sec=None,
                side_rev_pri=None, sfreq=None, wbd_pri=None,
                remove_gaps_between_datasets = False, ret_wbd_merged=False,
-               subdir = ''):
+               subdir = '', verbose=0):
     '''
     loads from file and concatenates all anns specified by suffixes
 
@@ -1430,7 +1430,8 @@ def concatAnns(rawnames, Xtimes_pri, suffixes=['_anns'], crop=(None,None),
             anns_fn = rawname_ + suffix + '.txt'
             anns_fn_full = os.path.join(data_dir, subdir, anns_fn)
             if os.path.exists(anns_fn_full):
-                #print('concatAnns: reading {}'.format(anns_fn) )
+                if verbose > 0:
+                    print('concatAnns: reading {}'.format(anns_fn) )
                 anns_cur = mne.read_annotations(anns_fn_full)
                 if side_rev_pri[rawi]:
                     anns_cur = revAnnSides(anns_cur)

@@ -271,12 +271,17 @@ class globparams:
         self.int_types_merge_mvt = ['trem', 'notrem', 'hold&move']
         self.int_types_merge_notrem = ['trem', 'notrem&hold&move']
         self.int_types_trem_vs_quiet = ['trem', 'notrem']
+        self.int_types_hold_vs_quiet = ['hold', 'notrem']
+        self.int_types_move_vs_quiet = ['move', 'notrem']
 
         self.interval_order_per_merge_it = {('merge_nothing','basic'):self.int_types_basic,
          ('merge_movements','basic'): self.int_types_merge_mvt,
          ('merge_all_not_trem','basic'): self.int_types_merge_notrem,
             ('merge_nothing','trem_vs_quiet'): self.int_types_trem_vs_quiet        ,
-            ('merge_all_not_trem','trem_vs_quiet'): self.int_types_trem_vs_quiet        }
+            ('merge_all_not_trem','trem_vs_quiet'): self.int_types_trem_vs_quiet   ,    
+            ('merge_nothing','move_vs_quiet'): self.int_types_move_vs_quiet        ,
+            ('merge_nothing','hold_vs_quiet'): self.int_types_hold_vs_quiet        ,
+            }
 
         self.int_types_basic_sided = ['trem_L', 'notrem_L', 'hold_L', 'move_L'] + \
                 ['trem_R', 'notrem_R', 'hold_R', 'move_R']
